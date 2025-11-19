@@ -1,0 +1,9 @@
+[
+  { "id": "inbox", "name": "Inbox", "unread": 5 },
+  { "id": "starred", "name": "Starred", "unread": 1 },
+  { "id": "sent", "name": "Sent", "unread": 0 },
+  { "id": "drafts", "name": "Drafts", "unread": 0 },
+  { "id": "archive", "name": "Archive", "unread": 0 },
+  { "id": "trash", "name": "Trash", "unread": 0 },
+  { "id": "custom-1", "name": "Project X", "unread": 2 }
+]

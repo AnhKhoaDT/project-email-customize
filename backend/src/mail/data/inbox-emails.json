@@ -1,0 +1,24 @@
+[
+  {
+    "id": "e1",
+    "from": "Alice <alice@example.com>",
+    "senderName": "Alice",
+    "to": "demo@demo.com",
+    "subject": "Welcome to the project",
+    "preview": "Hi — welcome aboard! Here's a short introduction...",
+    "timestamp": "2025-11-19T09:12:00Z",
+    "starred": false,
+    "bodyId": "e1"
+  },
+  {
+    "id": "e2",
+    "from": "Bob <bob@example.com>",
+    "senderName": "Bob",
+    "to": "demo@demo.com",
+    "subject": "Weekly status update",
+    "preview": "This week we completed the following tasks...",
+    "timestamp": "2025-11-18T14:30:00Z",
+    "starred": true,
+    "bodyId": "e2"
+  }
+]
