@@ -122,7 +122,7 @@ export default function Register() {
                 {errors.password && <p className="text-red-500 text-sm">{errors.password.message}</p>}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="birthday">Birthday (Optional)</Label>
+                <Label htmlFor="birthday">Birthday</Label>
                 <Input 
                   id="birthday" 
                   type="date" 
