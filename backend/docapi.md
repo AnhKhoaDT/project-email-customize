@@ -100,25 +100,334 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
 ### Mail (Gmail proxy)
 > All mail endpoints require `Authorization: Bearer <accessToken>` (app access token) in header.
 
-1) GET /mailboxes
-- Returns Gmail labels for the authenticated user (backend uses stored Google refresh token to call Gmail API).
-- Example:
+#### Nhóm API Đọc dữ liệu (Data Retrieval)
+
+1) **GET /mailboxes**
+- **Mục đích**: Lấy danh sách các hộp thư hoặc nhãn (labels/folders) từ Gmail.
+- **Auth**: Required (Bearer token)
+- **Response**: Danh sách các labels với id, name, type, messageListVisibility, etc.
+- **Example**:
   ```bash
   curl -H "Authorization: Bearer <ACCESS_TOKEN>" http://localhost:5000/mailboxes
   ```
-
-2) GET /mailboxes/:id/emails?pageToken=...
-- List messages in label `:id`. Optional `pageToken`.
-- Example:
-  ```bash
-  curl -H "Authorization: Bearer <ACCESS_TOKEN>" "http://localhost:5000/mailboxes/INBOX/emails"
+  ```js
+  const res = await fetch(BACKEND + '/mailboxes', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const labels = await res.json();
   ```
 
-3) GET /emails/:id
-- Get full message content.
-- Example:
+2) **GET /mailboxes/:id/emails?page=1&limit=50&pageToken=...**
+- **Mục đích**: Lấy danh sách email trong một hộp thư cụ thể, có hỗ trợ phân trang.
+- **Auth**: Required (Bearer token)
+- **Params**:
+  - `:id` - Label ID (ví dụ: `INBOX`, `SENT`, `DRAFT`, hoặc custom label ID)
+  - `page` (optional) - Số trang (hiện tại chưa được sử dụng, dùng pageToken thay thế)
+  - `limit` (optional, default=50) - Số lượng email trên mỗi trang
+  - `pageToken` (optional) - Token để lấy trang tiếp theo (từ response trước)
+- **Response**: 
+  ```json
+  {
+    "messages": [
+      { "id": "...", "threadId": "..." }
+    ],
+    "nextPageToken": "...",
+    "resultSizeEstimate": 100
+  }
+  ```
+- **Example**:
   ```bash
-  curl -H "Authorization: Bearer <ACCESS_TOKEN>" http://localhost:5000/emails/<MESSAGE_ID>
+  curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    "http://localhost:5000/mailboxes/INBOX/emails?limit=20"
+  ```
+  ```js
+  const res = await fetch(BACKEND + '/mailboxes/INBOX/emails?limit=20&pageToken=xyz', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const data = await res.json();
+  ```
+
+3) **GET /emails/:id**
+- **Mục đích**: Lấy nội dung chi tiết của một email cụ thể (bao gồm body HTML/plain text, headers, attachments info).
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Message ID
+- **Response**: Parsed email object với các trường quan trọng:
+  ```json
+  {
+    "id": "19abbacc4d99a7a4",
+    "threadId": "19abbacc4d99a7a4",
+    "labelIds": ["UNREAD", "INBOX"],
+    "snippet": "Email preview text...",
+    "subject": "[GitHub] Sudo email verification code",
+    "from": "GitHub <noreply@github.com>",
+    "to": "user@example.com",
+    "cc": "",
+    "bcc": "",
+    "date": "Tue, 25 Nov 2025 07:40:52 -0800",
+    "messageId": "<6925ce04db553_fc110080349@accountsecurityworker.mail>",
+    "htmlBody": "<!DOCTYPE html>...",
+    "textBody": "Hey, AnhKhoaDT! Here is your code...",
+    "attachments": [
+      {
+        "filename": "document.pdf",
+        "mimeType": "application/pdf",
+        "attachmentId": "ANGjdJ...",
+        "size": 12345
+      }
+    ],
+    "sizeEstimate": 27959,
+    "historyId": "37957",
+    "internalDate": "1764085252000",
+    "raw": { ... } // Original Gmail API response nếu cần
+  }
+  ```
+- **Lưu ý**: 
+  - `htmlBody`: Nội dung HTML đã decode, sẵn sàng hiển thị trong iframe hoặc dangerouslySetInnerHTML
+  - `textBody`: Nội dung plain text đã decode (fallback nếu không có HTML)
+  - `attachments`: Danh sách file đính kèm với attachmentId để download
+  - Backend tự động parse và decode Base64URL của Gmail
+- **Example**:
+  ```bash
+  curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    http://localhost:5000/emails/<MESSAGE_ID>
+  ```
+  ```js
+  const res = await fetch(BACKEND + '/emails/' + messageId, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const email = await res.json();
+  
+  // Hiển thị HTML body
+  // <div dangerouslySetInnerHTML={{ __html: email.htmlBody }} />
+  // hoặc fallback sang text
+  // <pre>{email.textBody}</pre>
+  ```
+
+4) **GET /attachments/:messageId/:attachmentId**
+- **Mục đích**: Tải hoặc stream file đính kèm về frontend.
+- **Auth**: Required (Bearer token)
+- **Params**: 
+  - `:messageId` - ID của email chứa attachment
+  - `:attachmentId` - ID của attachment (lấy từ email detail)
+- **Response**: Binary stream của file đính kèm
+- **Headers**: `Content-Type: application/octet-stream`
+- **Example**:
+  ```bash
+  curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    http://localhost:5000/attachments/<MESSAGE_ID>/<ATTACHMENT_ID> \
+    --output filename.pdf
+  ```
+  ```js
+  // Download attachment
+  const res = await fetch(BACKEND + `/attachments/${messageId}/${attachmentId}`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'filename.pdf';
+  a.click();
+  ```
+
+#### Nhóm API Thao tác (Actions)
+
+5) **POST /emails/send**
+- **Mục đích**: Gửi một email mới.
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "to": ["recipient@example.com"],
+    "cc": ["cc@example.com"],
+    "bcc": ["bcc@example.com"],
+    "subject": "Email subject",
+    "body": "Email body content",
+    "isHtml": true,
+    "attachments": [
+      {
+        "filename": "document.pdf",
+        "content": "base64EncodedContent",
+        "contentType": "application/pdf"
+      }
+    ]
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email sent successfully",
+    "data": { "id": "...", "threadId": "...", "labelIds": [...] }
+  }
+  ```
+- **Example**:
+  ```bash
+  curl -X POST -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "to": ["test@example.com"],
+      "subject": "Test Email",
+      "body": "Hello from API",
+      "isHtml": false
+    }' \
+    http://localhost:5000/emails/send
+  ```
+  ```js
+  const res = await fetch(BACKEND + '/emails/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      to: ['recipient@example.com'],
+      subject: 'Test Subject',
+      body: '<h1>Hello</h1>',
+      isHtml: true
+    })
+  });
+  const result = await res.json();
+  ```
+
+6) **POST /emails/:id/reply**
+- **Mục đích**: Trả lời một email.
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Message ID của email cần reply
+- **Body**:
+  ```json
+  {
+    "body": "Reply message content",
+    "isHtml": true,
+    "attachments": [
+      {
+        "filename": "document.pdf",
+        "content": "base64EncodedContent",
+        "contentType": "application/pdf"
+      }
+    ]
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Reply sent successfully",
+    "data": { "id": "...", "threadId": "...", "labelIds": [...] }
+  }
+  ```
+- **Example**:
+  ```bash
+  curl -X POST -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "body": "Thank you for your email",
+      "isHtml": false
+    }' \
+    http://localhost:5000/emails/<MESSAGE_ID>/reply
+  ```
+  ```js
+  const res = await fetch(BACKEND + `/emails/${messageId}/reply`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      body: 'Thanks for reaching out!',
+      isHtml: false
+    })
+  });
+  const result = await res.json();
+  ```
+
+7) **POST /emails/:id/modify**
+- **Mục đích**: Thực hiện các thay đổi trạng thái như: đánh dấu đã đọc/chưa đọc, gắn sao, xóa, archive.
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Message ID
+- **Body**:
+  ```json
+  {
+    "action": "markRead" | "markUnread" | "star" | "unstar" | "delete" | "archive" | "unarchive"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email modified successfully",
+    "data": { "id": "...", "threadId": "...", "labelIds": [...] }
+  }
+  ```
+- **Actions**:
+  - `markRead`: Đánh dấu đã đọc (xóa label UNREAD)
+  - `markUnread`: Đánh dấu chưa đọc (thêm label UNREAD)
+  - `star`: Gắn sao (thêm label STARRED)
+  - `unstar`: Gỡ sao (xóa label STARRED)
+  - `delete`: Xóa email (chuyển vào TRASH)
+  - `archive`: Archive email (xóa khỏi INBOX)
+  - `unarchive`: Unarchive email (thêm lại vào INBOX)
+- **Example**:
+  ```bash
+  curl -X POST -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    -H "Content-Type: application/json" \
+    -d '{ "action": "markRead" }' \
+    http://localhost:5000/emails/<MESSAGE_ID>/modify
+  ```
+  ```js
+  const res = await fetch(BACKEND + `/emails/${messageId}/modify`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ action: 'star' })
+  });
+  const result = await res.json();
+  ```
+
+8) **POST /labels/:id/toggle**
+- **Mục đích**: Gắn hoặc gỡ nhãn (label) cho một hoặc nhiều email (dành riêng cho Gmail).
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Label ID
+- **Body**:
+  ```json
+  {
+    "action": "add" | "remove",
+    "emailIds": ["messageId1", "messageId2", "..."]
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Label toggled successfully",
+    "data": {}
+  }
+  ```
+- **Example**:
+  ```bash
+  curl -X POST -H "Authorization: Bearer <ACCESS_TOKEN>" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "action": "add",
+      "emailIds": ["msg1", "msg2"]
+    }' \
+    http://localhost:5000/labels/Label_123/toggle
+  ```
+  ```js
+  const res = await fetch(BACKEND + `/labels/${labelId}/toggle`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      action: 'add',
+      emailIds: [messageId1, messageId2]
+    })
+  });
+  const result = await res.json();
   ```
 
 
