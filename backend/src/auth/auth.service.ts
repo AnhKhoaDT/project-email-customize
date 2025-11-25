@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { UsersService } from '../users/users.service';
+import { SessionsService } from '../sessions/sessions.service';
 import * as bcrypt from 'bcrypt';
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'access-secret-example';
@@ -10,9 +11,7 @@ const REFRESH_EXPIRES_IN = '7d';
 
 @Injectable()
 export class AuthService {
-  private refreshTokenStore = new Map<string, string>(); // refreshToken -> userId
-
-  constructor(private usersService: UsersService) {}
+  constructor(private usersService: UsersService, private sessionsService: SessionsService) {}
 
   async validateUser(email: string, password: string) {
     const user = await this.usersService.findByEmail(email);
@@ -35,7 +34,7 @@ export class AuthService {
     if (!user) throw new UnauthorizedException('Invalid credentials');
     const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = this.signRefreshToken({ sub: user.id });
-    this.refreshTokenStore.set(refreshToken, user.id);
+    await this.sessionsService.createOrReplace(refreshToken, user.id);
     return { accessToken, refreshToken, user };
   }
 
@@ -47,17 +46,24 @@ export class AuthService {
     }
     const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = this.signRefreshToken({ sub: user.id });
-    this.refreshTokenStore.set(refreshToken, user.id);
+    await this.sessionsService.createOrReplace(refreshToken, user.id);
     return { accessToken, refreshToken, user };
+  }
+
+  createSessionForUser(user: { id: string; email: string }) {
+    const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
+    const refreshToken = this.signRefreshToken({ sub: user.id });
+    // create persistent session record
+    this.sessionsService.createOrReplace(refreshToken, user.id).catch(() => {});
+    return { accessToken, refreshToken };
   }
 
   async refresh(refreshToken: string) {
     try {
       const payload: any = jwt.verify(refreshToken, REFRESH_TOKEN_SECRET);
-      const stored = this.refreshTokenStore.get(refreshToken);
-      if (!stored || stored !== payload.sub) {
-        throw new UnauthorizedException('Invalid refresh token');
-      }
+      const session = await this.sessionsService.findByToken(refreshToken);
+      if (!session || session.revoked) throw new UnauthorizedException('Invalid refresh token');
+      if (session.user.toString() !== payload.sub) throw new UnauthorizedException('Invalid refresh token (mismatch)');
       const user = await this.usersService.findById(payload.sub);
       if (!user) throw new UnauthorizedException('User not found');
       const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
@@ -67,7 +73,7 @@ export class AuthService {
     }
   }
 
-  logout(refreshToken: string) {
-    this.refreshTokenStore.delete(refreshToken);
+  async logout(refreshToken: string) {
+    await this.sessionsService.deleteByToken(refreshToken).catch(() => {});
   }
 }
