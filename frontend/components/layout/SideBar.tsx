@@ -9,9 +9,11 @@ import {
 import { IoSend, IoSettingsOutline } from "react-icons/io5";
 import { RiErrorWarningFill } from "react-icons/ri";
 import ThemeSwitcher from "@/components/theme-switcher";
+import LogoutButton from "@/components/logout-button";
+import { User } from "@/types/auth.types";
 
 export interface SideBarProps {
-  user: string[];
+  user: User | null;
   isExpanded: boolean; // Prop mới
   toggleSidebar: () => void; // Prop mới (dùng cho mobile để đóng)
 }
@@ -21,6 +23,11 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
   const itemClass = `cursor-pointer flex flex-row items-center ${
     isExpanded ? "justify-between px-2" : "justify-center"
   } h-10 hover:bg-muted/50 rounded-md transition-all duration-200`;
+
+  // Get user display data
+  const userName = user?.name || user?.email?.split('@')[0] || 'User';
+  const userEmail = user?.email || 'user@example.com';
+  const userInitial = userName.charAt(0).toUpperCase();
 
   return (
     <>
@@ -47,7 +54,7 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
           >
             <div className="flex flex-row items-center gap-2">
               <div className="w-8 h-8 rounded-sm bg-muted border border-primary flex items-center justify-center shrink-0">
-                <p>B</p>
+                <p>{userInitial}</p>
               </div>
             </div>
             {isExpanded && (
@@ -65,9 +72,9 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
                 : "opacity-0 max-h-0 md:hidden"
             }`}
           >
-            <span className="whitespace-nowrap">Baked Design</span>
+            <span className="whitespace-nowrap">{userName}</span>
             <span className="text-secondary text-base truncate">
-              work@baked.design
+              {userEmail}
             </span>
           </div>
 
@@ -210,7 +217,7 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
             {isExpanded && <span>Help & Feedback</span>}
           </button>
 
-          <div className="mt-4 flex justify-start items-center"><ThemeSwitcher /></div>
+          <div className="mt-4 flex justify-between items-center"><ThemeSwitcher /> <LogoutButton /></div>
 
         </div>
       </div>

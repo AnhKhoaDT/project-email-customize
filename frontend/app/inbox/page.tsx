@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/auth-context";
 import SideBar from "@/components/layout/SideBar";
 import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
@@ -8,13 +10,22 @@ import { type Mail } from "@/types";
 import { mockMails } from "@/mockDatas/index";
 
 export default function Home() {
+  const router = useRouter();
+  const { isAuthenticated, isLoading, user } = useAuth();
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
+  const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
+
+  // Client-side authentication check
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      console.log('[Inbox] User not authenticated, redirecting to login...');
+      router.push('/login');
+    }
+  }, [isAuthenticated, isLoading, router]);
 
   const toggleSidebar = () => {
     setIsSidebarExpanded((prev) => !prev);
   };
-
-  const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
 
   const fetchMailBox = () => {
     return mockMails;
@@ -28,12 +39,29 @@ export default function Home() {
     if (isDesktop && mails && mails.length > 0 && !selectedMail) {
       setSelectedMail(mails[0]);
     }
-  }, []);
+  }, [mails, selectedMail]);
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-4 text-sm text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated, show nothing (will redirect via useEffect)
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <SideBar
-        user={["A", "B"]}
+        user={user}
         isExpanded={isSidebarExpanded}
         toggleSidebar={toggleSidebar}
       />
