@@ -118,7 +118,7 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   ```
 
 2) **GET /mailboxes/:id/emails?page=1&limit=50&pageToken=...**
-- **Mục đích**: Lấy danh sách email trong một hộp thư cụ thể, có hỗ trợ phân trang.
+- **Mục đích**: Lấy danh sách email trong một hộp thư cụ thể, có hỗ trợ phân trang. **Backend tự động fetch chi tiết cho mỗi email.**
 - **Auth**: Required (Bearer token)
 - **Params**:
   - `:id` - Label ID (ví dụ: `INBOX`, `SENT`, `DRAFT`, hoặc custom label ID)
@@ -129,12 +129,37 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   ```json
   {
     "messages": [
-      { "id": "...", "threadId": "..." }
+      {
+        "id": "19aba6e5873a9087",
+        "threadId": "19aba6e5873a9087",
+        "labelIds": ["UNREAD", "INBOX"],
+        "snippet": "Email preview text...",
+        "subject": "[JIRA] (KAN-26) API for measurement",
+        "from": "Sender Name <sender@example.com>",
+        "to": "Recipient <recipient@example.com>",
+        "date": "Tue, 25 Nov 2025 09:53:04 +0000",
+        "sizeEstimate": 14773,
+        "internalDate": "1764064384000",
+        "isUnread": true,
+        "isStarred": false,
+        "hasAttachment": false
+      }
     ],
-    "nextPageToken": "...",
+    "nextPageToken": "xyz123...",
     "resultSizeEstimate": 100
   }
   ```
+- **Các trường quan trọng**:
+  - `subject`: Tiêu đề email
+  - `from`: Người gửi (tên + email)
+  - `to`: Người nhận
+  - `date`: Ngày gửi (human-readable)
+  - `snippet`: Preview nội dung ngắn (~160 ký tự)
+  - `isUnread`: Email chưa đọc hay chưa
+  - `isStarred`: Email có gắn sao không
+  - `hasAttachment`: Email có file đính kèm không
+  - `labelIds`: Danh sách labels (INBOX, SENT, UNREAD, STARRED, etc.)
+- **Lưu ý**: Backend tự động fetch metadata cho từng email nên response có thể hơi chậm với `limit` lớn. Khuyến nghị `limit=20-50`.
 - **Example**:
   ```bash
   curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
@@ -145,6 +170,12 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
     headers: { 'Authorization': `Bearer ${accessToken}` }
   });
   const data = await res.json();
+  
+  // Hiển thị danh sách
+  data.messages.forEach(email => {
+    console.log(`${email.from}: ${email.subject}`);
+    console.log(`Unread: ${email.isUnread}, Has attachment: ${email.hasAttachment}`);
+  });
   ```
 
 3) **GET /emails/:id**
