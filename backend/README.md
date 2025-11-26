@@ -44,12 +44,12 @@ npm start
 npm run start:debug
 ```
 
-The server listens on `http://localhost:4000` by default when the app starts.
+The server listens on `http://localhost:5000` by default when the app starts.
 
 Environment variables
 
 - `NODE_ENV`: controls environment behavior. The project enables CORS only when `NODE_ENV` is not `production` (so CORS is enabled for `development` by default).
-- `PORT`: override the port the server listens on (default `4000`). Example: `PORT=5000 npm run start:dev`.
+- `PORT`: override the port the server listens on (default `5000`). Example: `PORT=5000 npm run start:dev`.
 
 Example .env
 
