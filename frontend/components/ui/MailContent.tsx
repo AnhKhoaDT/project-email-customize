@@ -1,17 +1,23 @@
+import { useState } from "react";
 import { CiMail } from "react-icons/ci";
 import {
   IoMdArrowBack,
   IoMdArrowForward,
   IoMdClose,
   IoMdMore,
+  IoMdSend,
 } from "react-icons/io";
 import { BsArchive, BsTrash3 } from "react-icons/bs";
 import { FaReply, FaShare } from "react-icons/fa";
 
 import { Mail } from "@/types";
 
+// --- CẤU HÌNH API ---
+// Thay thế đường dẫn này bằng URL backend thực tế của bạn
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+
 interface MailContentProps {
-  mail?: Mail | null; // Sửa MailData thành Mail
+  mail?: Mail | null;
   onBack?: () => void;
 }
 
@@ -43,7 +49,10 @@ const formatDate = (dateStr: string) => {
 };
 
 const MailContent = ({ mail, onBack }: MailContentProps) => {
-  // UPDATE 2: Sửa w-2/3 thành w-full để parent (Home) điều khiển kích thước
+  const [isReplying, setIsReplying] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [isSending, setIsSending] = useState(false);
+
   if (!mail) {
     return (
       <div className="flex flex-col w-full items-center justify-center h-full text-secondary bg-background/50">
@@ -58,9 +67,74 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
   const senderName = getSenderName(mail.from);
   const senderEmail = getSenderEmail(mail.from);
 
-  // UPDATE 3: Sửa w-2/3 thành w-full. Parent sẽ chia cột.
+  const handleReplyClick = () => {
+    setIsReplying(true);
+    // Tùy chọn: Thêm chữ ký hoặc trích dẫn email cũ vào body
+    // setReplyBody(`\n\nOn ${formatDate(mail.date)}, ${senderName} wrote:\n> ...`);
+  };
+
+  const handleCancelReply = () => {
+    setIsReplying(false);
+    setReplyBody("");
+  };
+
+  // --- HÀM GỌI API REPLY ---
+  const handleSendReply = async () => {
+    if (!replyBody.trim()) return;
+    // Giả sử mail object có thuộc tính id. Nếu id nằm ở chỗ khác (vd: mail.messageId), hãy sửa lại.
+    if (!mail.id) {
+      alert("Error: Cannot identify email ID.");
+      return;
+    }
+
+    setIsSending(true);
+
+    try {
+      // 1. Lấy Token (Thay đổi logic này tùy theo cách bạn lưu token: localStorage, cookie, hay Context)
+      const token = localStorage.getItem("access_token");
+
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        setIsSending(false);
+        return;
+      }
+
+      // 2. Gọi API
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/reply`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`, // Header Auth Required
+        },
+        body: JSON.stringify({
+          body: replyBody,
+          isHtml: false, // Vì dùng textarea thường nên set là false. Nếu dùng RichEditor, set true.
+          attachments: [], // Chưa xử lý file đính kèm trong UI này
+        }),
+      });
+
+      // 3. Xử lý kết quả
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to send reply");
+      }
+
+      // Thành công
+      // const data = await response.json(); // Nếu cần dùng dữ liệu trả về
+
+      setIsReplying(false);
+      setReplyBody("");
+      alert("Reply sent successfully!");
+    } catch (error: any) {
+      console.error("Error sending reply:", error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col w-full h-full bg-[#121212] text-gray-200 overflow-hidden relative">
+    <div className="flex flex-col w-full h-full bg-background text-gray-200 overflow-hidden relative">
       {/* --- TOP ACTION BAR --- */}
       <div className="flex flex-row justify-between items-center p-3 border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4 text-gray-400">
@@ -72,21 +146,19 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
           </button>
           <div className="h-4 w-px bg-white/20 mx-1"></div>
 
-          {/* UPDATE 4: Gắn sự kiện onBack vào nút mũi tên quay lại */}
           <button
-            className="hover:text-white transition-colors md:hidden cursor-pointer" // Chỉ hiện thị nút Back rõ ràng trên mobile nếu muốn, hoặc để luôn hiện
+            className="hover:text-white transition-colors md:hidden cursor-pointer"
             title="Back to Inbox"
+            onClick={onBack}
           >
             <IoMdArrowBack size={20} />
           </button>
 
-          {/* Giữ lại nút Forward */}
           <button className="hover:text-white transition-colors cursor-pointer">
             <IoMdArrowForward size={20} />
           </button>
         </div>
 
-        {/* ... (Phần Action bên phải giữ nguyên) ... */}
         <div className="flex items-center gap-2 text-gray-400">
           <button className="p-2 hover:bg-white/10 rounded-md transition-colors cursor-pointer">
             <BsArchive size={18} />
@@ -97,8 +169,8 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
         </div>
       </div>
 
-      {/* ... (Phần SCROLLABLE CONTENT AREA giữ nguyên toàn bộ logic hiển thị mail) ... */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+      {/* --- SCROLLABLE CONTENT AREA --- */}
+      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-20">
         {/* Subject Header */}
         <div className="mb-6">
           <div className="flex flex-row justify-between items-start">
@@ -139,8 +211,8 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
           </div>
         </div>
 
-        {/* Dynamic Body */}
-        <div className="w-full bg-background text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden">
+        {/* Original Mail Body */}
+        <div className="w-full bg-background text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
           <div
             className="email-content-wrapper text-[15px] leading-relaxed"
             dangerouslySetInnerHTML={{
@@ -152,18 +224,66 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
             }}
           />
         </div>
-        <div className="h-20"></div>
+
+        {/* --- REPLY EDITOR AREA --- */}
+        {isReplying && (
+          <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
+              <FaReply /> Replying to{" "}
+              <span className="text-white">{senderName}</span>
+            </div>
+            <textarea
+              autoFocus
+              className="w-full bg-[#1e1e1e] border border-white/20 rounded-md p-4 text-gray-200 focus:outline-none focus:border-blue-500 min-h-[150px] resize-y"
+              placeholder="Type your reply here..."
+              value={replyBody}
+              onChange={(e) => setReplyBody(e.target.value)}
+              disabled={isSending}
+            />
+            {/* Note: Nếu muốn thêm tính năng attach file, bạn cần thêm <input type="file"> ở đây và xử lý state attachments */}
+
+            <div className="flex gap-3 mt-2">
+              <button
+                onClick={handleSendReply}
+                disabled={isSending || !replyBody.trim()}
+                className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition-colors cursor-pointer"
+              >
+                {isSending ? (
+                  "Sending..."
+                ) : (
+                  <>
+                    <IoMdSend /> Send
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleCancelReply}
+                disabled={isSending}
+                className="px-4 py-2 hover:bg-white/10 text-gray-400 hover:text-white text-sm rounded transition-colors cursor-pointer"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="h-10"></div>
       </div>
 
       {/* --- BOTTOM ACTION BAR --- */}
-      <div className="absolute bottom-6 left-6 flex flex-row gap-3">
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer">
-          <FaReply /> Reply
-        </button>
-        <button className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer">
-          <FaShare /> Forward
-        </button>
-      </div>
+      {!isReplying && (
+        <div className="absolute bottom-6 left-6 flex flex-row gap-3">
+          <button
+            onClick={handleReplyClick}
+            className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg"
+          >
+            <FaReply /> Reply
+          </button>
+          <button className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg">
+            <FaShare /> Forward
+          </button>
+        </div>
+      )}
     </div>
   );
 };

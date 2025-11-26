@@ -79,14 +79,24 @@ const MailBox = ({
                   >
                     {/* ... (Nội dung từng item mail giữ nguyên) ... */}
                     <div className="flex items-start md:items-center w-full overflow-hidden">
-                      <img
+                      {/* <img
                         src={
                           "https://avatar.iran.liara.run/username?username=" +
                           (mail.from || "someone")
                         }
                         alt="Avatar"
                         className="w-10 h-10 rounded-full mr-4 shrink-0 object-cover"
-                      />
+                      /> */}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="#CCCCCC"
+                        width="100px"
+                        height="100px"
+                        className="w-10 h-10 rounded-full mr-4 shrink-0 object-cover"
+                      >
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+                      </svg>
                       <div className="flex flex-col w-full min-w-0">
                         <div className="flex flex-row items-center justify-between">
                           <span
