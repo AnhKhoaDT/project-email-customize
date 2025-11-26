@@ -35,8 +35,75 @@ export class GmailService {
   async listMessagesInLabel(userId: string, labelId: string, pageSize = 20, pageToken?: string) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
+    
+    // Lấy danh sách message IDs
     const res = await gmail.users.messages.list({ userId: 'me', labelIds: [labelId], maxResults: pageSize, pageToken });
-    return res.data;
+    
+    // Nếu không có messages thì return luôn
+    if (!res.data.messages || res.data.messages.length === 0) {
+      return {
+        messages: [],
+        nextPageToken: res.data.nextPageToken,
+        resultSizeEstimate: res.data.resultSizeEstimate || 0
+      };
+    }
+    
+    // Fetch chi tiết cho từng message (với format metadata để nhanh hơn)
+    const messagesWithDetails = await Promise.all(
+      res.data.messages.map(async (msg: any) => {
+        try {
+          const detail = await gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id,
+            format: 'metadata',
+            metadataHeaders: ['Subject', 'From', 'To', 'Date']
+          });
+          
+          const headers = detail.data.payload?.headers || [];
+          const getHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+          
+          return {
+            id: detail.data.id,
+            threadId: detail.data.threadId,
+            labelIds: detail.data.labelIds || [],
+            snippet: detail.data.snippet || '',
+            subject: getHeader('Subject') || '(No Subject)',
+            from: getHeader('From'),
+            to: getHeader('To'),
+            date: getHeader('Date'),
+            sizeEstimate: detail.data.sizeEstimate,
+            internalDate: detail.data.internalDate,
+            isUnread: (detail.data.labelIds || []).includes('UNREAD'),
+            isStarred: (detail.data.labelIds || []).includes('STARRED'),
+            hasAttachment: (detail.data.payload?.parts || []).some((p: any) => p.filename && p.body?.attachmentId)
+          };
+        } catch (err) {
+          logger.error(`Failed to fetch message ${msg.id}:`, err);
+          // Fallback: trả về thông tin cơ bản
+          return {
+            id: msg.id,
+            threadId: msg.threadId,
+            labelIds: [],
+            snippet: '',
+            subject: '(Error loading)',
+            from: '',
+            to: '',
+            date: '',
+            sizeEstimate: 0,
+            internalDate: '',
+            isUnread: false,
+            isStarred: false,
+            hasAttachment: false
+          };
+        }
+      })
+    );
+    
+    return {
+      messages: messagesWithDetails,
+      nextPageToken: res.data.nextPageToken,
+      resultSizeEstimate: res.data.resultSizeEstimate || 0
+    };
   }
 
   async getMessage(userId: string, messageId: string) {
