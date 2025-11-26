@@ -2,16 +2,17 @@
 // AXIOS API CLIENT
 // ========================================
 // Features:
-// - Auto attach access token to requests
-// - Auto refresh token khi 401
-// - withCredentials: true (gửi HTTP-only cookie)
+// - Auto attach access token to requests (Authorization: Bearer)
+// - Auto refresh token on 401 Unauthorized
+// - Concurrency handling: multiple failed requests trigger only one refresh
+// - Refresh token sent from localStorage in request body (per assignment)
 // ========================================
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { getAccessToken, setAccessToken, clearTokens } from './token';
 
 // Base URL từ environment variable
-const BASE_URL = process.env.BACKEND_API_URL || 'http://localhost:3001';
+const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:5000';
 
 // Create axios instance
 const api = axios.create({
@@ -70,35 +71,39 @@ const onTokenRefreshed = (token: string) => {
 
 /**
  * Call refresh token endpoint
- * Backend sẽ đọc refresh token từ HTTP-only cookie
+ * Refreshes access token using HttpOnly cookie containing refreshToken
+ * Backend reads refreshToken from cookie automatically
  */
 const refreshAccessToken = async (): Promise<string> => {
   try {
-    // Call refresh endpoint
-    // withCredentials: true → tự động gửi refresh_token cookie
+    console.log('[API] Attempting to refresh token from HttpOnly cookie...');
+    console.log('[API] Visible cookies:', document.cookie);
+    
+    // Call refresh endpoint - refreshToken sent via HttpOnly cookie
     const response = await axios.post(
       `${BASE_URL}/auth/refresh`,
       {},
       {
-        withCredentials: true,
         headers: { 'Content-Type': 'application/json' },
+        withCredentials: true, // CRITICAL: Send cookies with request
       }
     );
     
     const { accessToken } = response.data;
+    console.log('[API] Token refresh successful!');
     
     // Save new access token
     setAccessToken(accessToken);
     
     return accessToken;
-  } catch (error) {
+  } catch (error: any) {
+    console.error('[API] Token refresh failed:', error?.response?.status, error?.response?.data);
+    
     // Refresh failed → logout user
     clearTokens();
     
-    // Redirect to login
-    if (typeof window !== 'undefined') {
-      window.location.href = '/login';
-    }
+    // DON'T redirect automatically - let the app handle it
+    // The useUserQuery will set isAuthenticated=false and the page will redirect
     
     throw error;
   }

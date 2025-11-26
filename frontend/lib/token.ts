@@ -1,25 +1,34 @@
 // ========================================
 // TOKEN MANAGEMENT UTILITIES
 // ========================================
-// STRATEGY (Best Balance: Security + UX):
+// STRATEGY (Per Assignment Requirements):
+// 
 // - Access Token: localStorage + Cookie
-//   → localStorage: Fast access, persist qua F5 (good UX)
-//   → Cookie: Cho Next.js middleware đọc
+//   → localStorage: Primary storage, persists across page refresh
+//   → Cookie: Enables Next.js middleware to read token for route protection
+//   → Expires: 15 minutes (short-lived)
 // 
-// - Refresh Token: HTTP-only Cookie ONLY
-//   → Backend set/manage/revoke
-//   → KHÔNG accessible từ JavaScript
-//   → Database tracking
+// - Refresh Token: localStorage
+//   → Per assignment requirement: "Store refresh token in persistent storage (e.g., localStorage)"
+//   → Allows user session to persist across browser refresh
+//   → Expires: 7 days
+//   → Can be revoked server-side via database tracking
 // 
-// SECURITY FEATURES:
-// ✅ Refresh token XSS-proof (HTTP-only)
-// ✅ SameSite cookies (CSRF protection)
-// ✅ Short-lived access token (15 min)
-// ✅ Refresh token can be revoked remotely
+// SECURITY CONSIDERATIONS:
+// ✅ Short-lived access tokens (15 min) limit exposure window
+// ✅ Refresh tokens can be revoked remotely in database
+// ✅ Both tokens cleared on logout
+// ✅ HTTPS in production prevents token interception
+// ✅ Content Security Policy (CSP) mitigates XSS attacks
+// ✅ SameSite cookies provide CSRF protection
+// 
+// NOTE: HttpOnly cookies (stretch goal) are used in Google OAuth flow
+// for enhanced security, but assignment requires localStorage for standard auth.
 // ========================================
 
 // Constants
 const ACCESS_TOKEN_KEY = 'access_token';
+const REFRESH_TOKEN_KEY = 'refresh_token';
 
 // Check if running in browser
 const isBrowser = typeof window !== 'undefined';
@@ -129,22 +138,89 @@ export const clearAccessToken = (): void => {
 };
 
 /**
- * Clear all tokens
- * 
- * Frontend: Clear access token từ localStorage + cookie
- * Backend: Clear refresh token từ HTTP-only cookie (khi call /auth/logout)
+ * Get refresh token from localStorage
+ * Per assignment requirement: refresh token stored in localStorage
  */
-export const clearTokens = (): void => {
-  clearAccessToken();
-  // Note: Refresh token được backend xóa qua API call
+export const getRefreshToken = (): string | null => {
+  if (!isBrowser) return null;
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
 };
 
 /**
- * Check if user has valid access token
+ * Set refresh token in localStorage
+ * Per assignment requirement: refresh token stored in localStorage
+ */
+export const setRefreshToken = (token: string): void => {
+  if (!isBrowser) return;
+  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+};
+
+/**
+ * Clear refresh token from localStorage
+ */
+export const clearRefreshToken = (): void => {
+  if (!isBrowser) return;
+  localStorage.removeItem(REFRESH_TOKEN_KEY);
+};
+
+/**
+ * Clear all tokens and user data
  * 
- * Note: Không check refresh token vì nó ở HTTP-only cookie
- * (backend tự động handle via withCredentials: true)
+ * Frontend: Clear both access token and refresh token from localStorage
+ * Also clear user data for complete logout
+ */
+export const clearTokens = (): void => {
+  clearAccessToken();
+  clearRefreshToken();
+  clearUserData();
+};
+
+/**
+ * Check if user has valid tokens
+ * Check for access token (primary) or refresh token (for session restoration)
  */
 export const hasTokens = (): boolean => {
-  return !!getAccessToken();
+  return !!getAccessToken() || !!getRefreshToken();
+};
+
+// ========================================
+// USER DATA MANAGEMENT
+// ========================================
+
+const USER_DATA = 'user_data';
+
+/**
+ * Save user data to localStorage
+ * Persist user info across page reloads
+ */
+export const saveUserData = (user: any): void => {
+  if (!isBrowser) return;
+  try {
+    localStorage.setItem(USER_DATA, JSON.stringify(user));
+  } catch (error) {
+    console.error('Failed to save user data:', error);
+  }
+};
+
+/**
+ * Get user data from localStorage
+ * Returns null if no data or parse error
+ */
+export const getUserData = (): any | null => {
+  if (!isBrowser) return null;
+  try {
+    const data = localStorage.getItem(USER_DATA);
+    return data ? JSON.parse(data) : null;
+  } catch (error) {
+    console.error('Failed to parse user data:', error);
+    return null;
+  }
+};
+
+/**
+ * Clear user data from localStorage
+ */
+export const clearUserData = (): void => {
+  if (!isBrowser) return;
+  localStorage.removeItem(USER_DATA);
 };

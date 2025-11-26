@@ -5,14 +5,27 @@ import LogoutButton from "@/components/logout-button";
 import ThemeSwitcher from "@/components/theme-switcher";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { Mail } from "lucide-react";
+import Link from "next/link";
 
 export default function Inbox() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const router = useRouter();
 
+  // Debug logging
+  useEffect(() => {
+    console.log('Inbox - Auth State:', { 
+      isAuthenticated, 
+      isLoading, 
+      user,
+      hasAccessToken: !!localStorage.getItem('accessToken')
+    });
+  }, [isAuthenticated, isLoading, user]);
+
   // Redirect to login if not authenticated
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
+      console.log('Inbox - Redirecting to login');
       router.push('/login');
     }
   }, [isAuthenticated, isLoading, router]);
@@ -40,7 +53,12 @@ export default function Inbox() {
       <header className="fixed top-0 left-0 right-0 z-50 border-b bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800">
         <div className="flex items-center justify-between px-6 py-4">
           <div>
-            <h1 className="text-xl font-semibold">Email Customize</h1>
+            <Link href="/" className="flex items-center gap-2">
+              <Mail className="h-6 w-6 text-blue-600 dark:text-blue-500" />
+              <span className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
+                Email Customize
+              </span>
+            </Link>
             {user && (
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
                 Welcome, {user.email}

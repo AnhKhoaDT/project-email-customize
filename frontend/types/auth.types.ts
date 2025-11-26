@@ -18,6 +18,7 @@ export interface RegisterCredentials extends LoginCredentials {
 export interface LoginResponse {
     user: User;
     accessToken: string;
+    refreshToken: string;
 }
 
 export interface RefreshTokenResponse {

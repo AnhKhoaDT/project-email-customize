@@ -5,7 +5,7 @@
 // ========================================
 
 import api from './api';
-import { setAccessToken, clearTokens } from './token';
+import { setAccessToken, setRefreshToken, clearTokens } from './token';
 import { LoginCredentials, RegisterCredentials, LoginResponse, User } from '@/types/auth.types';
 
 /**
@@ -14,20 +14,22 @@ import { LoginCredentials, RegisterCredentials, LoginResponse, User } from '@/ty
  * Flow:
  * 1. POST /auth/login với credentials
  * 2. Backend validates
- * 3. Backend returns: { accessToken, user }
- * 4. Backend sets HTTP-only cookie: refresh_token
- * 5. Frontend lưu accessToken
+ * 3. Backend returns: { accessToken, refreshToken, user }
+ * 4. Frontend lưu cả accessToken và refreshToken vào localStorage
+ * 
+ * Note: Per assignment requirement, refreshToken is stored in localStorage
  */
 export const login = async (credentials: LoginCredentials): Promise<LoginResponse> => {
   const response = await api.post<LoginResponse>('/auth/login', credentials);
-  const { accessToken, user } = response.data;
+  const { accessToken, refreshToken, user } = response.data;
   
-  // Lưu access token (localStorage + cookie)
+  // Save access token (localStorage + cookie for middleware)
   setAccessToken(accessToken);
   
-  // Note: Refresh token được backend set vào HTTP-only cookie tự động
+  // Save refresh token (localStorage - per assignment requirement)
+  setRefreshToken(refreshToken);
   
-  return { accessToken, user };
+  return { accessToken, refreshToken, user };
 };
 
 /**
@@ -51,11 +53,13 @@ export const register = async (credentials: RegisterCredentials): Promise<User> 
  */
 export const loginWithGoogle = async (token: string): Promise<LoginResponse> => {
   const response = await api.post<LoginResponse>('/auth/google', { token });
-  const { accessToken, user } = response.data;
+  const { accessToken, refreshToken, user } = response.data;
   
+  // Save both tokens
   setAccessToken(accessToken);
+  setRefreshToken(refreshToken);
   
-  return { accessToken, user };
+  return { accessToken, refreshToken, user };
 };
 
 /**
@@ -86,6 +90,6 @@ export const logout = async (): Promise<void> => {
  * Dùng để restore session sau khi refresh page
  */
 export const getCurrentUser = async (): Promise<User> => {
-  const response = await api.get<{ user: User }>('/auth/me');
-  return response.data.user;
+  const response = await api.get<User>('/users/me');
+  return response.data;
 };

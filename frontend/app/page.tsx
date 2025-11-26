@@ -1,9 +1,28 @@
+"use client"
+
 import Link from "next/link";
 import { Mail, Shield, Zap, Users, ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import ThemeSwitcher from "@/components/theme-switcher";
+import LogoutButton from "@/components/logout-button";
+import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@/contexts/auth-context";
 
 export default function Welcome() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    const authStatus = searchParams.get('auth');
+    
+    if (authStatus === 'success') {
+      // Redirect to callback page for processing
+      router.push('/callback?auth=success');
+    }
+  }, [searchParams, router]);
+
   return (
     <div className="min-h-screen bg-linear-to-b from-zinc-50 to-white dark:from-zinc-950 dark:to-zinc-900">
       {/* Header / Navigation */}
@@ -18,16 +37,27 @@ export default function Welcome() {
             </div>
             <div className="flex items-center gap-4">
               <ThemeSwitcher />
-              <Link href="/login">
-                <Button variant="outline" size="sm">
-                  Sign in
-                </Button>
-              </Link>
-              <Link href="/register">
-                <Button size="sm" className="hidden sm:flex">
-                  Sign up
-                </Button>
-              </Link>
+              {isAuthenticated && user ? (
+                <>
+                  <span className="text-sm text-zinc-700 dark:text-zinc-300 hidden sm:inline">
+                    {user.name || user.email}
+                  </span>
+                  <LogoutButton />
+                </>
+              ) : (
+                <>
+                  <Link href="/login">
+                    <Button variant="outline" size="sm">
+                      Sign in
+                    </Button>
+                  </Link>
+                  <Link href="/register">
+                    <Button size="sm" className="hidden sm:flex">
+                      Sign up
+                    </Button>
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -60,9 +90,9 @@ export default function Welcome() {
 
           {/* CTA Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 mt-4">
-            <Link href="/login">
+            <Link href={isAuthenticated ? "/inbox" : "/login"}>
               <Button size="lg" className="text-base px-8">
-                Get Started
+                {isAuthenticated ? "Go to Inbox" : "Get Started"}
               </Button>
             </Link>
           </div>
