@@ -1,86 +1,81 @@
-"use client"
+"use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import LogoutButton from "@/components/logout-button";
-import ThemeSwitcher from "@/components/theme-switcher";
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Mail } from "lucide-react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
+import SideBar from "@/components/layout/SideBar";
+import MailBox from "@/components/ui/MailBox";
+import MailContent from "@/components/ui/MailContent";
+import { type Mail } from "@/types";
+import { mockMails } from "@/mockDatas/index";
 
-export default function Inbox() {
-  const { isAuthenticated, isLoading, user } = useAuth();
-  const router = useRouter();
+export default function Home() {
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
 
-  // Debug logging
+  const toggleSidebar = () => {
+    setIsSidebarExpanded((prev) => !prev);
+  };
+
+  const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
+
+  const fetchMailBox = () => {
+    return mockMails;
+  };
+  const mails = fetchMailBox();
+
+  // Tùy chọn: Auto select trên desktop, nhưng trên mobile thì không nên auto select ngay
+  // để người dùng thấy danh sách trước.
   useEffect(() => {
-    console.log('Inbox - Auth State:', { 
-      isAuthenticated, 
-      isLoading, 
-      user,
-      hasAccessToken: !!localStorage.getItem('accessToken')
-    });
-  }, [isAuthenticated, isLoading, user]);
-
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      console.log('Inbox - Redirecting to login');
-      router.push('/login');
+    const isDesktop = window.innerWidth >= 768; // logic đơn giản check màn hình
+    if (isDesktop && mails && mails.length > 0 && !selectedMail) {
+      setSelectedMail(mails[0]);
     }
-  }, [isAuthenticated, isLoading, router]);
-
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-zinc-900">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-gray-100 mx-auto"></div>
-          <p className="mt-4 text-sm text-gray-600 dark:text-gray-400">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Don't render if not authenticated (will redirect)
-  if (!isAuthenticated) {
-    return null;
-  }
+  }, []);
 
   return (
-    <div className="flex min-h-screen bg-zinc-50 font-sans dark:bg-zinc-900">
-      {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 border-b bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800">
-        <div className="flex items-center justify-between px-6 py-4">
-          <div>
-            <Link href="/" className="flex items-center gap-2">
-              <Mail className="h-6 w-6 text-blue-600 dark:text-blue-500" />
-              <span className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
-                Email Customize
-              </span>
-            </Link>
-            {user && (
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Welcome, {user.email}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <ThemeSwitcher />
-            <LogoutButton />
-          </div>
-        </div>
-      </header>
+    <div className="flex h-screen w-full overflow-hidden bg-background">
+      <SideBar
+        user={["A", "B"]}
+        isExpanded={isSidebarExpanded}
+        toggleSidebar={toggleSidebar}
+      />
 
-      {/* Main Content */}
-      <main className="flex-1 pt-20 px-6">
-        <div className="max-w-7xl mx-auto py-8">
-          <div className="text-center">
-            <h2 className="text-2xl font-semibold mb-2">Welcome to your Inbox</h2>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              This is a placeholder for the email dashboard.
-            </p>
-          </div>
+      <main className="flex flex-1 h-full w-full relative">
+        {/* LOGIC RESPONSIVE:
+            1. MailBox (Danh sách):
+               - Mobile: Ẩn khi đã chọn mail (hidden), hiện khi chưa chọn (flex).
+               - Desktop (md): Luôn hiện (md:flex) và chiếm 1/3 chiều rộng (md:w-1/3).
+        */}
+        <div
+          className={`
+            h-full 
+            ${selectedMail ? "hidden" : "flex"} 
+            md:flex md:w-1/3 w-full
+          `}
+        >
+          <MailBox
+            toggleSidebar={toggleSidebar}
+            mails={mails}
+            selectedMail={selectedMail}
+            onSelectMail={setSelectedMail}
+          />
+        </div>
+
+        {/* LOGIC RESPONSIVE:
+            2. MailContent (Nội dung):
+               - Mobile: Hiện khi đã chọn mail (flex), ẩn khi chưa chọn (hidden).
+               - Desktop (md): Luôn hiện (md:flex) và chiếm 2/3 chiều rộng (md:w-2/3).
+        */}
+        <div
+          className={`
+            h-full 
+            ${selectedMail ? "flex" : "hidden"} 
+            md:flex md:w-2/3 w-full
+          `}
+        >
+          <MailContent
+            mail={selectedMail}
+            // Khi bấm nút Back (trên mobile), reset state để quay về danh sách
+            onBack={() => setSelectedMail(null)}
+          />
         </div>
       </main>
     </div>
