@@ -36,13 +36,13 @@ export const login = async (credentials: LoginCredentials): Promise<LoginRespons
  * Register user mới
  * 
  * Flow:
- * 1. POST /auth/register với user info
+ * 1. POST /users/register với user info
  * 2. Backend creates user
  * 3. Return user info (không login tự động)
  * 4. Frontend redirect to login page
  */
 export const register = async (credentials: RegisterCredentials): Promise<User> => {
-  const response = await api.post<User>('/auth/register', credentials);
+  const response = await api.post<User>('/users/register', credentials);
   return response.data;
 };
 
