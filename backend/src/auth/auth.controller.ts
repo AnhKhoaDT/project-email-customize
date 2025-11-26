@@ -1,10 +1,13 @@
-import { Body, Controller, Post, Req, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Post, Req, UnauthorizedException, BadRequestException, Get, Query, Res } from '@nestjs/common';
+import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { UsersService } from '../users/users.service';
+import { google } from 'googleapis';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private authService: AuthService, private usersService: UsersService) {}
 
   @Post('login')
   async login(@Body() body: LoginDto) {
@@ -19,14 +22,174 @@ export class AuthController {
     return this.authService.exchangeGoogleToken({ email: body.email, name: body.name });
   }
 
+  // Build Google OAuth consent URL; if ?redirect=true is provided, this endpoint will
+  // redirect the browser to Google consent directly. Otherwise it returns JSON { url }.
+  @Get('google/url')
+  async googleUrl(@Query('redirect') redirect?: string, @Query('state') state?: string, @Res() res?: Response) {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/auth/google/callback';
+    if (!clientId) throw new BadRequestException('Google OAuth not configured');
+
+    const scope = [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ].join(' ');
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope,
+      access_type: 'offline',
+      prompt: 'consent',
+    });
+    if (state) params.set('state', state);
+
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    if (redirect && res) {
+      return res.redirect(url);
+    }
+    return { url };
+  }
+
+  // Simple single-call entrypoint for frontend: frontend opens this URL and backend
+  // redirects to Google consent flow. After consent Google will call
+  // GET /auth/google/callback which completes the exchange and redirects to frontend.
+  @Get('google')
+  async googleRedirect(@Query('state') state?: string, @Res() res?: Response) {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/auth/google/callback';
+    if (!clientId) throw new BadRequestException('Google OAuth not configured');
+
+    const scope = [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/gmail.readonly',
+    ].join(' ');
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope,
+      access_type: 'offline',
+      prompt: 'consent',
+    });
+    if (state) params.set('state', state);
+
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    return res.redirect(url);
+  }
+
+  // Google will redirect the browser to this endpoint with ?code=...; this handler
+  // exchanges the code and then redirects the browser to the frontend with app tokens
+  // encoded in the query string (or fragment). WARNING: returning tokens in URL is
+  // less secure—consider using cookies or postMessage from frontend.
+  @Get('google/callback')
+  async googleCallbackGet(@Query('code') code?: string, @Query('redirectTo') redirectTo?: string, @Res() res?: Response) {
+    if (!code) throw new BadRequestException('Missing authorization code');
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/auth/google/callback';
+    if (!clientId || !clientSecret) throw new BadRequestException('Google OAuth not configured');
+
+    const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    const { tokens } = await oAuth2Client.getToken(code);
+    oAuth2Client.setCredentials(tokens);
+
+    const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+    const info = await oauth2.userinfo.get();
+    const email = info.data.email;
+    const name = info.data.name || undefined;
+    if (!email) throw new BadRequestException('Unable to determine Google account email');
+
+    let user = await this.usersService.findByEmail(email);
+    if (!user) {
+      user = await this.usersService.createFromOAuth({ email, name });
+    }
+    if (tokens.refresh_token) {
+      await this.usersService.setGoogleRefreshToken(user._id.toString(), tokens.refresh_token);
+    }
+
+    const session = this.authService.createSessionForUser({ id: user._id.toString(), email: user.email });
+
+    const target = redirectTo || process.env.FE_URL || 'http://localhost:3000';
+    // Set refresh token as HttpOnly cookie and redirect to frontend without tokens in URL
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+    };
+    if (res) {
+      res.cookie('refreshToken', session.refreshToken, cookieOptions);
+      // Optionally the frontend can then call POST /auth/refresh to get an access token.
+      return res.redirect(target + '?auth=success');
+    }
+    return { user: { id: user._id.toString(), email: user.email, name: user.name }, tokens: { accessToken: session.accessToken } };
+  }
+
+  @Post('google/callback')
+  async googleCallback(@Body() body: { code?: string; redirectUri?: string }) {
+    const code = body.code;
+    if (!code) throw new BadRequestException('Missing authorization code');
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = body.redirectUri || process.env.GOOGLE_CALLBACK_URL || 'http://localhost:5000/auth/google/callback';
+    if (!clientId || !clientSecret) throw new BadRequestException('Google OAuth not configured');
+
+    const oAuth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+    const { tokens } = await oAuth2Client.getToken(code);
+    oAuth2Client.setCredentials(tokens);
+
+    // fetch userinfo
+    const oauth2 = google.oauth2({ version: 'v2', auth: oAuth2Client });
+    const res = await oauth2.userinfo.get();
+    const email = res.data.email;
+    const name = res.data.name || undefined;
+    if (!email) throw new BadRequestException('Unable to determine Google account email');
+
+    // find or create app user
+    let user = await this.usersService.findByEmail(email);
+    if (!user) {
+      user = await this.usersService.createFromOAuth({ email, name });
+    }
+
+    // persist Google refresh token if provided
+    if (tokens.refresh_token) {
+      await this.usersService.setGoogleRefreshToken(user._id.toString(), tokens.refresh_token);
+    }
+
+    // create app session tokens
+    const session = this.authService.createSessionForUser({ id: user._id.toString(), email: user.email });
+
+    return {
+      user: { id: user._id.toString(), email: user.email, name: user.name },
+      tokens: session,
+      googleTokens: { hasRefreshToken: !!tokens.refresh_token },
+    };
+  }
+
   @Post('refresh')
-  async refresh(@Body() body: { refreshToken: string }) {
-    return this.authService.refresh(body.refreshToken);
+  async refresh(@Body() body: { refreshToken?: string }, @Req() req?: Request) {
+    const token = body?.refreshToken || (req && (req as any).cookies && (req as any).cookies.refreshToken);
+    if (!token) throw new BadRequestException('Missing refresh token');
+    return this.authService.refresh(token);
   }
 
   @Post('logout')
-  async logout(@Body() body: { refreshToken: string }) {
-    this.authService.logout(body.refreshToken);
+  async logout(@Body() body: { refreshToken?: string }, @Req() req?: Request, @Res() res?: Response) {
+    const token = body?.refreshToken || (req && (req as any).cookies && (req as any).cookies.refreshToken);
+    if (token) {
+      await this.authService.logout(token);
+    }
+    if (res) {
+      res.clearCookie('refreshToken');
+      return res.json({ ok: true });
+    }
     return { ok: true };
   }
 }

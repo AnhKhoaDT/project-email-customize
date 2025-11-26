@@ -16,13 +16,55 @@ cd backend
 npm install
 ```
 
-2. Run in development mode:
+2. Development (watch) server using Nest CLI:
 
 ```bash
+# shorthand: runs dev server on port 5000
+npm run dev
+
+# or the longer form (uses NODE_ENV=development and watch)
 npm run start:dev
 ```
 
-The server listens on `http://localhost:4000` by default.
+3. Build for production:
+
+```bash
+npm run build
+```
+
+4. Run the built app:
+
+```bash
+npm start
+```
+
+5. Extra: start in debug mode (inspect):
+
+```bash
+npm run start:debug
+```
+
+The server listens on `http://localhost:4000` by default when the app starts.
+
+Environment variables
+
+- `NODE_ENV`: controls environment behavior. The project enables CORS only when `NODE_ENV` is not `production` (so CORS is enabled for `development` by default).
+- `PORT`: override the port the server listens on (default `4000`). Example: `PORT=5000 npm run start:dev`.
+
+Example .env
+
+Create a `.env` file in `backend/` for local development. A template is provided as `.env.example` — copy it and fill secrets before running:
+
+```bash
+cd backend
+cp .env.example .env
+# edit .env to set secrets
+```
+
+Important variables:
+
+- `ACCESS_TOKEN_SECRET` and `REFRESH_TOKEN_SECRET` — JWT secrets used to sign tokens.
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — only needed if you implement real Google OAuth verification.
 
 Auth endpoints
 
