@@ -7,57 +7,120 @@ import SideBar from "@/components/layout/SideBar";
 import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
 import { type Mail } from "@/types";
-import { mockMails } from "@/mockDatas/index";
+// import { mockMails } from "@/mockDatas/index"; // Xoá hoặc comment dòng này
 
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, user } = useAuth();
-  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
-  const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
+  const { isAuthenticated, isLoading: isAuthLoading, user } = useAuth();
 
-  // Client-side authentication check
+  // State quản lý UI
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
+
+  // State quản lý dữ liệu Mail
+  const [mails, setMails] = useState<Mail[]>([]);
+  const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
+  const [isMailsLoading, setIsMailsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // 1. Client-side authentication check
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      console.log('[Inbox] User not authenticated, redirecting to login...');
-      router.push('/login');
+    if (!isAuthLoading && !isAuthenticated) {
+      console.log("[Inbox] User not authenticated, redirecting to login...");
+      router.push("/login");
     }
-  }, [isAuthenticated, isLoading, router]);
+  }, [isAuthenticated, isAuthLoading, router]);
+
+  // 2. Call API lấy danh sách mail
+  useEffect(() => {
+    // Chỉ gọi API khi đã xác thực user thành công
+    if (isAuthenticated) {
+      const fetchMails = async () => {
+        try {
+          setIsMailsLoading(true);
+          setError(null);
+
+          // Thay '/api/mails' bằng endpoint thực tế của bạn
+          // Ví dụ: const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/emails`);
+          const id = "INBOX"; // Hoặc lấy từ nơi khác nếu cần
+          const limit = 50;
+          const page = 1;
+          const pageToken = ""; // Nếu có token phân trang, hãy thay thế ở đây
+          const token = localStorage.getItem("access_token");
+          const maiURL =
+            process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+          const response = await fetch(
+            `${maiURL}/mailboxes/${id}/emails?page=${page}&limit=${limit}&pageToken=${pageToken}`,
+            {
+              method: "GET", // Mặc định là GET, nhưng viết rõ ra cho dễ đọc (tùy chọn)
+              headers: {
+                "Content-Type": "application/json",
+                // 2. Truyền token vào Authorization header
+                // Cấu trúc thường gặp là: "Bearer <token>"
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error("Failed to fetch mails");
+          }
+
+          const data = await response.json();
+          console.log("Fetched mails:", data);
+          // Giả sử API trả về mảng mail trực tiếp hoặc object { data: [...] }
+          // Hãy điều chỉnh 'data' hoặc 'data.data' tùy theo response thực tế
+          setMails(data.messages);
+        } catch (err: any) {
+          console.error("Error fetching mails:", err);
+          setError(err.message || "Something went wrong");
+        } finally {
+          setIsMailsLoading(false);
+        }
+      };
+
+      fetchMails();
+    }
+  }, [isAuthenticated]);
+
+  // 3. Logic Auto select trên Desktop
+  useEffect(() => {
+    const isDesktop = window.innerWidth >= 768;
+
+    // Nếu là desktop, đã load xong mail, có mail, và chưa chọn mail nào
+    if (isDesktop && !isMailsLoading && mails.length > 0 && !selectedMail) {
+      // Logic cũ của bạn là setSelectedMail(null) -> có thể bạn muốn giữ trạng thái trống
+      // Tuy nhiên, UX tốt thường sẽ auto-select mail đầu tiên:
+      // setSelectedMail(mails[0]);
+
+      // Giữ nguyên logic của bạn (không chọn gì cả hoặc reset):
+      setSelectedMail(null);
+    }
+  }, [mails, selectedMail, isMailsLoading]);
 
   const toggleSidebar = () => {
     setIsSidebarExpanded((prev) => !prev);
   };
 
-  const fetchMailBox = () => {
-    return mockMails;
-  };
-  const mails = fetchMailBox();
-
-  // Tùy chọn: Auto select trên desktop, nhưng trên mobile thì không nên auto select ngay
-  // để người dùng thấy danh sách trước.
-  useEffect(() => {
-    const isDesktop = window.innerWidth >= 768; // logic đơn giản check màn hình
-    if (isDesktop && mails && mails.length > 0 && !selectedMail) {
-      setSelectedMail(mails[0]);
-    }
-  }, [mails, selectedMail]);
-
-  // Show loading state while checking authentication
-  if (isLoading) {
+  // 4. Loading State cho Authentication
+  if (isAuthLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-sm text-muted-foreground">Loading...</p>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Checking authentication...
+          </p>
         </div>
       </div>
     );
   }
 
-  // If not authenticated, show nothing (will redirect via useEffect)
+  // Nếu chưa auth thì return null (đợi redirect)
   if (!isAuthenticated) {
     return null;
   }
 
+  // 5. Render chính
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <SideBar
@@ -67,11 +130,7 @@ export default function Home() {
       />
 
       <main className="flex flex-1 h-full w-full relative">
-        {/* LOGIC RESPONSIVE:
-            1. MailBox (Danh sách):
-               - Mobile: Ẩn khi đã chọn mail (hidden), hiện khi chưa chọn (flex).
-               - Desktop (md): Luôn hiện (md:flex) và chiếm 1/3 chiều rộng (md:w-1/3).
-        */}
+        {/* Cột Danh sách Mail */}
         <div
           className={`
             h-full 
@@ -79,19 +138,27 @@ export default function Home() {
             md:flex md:w-1/3 w-full
           `}
         >
-          <MailBox
-            toggleSidebar={toggleSidebar}
-            mails={mails}
-            selectedMail={selectedMail}
-            onSelectMail={setSelectedMail}
-          />
+          {isMailsLoading ? (
+            // Loading state riêng cho cột danh sách mail
+            <div className="flex items-center justify-center w-full h-full">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : error ? (
+            // Error state
+            <div className="flex items-center justify-center w-full h-full text-red-500">
+              {error}
+            </div>
+          ) : (
+            <MailBox
+              toggleSidebar={toggleSidebar}
+              mails={mails}
+              selectedMail={selectedMail}
+              onSelectMail={setSelectedMail}
+            />
+          )}
         </div>
 
-        {/* LOGIC RESPONSIVE:
-            2. MailContent (Nội dung):
-               - Mobile: Hiện khi đã chọn mail (flex), ẩn khi chưa chọn (hidden).
-               - Desktop (md): Luôn hiện (md:flex) và chiếm 2/3 chiều rộng (md:w-2/3).
-        */}
+        {/* Cột Nội dung Mail */}
         <div
           className={`
             h-full 
@@ -101,7 +168,6 @@ export default function Home() {
         >
           <MailContent
             mail={selectedMail}
-            // Khi bấm nút Back (trên mobile), reset state để quay về danh sách
             onBack={() => setSelectedMail(null)}
           />
         </div>
