@@ -49,52 +49,55 @@ export const useUserQuery = () => {
         }
       }
       
-      // Không có accessToken hoặc fetch failed → thử refresh từ HttpOnly cookie
-      console.log('[useUserQuery] No accessToken or expired, attempting to refresh from HttpOnly cookie...');
-      
-      try {
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:5000';
-        const refreshResponse = await fetch(`${backendUrl}/auth/refresh`, {
-          method: 'POST',
-          credentials: 'include',  // 🔒 Send HttpOnly cookie automatically
-          headers: { 'Content-Type': 'application/json' }
-        });
+      // Only try refresh if we don't have a token AND we're still loading
+      if (!accessToken && isLoading) {
+        // Không có accessToken → thử refresh từ HttpOnly cookie
+        console.log('[useUserQuery] No accessToken, attempting to refresh from HttpOnly cookie...');
         
-        console.log('[useUserQuery] Refresh response:', refreshResponse.status);
-        
-        if (refreshResponse.ok) {
-          const { accessToken: newAccessToken } = await refreshResponse.json();
+        try {
+          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:5000';
+          const refreshResponse = await fetch(`${backendUrl}/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',  // 🔒 Send HttpOnly cookie automatically
+            headers: { 'Content-Type': 'application/json' }
+          });
           
-          // Store new access token in-memory
-          setAccessToken(newAccessToken);  // AuthContext
-          setGlobalAccessToken(newAccessToken);  // window.__accessToken for axios
+          console.log('[useUserQuery] Refresh response:', refreshResponse.status);
           
-          console.log('[useUserQuery] ✅ Token refreshed from HttpOnly cookie');
+          if (refreshResponse.ok) {
+            const { accessToken: newAccessToken } = await refreshResponse.json();
+            
+            // Store new access token in-memory
+            setAccessToken(newAccessToken);  // AuthContext
+            setGlobalAccessToken(newAccessToken);  // window.__accessToken for axios
           
-          // Fetch user profile with new token
-          const userProfile = await getCurrentUser();
-          setUser(userProfile);
-          setIsAuthenticated(true);
-          console.log('[useUserQuery] ✅ User authenticated:', userProfile.email);
-        } else {
-          console.log('[useUserQuery] ❌ No valid refresh token in HttpOnly cookie');
+            console.log('[useUserQuery] ✅ Token refreshed from HttpOnly cookie');
+            
+            // Fetch user profile with new token
+            const userProfile = await getCurrentUser();
+            setUser(userProfile);
+            setIsAuthenticated(true);
+            console.log('[useUserQuery] ✅ User authenticated:', userProfile.email);
+          } else {
+            console.log('[useUserQuery] ❌ No valid refresh token in HttpOnly cookie');
+            clearTokens();
+            setUser(null);
+            setIsAuthenticated(false);
+          }
+        } catch (error) {
+          console.error('[useUserQuery] ❌ Refresh error:', error);
           clearTokens();
           setUser(null);
           setIsAuthenticated(false);
+        } finally {
+          setIsLoading(false);
         }
-      } catch (error) {
-        console.error('[useUserQuery] ❌ Refresh error:', error);
-        clearTokens();
-        setUser(null);
-        setIsAuthenticated(false);
-      } finally {
-        setIsLoading(false);
       }
     };
 
     initializeAuth();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Re-run when accessToken changes (e.g., after login)
+  }, [accessToken]);
 
   return { isLoading };
 };

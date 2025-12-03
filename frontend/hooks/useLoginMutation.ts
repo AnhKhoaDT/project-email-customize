@@ -33,6 +33,9 @@ export const useLoginMutation = () => {
 
       console.log('[useLoginMutation] ✅ Login successful, access token stored in-memory');
 
+      // Small delay to ensure state is propagated before redirect
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Redirect
       router.push('/inbox');
 

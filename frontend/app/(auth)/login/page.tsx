@@ -244,15 +244,6 @@ export default function Login() {
                 Register
               </Link>
             </div>
-            {/* Dev-only debug: show received Google auth code */}
-            {process.env.NODE_ENV !== 'production' && googleCode && (
-              <div className="mt-3 w-full text-left">
-                <div className="rounded-md border border-zinc-200 p-3 bg-zinc-50 dark:bg-zinc-900/60">
-                  <div className="text-xs text-zinc-500 mb-1">Google auth code (dev only)</div>
-                  <pre className="wrap-break-words text-sm text-zinc-700 dark:text-zinc-200">{googleCode}</pre>
-                </div>
-              </div>
-            )}
           </CardFooter>
         </Card>
       </div>

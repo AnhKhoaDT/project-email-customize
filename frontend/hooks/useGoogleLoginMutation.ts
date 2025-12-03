@@ -32,6 +32,9 @@ export const useGoogleLoginMutation = () => {
 
       console.log('[useGoogleLoginMutation] ✅ Google login successful, access token stored in-memory');
 
+      // Small delay to ensure state is propagated before redirect
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Redirect to inbox
       router.push('/inbox');
 

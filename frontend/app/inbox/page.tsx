@@ -45,19 +45,27 @@ export default function Home() {
           const limit = 50;
           const page = 1;
           const pageToken = ""; // Nếu có token phân trang, hãy thay thế ở đây
-          const token = localStorage.getItem("access_token");
+          
+          // 🔒 Get access token from window (in-memory storage)
+          const token = typeof window !== 'undefined' ? window.__accessToken : null;
+          
+          if (!token) {
+            console.log('[Inbox] No access token available yet, skipping fetch');
+            setIsMailsLoading(false);
+            return;
+          }
+          
           const maiURL =
             process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
           const response = await fetch(
             `${maiURL}/mailboxes/${id}/emails?page=${page}&limit=${limit}&pageToken=${pageToken}`,
             {
-              method: "GET", // Mặc định là GET, nhưng viết rõ ra cho dễ đọc (tùy chọn)
+              method: "GET",
               headers: {
                 "Content-Type": "application/json",
-                // 2. Truyền token vào Authorization header
-                // Cấu trúc thường gặp là: "Bearer <token>"
                 Authorization: `Bearer ${token}`,
               },
+              credentials: 'include',  // 🔒 Send HttpOnly cookie for refresh token
             }
           );
 
