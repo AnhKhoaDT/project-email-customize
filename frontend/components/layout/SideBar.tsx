@@ -16,9 +16,10 @@ export interface SideBarProps {
   user: User | null;
   isExpanded: boolean; // Prop mới
   toggleSidebar: () => void; // Prop mới (dùng cho mobile để đóng)
+  onComposeClick?: () => void; // Handler for New email button
 }
 
-const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
+const SideBar = ({ user, isExpanded, toggleSidebar, onComposeClick }: SideBarProps) => {
   // Class chung cho các item
   const itemClass = `cursor-pointer flex flex-row items-center ${
     isExpanded ? "justify-between px-2" : "justify-center"
@@ -80,6 +81,7 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
 
           {/* Create Mail Button */}
           <button
+            onClick={onComposeClick}
             className={`mt-6 flex flex-row items-center gap-2 h-10 bg-muted rounded-md cursor-pointer hover:bg-muted/80 transition-all
               ${
                 isExpanded

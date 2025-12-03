@@ -492,10 +492,12 @@ Key directories:
 ### Keyboard Navigation
 **Implemented:**
 - `↑/↓` - Navigate through email list
+- `c` - Compose new email
+- `f` - Forward selected email
 - `Esc` - Close email detail (mobile)
 
 **Planned:**
-- `c` Compose, `r` Reply, `a` Reply All, `f` Forward, `#` Delete, `s` Star, `e` Archive, `u` Mark Unread
+- `r` Reply, `a` Reply All, `#` Delete, `s` Star, `e` Archive, `u` Mark Unread
 
 ## 🔒 Security Considerations
 

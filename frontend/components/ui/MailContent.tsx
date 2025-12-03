@@ -19,6 +19,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 interface MailContentProps {
   mail?: Mail | null;
   onBack?: () => void;
+  onForwardClick?: () => void;
 }
 
 // ... (Giữ nguyên các hàm Helper: getSenderName, getSenderEmail, formatDate) ...
@@ -48,7 +49,7 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-const MailContent = ({ mail, onBack }: MailContentProps) => {
+const MailContent = ({ mail, onBack, onForwardClick }: MailContentProps) => {
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -279,7 +280,10 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
           >
             <FaReply /> Reply
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg">
+          <button 
+            onClick={onForwardClick}
+            className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg"
+          >
             <FaShare /> Forward
           </button>
         </div>

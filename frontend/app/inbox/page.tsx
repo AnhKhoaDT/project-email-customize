@@ -6,6 +6,8 @@ import { useAuth } from "@/contexts/auth-context";
 import SideBar from "@/components/layout/SideBar";
 import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
+import ComposeModal from "@/components/ui/ComposeModal";
+import ForwardModal from "@/components/ui/ForwardModal";
 import { type Mail } from "@/types";
 // import { mockMails } from "@/mockDatas/index"; // Xoá hoặc comment dòng này
 
@@ -24,6 +26,12 @@ export default function Home() {
   
   // State for keyboard navigation
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  
+  // State for compose modal
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  
+  // State for forward modal
+  const [isForwardOpen, setIsForwardOpen] = useState(false);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -127,6 +135,38 @@ export default function Home() {
     }
   };
 
+  // Handler to send email
+  const handleSendEmail = async (emailData: {
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject: string;
+    body: string;
+    isHtml: boolean;
+  }) => {
+    const token = typeof window !== 'undefined' ? window.__accessToken : null;
+    if (!token) {
+      throw new Error('Not authenticated');
+    }
+
+    const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:5000';
+    const response = await fetch(`${apiURL}/emails/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: 'include',
+      body: JSON.stringify(emailData),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to send email');
+    }
+
+    return await response.json();
+  };
+
   // 4. Keyboard Navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -176,8 +216,8 @@ export default function Home() {
 
         case 'c':
           e.preventDefault();
-          // TODO: Open compose modal
-          console.log('[Keyboard] Compose new email (c)');
+          // Open compose modal
+          setIsComposeOpen(true);
           break;
 
         case 'r':
@@ -198,9 +238,9 @@ export default function Home() {
 
         case 'f':
           e.preventDefault();
-          // TODO: Forward selected email
+          // Forward selected email
           if (selectedMail) {
-            console.log('[Keyboard] Forward (f):', selectedMail.id);
+            setIsForwardOpen(true);
           }
           break;
 
@@ -277,6 +317,7 @@ export default function Home() {
         user={user}
         isExpanded={isSidebarExpanded}
         toggleSidebar={toggleSidebar}
+        onComposeClick={() => setIsComposeOpen(true)}
       />
 
       <main className="flex flex-1 h-full w-full relative">
@@ -320,9 +361,27 @@ export default function Home() {
           <MailContent
             mail={selectedMail}
             onBack={() => setSelectedMail(null)}
+            onForwardClick={() => selectedMail && setIsForwardOpen(true)}
           />
         </div>
       </main>
+
+      {/* Compose Modal */}
+      <ComposeModal
+        isOpen={isComposeOpen}
+        onClose={() => setIsComposeOpen(false)}
+        onSend={handleSendEmail}
+      />
+
+      {/* Forward Modal */}
+      {selectedMail && (
+        <ForwardModal
+          isOpen={isForwardOpen}
+          onClose={() => setIsForwardOpen(false)}
+          onSend={handleSendEmail}
+          originalMail={selectedMail}
+        />
+      )}
     </div>
   );
 }
