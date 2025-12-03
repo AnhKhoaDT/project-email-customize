@@ -4,12 +4,14 @@ import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
+import { useEffect, useRef } from "react";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
   selectedMail?: Mail | null;
   mails: Mail[];
   onSelectMail: (mail: Mail) => void;
+  focusedIndex?: number;
 }
 
 const MailBox = ({
@@ -17,7 +19,21 @@ const MailBox = ({
   selectedMail,
   mails,
   onSelectMail,
+  focusedIndex = 0,
 }: MailBoxProps) => {
+  // Ref to track focused mail item for scroll-into-view
+  const focusedItemRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll focused item into view when focusedIndex changes
+  useEffect(() => {
+    if (focusedItemRef.current) {
+      focusedItemRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }
+  }, [focusedIndex]);
+
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
   return (
@@ -61,19 +77,21 @@ const MailBox = ({
         <div className="mt-8">
           <div className="flex flex-col gap-2 ">
             {mails && mails.length > 0 ? (
-              mails.map((mail) => {
+              mails.map((mail, index) => {
                 const isSelected = selectedMail?.id === mail.id;
+                const isFocused = focusedIndex === index;
 
                 return (
                   <div
                     key={mail.id}
+                    ref={isFocused ? focusedItemRef : null}
                     onClick={() => onSelectMail(mail)}
                     className={`
                       flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border
                       ${
                         isSelected
                           ? "bg-primary/10 border-primary/50 shadow-sm"
-                          : "bg-secondary/5 border-transparent hover:bg-secondary/10"
+                          : isFocused
                       }
                     `}
                   >

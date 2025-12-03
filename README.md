@@ -490,7 +490,12 @@ Key directories:
 - **Mobile (<768px):** Single column with navigation
 
 ### Keyboard Navigation
-`↑/↓` Navigate, `Enter` Open, `c` Compose, `r` Reply, `a` Reply All, `f` Forward, `#` Delete, `s` Star, `e` Archive, `u` Mark Unread, `Esc` Close
+**Implemented:**
+- `↑/↓` - Navigate through email list
+- `Esc` - Close email detail (mobile)
+
+**Planned:**
+- `c` Compose, `r` Reply, `a` Reply All, `f` Forward, `#` Delete, `s` Star, `e` Archive, `u` Mark Unread
 
 ## 🔒 Security Considerations
 

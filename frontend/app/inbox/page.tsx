@@ -21,6 +21,9 @@ export default function Home() {
   const [selectedMail, setSelectedMail] = useState<Mail | null>(null);
   const [isMailsLoading, setIsMailsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // State for keyboard navigation
+  const [focusedIndex, setFocusedIndex] = useState<number>(0);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -114,7 +117,141 @@ export default function Home() {
     setIsSidebarExpanded((prev) => !prev);
   };
 
-  // 4. Loading State cho Authentication
+  // Handler to select mail and sync focusedIndex
+  const handleSelectMail = (mail: Mail) => {
+    setSelectedMail(mail);
+    // Update focusedIndex to match the selected mail
+    const index = mails.findIndex(m => m.id === mail.id);
+    if (index !== -1) {
+      setFocusedIndex(index);
+    }
+  };
+
+  // 4. Keyboard Navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'arrowup':
+          e.preventDefault();
+          // Navigate up in email list
+          if (focusedIndex > 0) {
+            const newIndex = focusedIndex - 1;
+            setFocusedIndex(newIndex);
+            if (mails[newIndex]) {
+              setSelectedMail(mails[newIndex]);
+            }
+          }
+          break;
+
+        case 'arrowdown':
+          e.preventDefault();
+          // Navigate down in email list
+          if (focusedIndex < mails.length - 1) {
+            const newIndex = focusedIndex + 1;
+            setFocusedIndex(newIndex);
+            if (mails[newIndex]) {
+              setSelectedMail(mails[newIndex]);
+            }
+          }
+          break;
+
+        case 'enter':
+          e.preventDefault();
+          // Open selected email
+          if (mails[focusedIndex]) {
+            setSelectedMail(mails[focusedIndex]);
+          }
+          break;
+
+        case 'escape':
+          e.preventDefault();
+          // Close email detail view (mobile)
+          setSelectedMail(null);
+          break;
+
+        case 'c':
+          e.preventDefault();
+          // TODO: Open compose modal
+          console.log('[Keyboard] Compose new email (c)');
+          break;
+
+        case 'r':
+          e.preventDefault();
+          // TODO: Reply to selected email
+          if (selectedMail) {
+            console.log('[Keyboard] Reply (r) to:', selectedMail.id);
+          }
+          break;
+
+        case 'a':
+          e.preventDefault();
+          // TODO: Reply all to selected email
+          if (selectedMail) {
+            console.log('[Keyboard] Reply All (a) to:', selectedMail.id);
+          }
+          break;
+
+        case 'f':
+          e.preventDefault();
+          // TODO: Forward selected email
+          if (selectedMail) {
+            console.log('[Keyboard] Forward (f):', selectedMail.id);
+          }
+          break;
+
+        case '#':
+        case 'delete':
+          e.preventDefault();
+          // TODO: Delete selected email
+          if (selectedMail) {
+            console.log('[Keyboard] Delete (#):', selectedMail.id);
+          }
+          break;
+
+        case 's':
+          e.preventDefault();
+          // TODO: Star/Unstar selected email
+          if (selectedMail) {
+            console.log('[Keyboard] Star (s):', selectedMail.id);
+          }
+          break;
+
+        case 'e':
+          e.preventDefault();
+          // TODO: Archive selected email
+          if (selectedMail) {
+            console.log('[Keyboard] Archive (e):', selectedMail.id);
+          }
+          break;
+
+        case 'u':
+          e.preventDefault();
+          // TODO: Mark as unread
+          if (selectedMail) {
+            console.log('[Keyboard] Mark Unread (u):', selectedMail.id);
+          }
+          break;
+
+        default:
+          break;
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mails, selectedMail, focusedIndex]);
+
+  // 6. Loading State cho Authentication
   if (isAuthLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
@@ -133,7 +270,7 @@ export default function Home() {
     return null;
   }
 
-  // 5. Render chính
+  // 7. Render chính
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
       <SideBar
@@ -166,7 +303,8 @@ export default function Home() {
               toggleSidebar={toggleSidebar}
               mails={mails}
               selectedMail={selectedMail}
-              onSelectMail={setSelectedMail}
+              onSelectMail={handleSelectMail}
+              focusedIndex={focusedIndex}
             />
           )}
         </div>
