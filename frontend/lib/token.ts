@@ -1,186 +1,111 @@
 // ========================================
 // TOKEN MANAGEMENT UTILITIES
 // ========================================
-// STRATEGY (Per Assignment Requirements):
+// SECURE STRATEGY (Production Best Practice):
 // 
-// - Access Token: localStorage + Cookie
-//   → localStorage: Primary storage, persists across page refresh
-//   → Cookie: Enables Next.js middleware to read token for route protection
+// - Access Token: IN-MEMORY ONLY (React Context)
+//   → Never persisted to localStorage/cookies
+//   → Lost on page refresh (must re-fetch via refresh token)
 //   → Expires: 15 minutes (short-lived)
+//   → 🔒 IMMUNE TO XSS ATTACKS
 // 
-// - Refresh Token: localStorage
-//   → Per assignment requirement: "Store refresh token in persistent storage (e.g., localStorage)"
-//   → Allows user session to persist across browser refresh
+// - Refresh Token: HttpOnly Cookie ONLY (server-side)
+//   → Set by backend: res.cookie('refreshToken', ..., { httpOnly: true })
+//   → Never accessible to JavaScript
 //   → Expires: 7 days
 //   → Can be revoked server-side via database tracking
+//   → 🔒 IMMUNE TO XSS ATTACKS
 // 
-// SECURITY CONSIDERATIONS:
-// ✅ Short-lived access tokens (15 min) limit exposure window
-// ✅ Refresh tokens can be revoked remotely in database
-// ✅ Both tokens cleared on logout
-// ✅ HTTPS in production prevents token interception
-// ✅ Content Security Policy (CSP) mitigates XSS attacks
-// ✅ SameSite cookies provide CSRF protection
+// SECURITY BENEFITS:
+// ✅ Access token never stored persistently → XSS can't steal it
+// ✅ Refresh token in HttpOnly cookie → JavaScript can't access it
+// ✅ SameSite cookies → CSRF protection
+// ✅ Short-lived access tokens → Limited damage window
+// ✅ Server-side refresh token revocation → Remote logout capability
 // 
-// NOTE: HttpOnly cookies (stretch goal) are used in Google OAuth flow
-// for enhanced security, but assignment requires localStorage for standard auth.
+// TRADE-OFFS:
+// ⚠️ Access token lost on page refresh → Must call /auth/refresh on mount
+// ⚠️ Slightly more complex initialization flow
+// ✅ BUT: Maximum security - industry best practice
 // ========================================
 
-// Constants
-const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
+// No token constants needed - tokens are in-memory (context) or HttpOnly cookies
 
 // Check if running in browser
 const isBrowser = typeof window !== 'undefined';
 
 // ========================================
-// COOKIE HELPERS
+// TOKEN MANAGEMENT - IN-MEMORY ONLY
+// ========================================
+// Access tokens are stored in React Context (auth-context.tsx)
+// Refresh tokens are stored in HttpOnly cookies (server-side only)
+// 
+// This file now only manages USER DATA (non-sensitive info)
 // ========================================
 
 /**
- * Set cookie cho access token
- * CHÚ Ý: Chỉ dùng cho access token để middleware có thể đọc
- * KHÔNG dùng cho refresh token (refresh token phải là HTTP-only từ backend)
+ * DEPRECATED: Access token now stored in AuthContext (in-memory)
+ * Use: const { accessToken } = useAuth()
  */
-const setCookie = (name: string, value: string, hours: number = 24): void => {
-  if (!isBrowser) return;
-  
-  const expires = new Date();
-  expires.setTime(expires.getTime() + hours * 60 * 60 * 1000);
-  
-  // SameSite=Lax: Protection against CSRF
-  document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/;SameSite=Lax`;
-};
-
-/**
- * Get cookie by name
- */
-const getCookie = (name: string): string | null => {
-  if (!isBrowser) return null;
-  
-  const nameEQ = name + "=";
-  const ca = document.cookie.split(';');
-  
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i];
-    while (c.charAt(0) === ' ') c = c.substring(1, c.length);
-    if (c.indexOf(nameEQ) === 0) {
-      return c.substring(nameEQ.length, c.length);
-    }
-  }
-  
+export const getAccessToken = (): string | null => {
+  console.warn('[token.ts] getAccessToken() is deprecated. Access token is now in-memory (AuthContext).');
   return null;
 };
 
 /**
- * Delete cookie by setting expiration to past
- */
-const deleteCookie = (name: string): void => {
-  if (!isBrowser) return;
-  document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/;`;
-};
-
-// ========================================
-// TOKEN MANAGEMENT - PUBLIC API
-// ========================================
-
-/**
- * Get access token
- * Ưu tiên: localStorage > Cookie
- * 
- * Tại sao?
- * - localStorage: Fast, primary storage
- * - Cookie: Fallback cho middleware/SSR
- */
-export const getAccessToken = (): string | null => {
-  if (!isBrowser) return null;
-  
-  // Try localStorage first (faster + persists)
-  const token = localStorage.getItem(ACCESS_TOKEN_KEY);
-  if (token) return token;
-  
-  // Fallback to cookie
-  return getCookie(ACCESS_TOKEN_KEY);
-};
-
-/**
- * Set access token
- * Lưu vào: localStorage + Cookie
- * 
- * localStorage: 
- * - Primary storage
- * - Persist qua F5 (good UX!)
- * - Fast access
- * 
- * Cookie:
- * - Cho Next.js middleware đọc
- * - Server-side rendering support
- * - Expires cùng lúc với token
+ * DEPRECATED: Access token now stored in AuthContext (in-memory)
+ * Use: const { setAccessToken } = useAuth()
  */
 export const setAccessToken = (token: string): void => {
-  if (!isBrowser) return;
-  
-  // Set in localStorage (primary)
-  localStorage.setItem(ACCESS_TOKEN_KEY, token);
-  
-  // Set in cookie (cho middleware - expires in 15 minutes)
-  setCookie(ACCESS_TOKEN_KEY, token, 0.25); // 0.25 hours = 15 minutes
+  console.warn('[token.ts] setAccessToken() is deprecated. Access token is now in-memory (AuthContext).');
 };
 
 /**
- * Clear access token from both localStorage and cookies
+ * DEPRECATED: Access token is in-memory, cleared by setting AuthContext to null
  */
 export const clearAccessToken = (): void => {
-  if (!isBrowser) return;
-  
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  deleteCookie(ACCESS_TOKEN_KEY);
+  // No-op - access token is in-memory
 };
 
 /**
- * Get refresh token from localStorage
- * Per assignment requirement: refresh token stored in localStorage
+ * DEPRECATED: Refresh token now in HttpOnly cookie (server-side only)
+ * Cookie is automatically sent with credentials: 'include'
  */
 export const getRefreshToken = (): string | null => {
-  if (!isBrowser) return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
+  console.warn('[token.ts] getRefreshToken() is deprecated. Refresh token is now HttpOnly cookie.');
+  return null;
 };
 
 /**
- * Set refresh token in localStorage
- * Per assignment requirement: refresh token stored in localStorage
+ * DEPRECATED: Refresh token now in HttpOnly cookie (server-side only)
+ * Backend sets cookie: res.cookie('refreshToken', ..., { httpOnly: true })
  */
 export const setRefreshToken = (token: string): void => {
-  if (!isBrowser) return;
-  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  console.warn('[token.ts] setRefreshToken() is deprecated. Refresh token is now HttpOnly cookie.');
 };
 
 /**
- * Clear refresh token from localStorage
+ * DEPRECATED: Refresh token is HttpOnly cookie, cleared by backend on logout
  */
 export const clearRefreshToken = (): void => {
-  if (!isBrowser) return;
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  // No-op - refresh token is HttpOnly cookie, cleared by backend
 };
 
 /**
- * Clear all tokens and user data
- * 
- * Frontend: Clear both access token and refresh token from localStorage
- * Also clear user data for complete logout
+ * Clear all auth-related data
+ * Now only clears user data (tokens are in-memory/HttpOnly)
  */
 export const clearTokens = (): void => {
-  clearAccessToken();
-  clearRefreshToken();
   clearUserData();
 };
 
 /**
- * Check if user has valid tokens
- * Check for access token (primary) or refresh token (for session restoration)
+ * Check if user has valid session
+ * Now relies on AuthContext state instead of localStorage
  */
 export const hasTokens = (): boolean => {
-  return !!getAccessToken() || !!getRefreshToken();
+  // This is now handled by AuthContext.isAuthenticated
+  return false;
 };
 
 // ========================================

@@ -4,12 +4,16 @@ import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
+import { useEffect, useRef } from "react";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
   selectedMail?: Mail | null;
   mails: Mail[];
   onSelectMail: (mail: Mail) => void;
+  focusedIndex?: number;
+  isLoadingMore?: boolean;
+  hasMore?: boolean;
 }
 
 const MailBox = ({
@@ -17,11 +21,27 @@ const MailBox = ({
   selectedMail,
   mails,
   onSelectMail,
+  focusedIndex = 0,
+  isLoadingMore = false,
+  hasMore = true,
 }: MailBoxProps) => {
+  // Ref to track focused mail item for scroll-into-view
+  const focusedItemRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll focused item into view when focusedIndex changes
+  useEffect(() => {
+    if (focusedItemRef.current) {
+      focusedItemRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+      });
+    }
+  }, [focusedIndex]);
+
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
   return (
-    <div className="flex flex-col w-full bg-background border-x border-amber-50/50 h-full overflow-y-auto scrollbar-hide">
+    <div className="mailbox-scroll-container flex flex-col w-full bg-background border-x border-amber-50/50 h-full overflow-y-auto scrollbar-hide">
       {/* ... (Phần Header, Search, Filter Buttons giữ nguyên) ... */}
       <div className="flex flex-row justify-between p-5 sticky top-0 bg-background z-10">
         <div className="flex flex-row items-center gap-2">
@@ -61,19 +81,21 @@ const MailBox = ({
         <div className="mt-8">
           <div className="flex flex-col gap-2 ">
             {mails && mails.length > 0 ? (
-              mails.map((mail) => {
+              mails.map((mail, index) => {
                 const isSelected = selectedMail?.id === mail.id;
+                const isFocused = focusedIndex === index;
 
                 return (
                   <div
                     key={mail.id}
+                    ref={isFocused ? focusedItemRef : null}
                     onClick={() => onSelectMail(mail)}
                     className={`
                       flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border
                       ${
                         isSelected
                           ? "bg-primary/10 border-primary/50 shadow-sm"
-                          : "bg-secondary/5 border-transparent hover:bg-secondary/10"
+                          : isFocused
                       }
                     `}
                   >
@@ -125,6 +147,21 @@ const MailBox = ({
             ) : (
               <div className="text-center text-secondary text-sm mt-5">
                 No mails found.
+              </div>
+            )}
+            
+            {/* Loading More Indicator */}
+            {isLoadingMore && (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <span className="ml-2 text-sm text-secondary">Loading more...</span>
+              </div>
+            )}
+            
+            {/* End of List Indicator */}
+            {!hasMore && mails.length > 0 && (
+              <div className="text-center text-secondary text-xs py-4">
+                No more emails to load
               </div>
             )}
           </div>

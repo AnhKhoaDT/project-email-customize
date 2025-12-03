@@ -9,13 +9,15 @@ interface LogoutButtonProps {
   size?: "default" | "sm" | "lg" | "icon";
   className?: string;
   showIcon?: boolean;
+  showText?: boolean;
 }
 
 export default function LogoutButton({ 
   variant = "outline", 
   size = "default",
   className = "",
-  showIcon = true 
+  showIcon = true,
+  showText = true 
 }: LogoutButtonProps) {
   const { logout, isLoading } = useLogoutMutation();
 
@@ -28,7 +30,7 @@ export default function LogoutButton({
       className={className}
     >
       {showIcon && <LogOut className="h-4 w-4" />}
-      {isLoading ? 'Logging out...' : 'Logout'}
+      {showText && (isLoading ? 'Logging out...' : 'Logout')}
     </Button>
   );
 }
