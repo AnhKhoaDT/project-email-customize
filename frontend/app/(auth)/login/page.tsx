@@ -20,7 +20,6 @@ import { useGoogleLoginMutation } from "@/hooks/useGoogleLoginMutation"
 import { useGoogleLogin as useGoogleOAuth } from '@react-oauth/google'
 import { Mail, Eye, EyeOff } from "lucide-react"
 import { useState } from "react"
-import ThemeSwitcher from "@/components/theme-switcher"
 
 // Define a schema for form validation
 const loginSchema = z.object({

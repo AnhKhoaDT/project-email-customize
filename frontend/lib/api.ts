@@ -1,15 +1,30 @@
 // ========================================
-// AXIOS API CLIENT
+// AXIOS API CLIENT - SECURE TOKEN STRATEGY
 // ========================================
 // Features:
 // - Auto attach access token to requests (Authorization: Bearer)
-// - Auto refresh token on 401 Unauthorized
+// - Auto refresh token on 401 Unauthorized via HttpOnly cookie
 // - Concurrency handling: multiple failed requests trigger only one refresh
-// - Refresh token sent from localStorage in request body (per assignment)
+// 
+// Security:
+// 🔒 Access token: Retrieved from window.__accessToken (set by interceptor)
+// 🔒 Refresh token: HttpOnly cookie (sent automatically with credentials)
 // ========================================
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { getAccessToken, setAccessToken, clearTokens } from './token';
+import { clearTokens } from './token';
+
+// Global in-memory token storage (window object)
+// This is accessible across the app but not persisted
+declare global {
+  interface Window {
+    __accessToken: string | null;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__accessToken = null;
+}
 
 // Base URL từ environment variable
 const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_API_URL || 'http://localhost:5000';
@@ -31,7 +46,8 @@ const api = axios.create({
 
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = getAccessToken();
+    // Get access token from global in-memory storage
+    const token = typeof window !== 'undefined' ? window.__accessToken : null;
     
     if (token) {
       // Attach Bearer token to Authorization header
@@ -77,7 +93,6 @@ const onTokenRefreshed = (token: string) => {
 const refreshAccessToken = async (): Promise<string> => {
   try {
     console.log('[API] Attempting to refresh token from HttpOnly cookie...');
-    console.log('[API] Visible cookies:', document.cookie);
     
     // Call refresh endpoint - refreshToken sent via HttpOnly cookie
     const response = await axios.post(
@@ -90,17 +105,22 @@ const refreshAccessToken = async (): Promise<string> => {
     );
     
     const { accessToken } = response.data;
-    console.log('[API] Token refresh successful!');
+    console.log('[API] ✅ Token refresh successful!');
     
-    // Save new access token
-    setAccessToken(accessToken);
+    // Save new access token to global in-memory storage
+    if (typeof window !== 'undefined') {
+      window.__accessToken = accessToken;
+    }
     
     return accessToken;
   } catch (error: any) {
-    console.error('[API] Token refresh failed:', error?.response?.status, error?.response?.data);
+    console.error('[API] ❌ Token refresh failed:', error?.response?.status, error?.response?.data);
     
-    // Refresh failed → logout user
+    // Refresh failed → clear tokens
     clearTokens();
+    if (typeof window !== 'undefined') {
+      window.__accessToken = null;
+    }
     
     // DON'T redirect automatically - let the app handle it
     // The useUserQuery will set isAuthenticated=false and the page will redirect
@@ -165,5 +185,29 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ========================================
+// HELPER FUNCTIONS
+// ========================================
+
+/**
+ * Set access token in global in-memory storage
+ * Called by login/refresh flows to update the token
+ */
+export const setGlobalAccessToken = (token: string | null): void => {
+  if (typeof window !== 'undefined') {
+    window.__accessToken = token;
+  }
+};
+
+/**
+ * Get access token from global in-memory storage
+ */
+export const getGlobalAccessToken = (): string | null => {
+  if (typeof window !== 'undefined') {
+    return window.__accessToken;
+  }
+  return null;
+};
 
 export default api;
