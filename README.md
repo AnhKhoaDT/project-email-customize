@@ -31,7 +31,7 @@ A full-stack single-page application implementing secure authentication (Email+P
 
 This project demonstrates a production-ready React application with:
 - ✅ **Secure Authentication**: Email/password login + Google OAuth Sign-In
-- ✅ **Token Management**: Access tokens (in-memory) + refresh tokens (localStorage)
+- ✅ **Token Management**: Access tokens (in-memory) + refresh tokens (HttpOnly cookies)
 - ✅ **Automatic Token Refresh**: Seamless token renewal with concurrency handling
 - ✅ **Protected Routes**: Authentication guards for private pages
 - ✅ **3-Column Email Dashboard**: Folders | Email List | Email Detail
@@ -493,47 +493,240 @@ Key directories:
 **Implemented:**
 - `↑/↓` - Navigate through email list
 - `c` - Compose new email
+- `r` - Reply to selected email
 - `f` - Forward selected email
 - `Esc` - Close email detail (mobile)
 
 **Planned:**
-- `r` Reply, `a` Reply All, `#` Delete, `s` Star, `e` Archive, `u` Mark Unread
+- `a` Reply All, `#` Delete, `s` Star, `e` Archive, `u` Mark Unread
 
 ## 🔒 Security Considerations
 
-### Implemented Measures
-- XSS Protection: CSP headers, input sanitization, DOMPurify, React escaping
-- CSRF Protection: Token-based auth (not cookie-based)
-- Token Security: Short lifetime, rotation, server-side revocation, HTTPS
-- Password Security: bcrypt hashing, strength validation, rate limiting
-- API Security: JWT verification, CORS whitelist, rate limiting
-- OAuth Security: Google token validation, encrypted storage
+### Token Storage Strategy - Design Justification
 
-### Known Limitations
-- localStorage XSS vulnerability (mitigated by CSP, sanitization, short token lifetime)
-- Token theft risk (mitigated by HTTPS, rotation, revocation)
+#### Why In-Memory Access Token?
+**Decision:** Store access token in memory (`window.__accessToken` + React Context)
+
+**Rationale:**
+- **XSS Immunity:** Not accessible via `document.cookie` or `localStorage` - prevents XSS token theft
+- **Short Lifetime:** 15-minute expiration limits exposure window
+- **Auto-Refresh:** Seamless renewal via refresh token when expired
+- **Trade-off:** Lost on page refresh, but immediately restored via `/auth/refresh` call
+
+**Why NOT localStorage?**
+- Vulnerable to XSS attacks (malicious scripts can read `localStorage.getItem('token')`)
+- Persistent storage = longer exposure if compromised
+- No built-in expiration mechanism
+
+#### Why HttpOnly Cookie for Refresh Token?
+**Decision:** Store refresh token in HttpOnly, Secure, SameSite cookie (server-side only)
+
+**Rationale:**
+- **XSS Protection:** JavaScript cannot access HttpOnly cookies
+- **CSRF Protection:** SameSite=Strict prevents cross-site requests
+- **Secure Flag:** Only transmitted over HTTPS in production
+- **Server-Side Control:** Backend manages rotation and revocation
+
+**Why NOT localStorage for refresh token?**
+- 7-day lifetime means higher risk if exposed via XSS
+- No automatic secure transmission flags
+
+### Implemented Security Measures
+
+**Authentication:**
+- ✅ JWT tokens with short access token lifetime (15 min)
+- ✅ Refresh token rotation on each use
+- ✅ bcrypt password hashing (10 rounds)
+- ✅ Google OAuth 2.0 with token validation
+- ✅ Session tracking in database for revocation
+
+**API Security:**
+- ✅ CORS whitelist (only frontend origin allowed)
+- ✅ JWT verification on protected routes
+- ✅ Rate limiting on auth endpoints
+- ✅ Request validation with DTO schemas
+
+**XSS Protection:**
+- ✅ React automatic escaping
+- ✅ CSP headers (Content-Security-Policy)
+- ✅ Input sanitization on backend
+- ✅ In-memory token storage
+
+**CSRF Protection:**
+- ✅ Token-based auth (not session cookies)
+- ✅ SameSite cookie attribute
+- ✅ Origin validation
+
+### Known Limitations & Mitigations
+
+| Threat | Risk | Mitigation |
+|--------|------|------------|
+| XSS Attack | High | In-memory tokens, CSP headers, React escaping |
+| Token Theft | Medium | Short lifetime, HTTPS only, auto-rotation |
+| CSRF | Low | Token-based auth, SameSite cookies |
+| Man-in-the-Middle | High | HTTPS enforced in production |
+| Brute Force | Medium | Rate limiting, account lockout (TODO) |
+
+### Security Best Practices Applied
+1. **Principle of Least Privilege:** Tokens only grant necessary Gmail scopes
+2. **Defense in Depth:** Multiple layers (in-memory + HttpOnly + short lifetime)
+3. **Fail Securely:** Auth errors = logout + redirect to login
+4. **Audit Trail:** Sessions table tracks all active tokens
 
 ## 🚀 Deployment
 
-### Frontend (Vercel/Netlify)
-1. Connect GitHub repository
-2. Set build command: `npm run build`
-3. Set environment variables
-4. Deploy
+### Prerequisites
+1. **Google Cloud OAuth Credentials** (see Google Cloud Setup below)
+2. **MongoDB Atlas Database** (see Database Setup below)
+3. **GitHub Repository** with code pushed
 
-### Backend (Render/Railway)
-1. Connect GitHub repository
-2. Select `backend` directory
-3. Set build command: `npm install && npm run build`
-4. Set start command: `npm run start:prod`
-5. Set environment variables
-6. Deploy
+### Frontend Deployment (Vercel)
 
-### MongoDB Atlas
-1. Create cluster
-2. Create database user
-3. Whitelist IP addresses
-4. Get connection string
+#### Step 1: Connect Repository
+1. Go to [vercel.com](https://vercel.com)
+2. Click "Add New" → "Project"
+3. Import your GitHub repository
+4. Select root directory: `frontend`
+
+#### Step 2: Configure Build Settings
+```
+Framework Preset: Next.js
+Build Command: npm run build
+Output Directory: .next
+Install Command: npm install
+Root Directory: frontend
+```
+
+#### Step 3: Environment Variables
+Add these in Vercel dashboard:
+```env
+NEXT_PUBLIC_BACKEND_API_URL=https://your-backend.onrender.com
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+BASE_URL=https://your-frontend.vercel.app
+```
+
+#### Step 4: Deploy
+- Click "Deploy"
+- Wait for build to complete
+- Copy deployment URL
+
+#### Step 5: Update Google OAuth
+1. Go to Google Cloud Console
+2. Add Vercel URL to authorized origins: `https://your-frontend.vercel.app`
+3. Add callback URL: `https://your-frontend.vercel.app/callback`
+
+---
+
+### Backend Deployment (Render)
+
+#### Step 1: Create Web Service
+1. Go to [render.com](https://render.com)
+2. Click "New" → "Web Service"
+3. Connect GitHub repository
+4. Select repository
+
+#### Step 2: Configure Service
+```
+Name: email-dashboard-api
+Region: Oregon (US West)
+Branch: main
+Root Directory: backend
+Runtime: Node
+Build Command: npm install && npm run build
+Start Command: npm run start:prod
+```
+
+#### Step 3: Environment Variables
+Add these in Render dashboard:
+```env
+# Database
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/emaildb
+
+# JWT Secrets (generate with: openssl rand -base64 32)
+ACCESS_TOKEN_SECRET=your-access-token-secret-min-32-chars
+REFRESH_TOKEN_SECRET=your-refresh-token-secret-min-32-chars
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_CALLBACK_URL=https://your-backend.onrender.com/auth/google/callback
+
+# Frontend URL (for CORS)
+FE_URL=https://your-frontend.vercel.app
+
+# Port (Render assigns automatically)
+PORT=5000
+```
+
+#### Step 4: Deploy
+- Click "Create Web Service"
+- Wait for build and deploy
+- Copy service URL
+
+#### Step 5: Update Google OAuth
+1. Go to Google Cloud Console
+2. Add backend URL to authorized redirect URIs:
+   - `https://your-backend.onrender.com/auth/google/callback`
+
+---
+
+### MongoDB Atlas Setup
+
+#### Step 1: Create Cluster
+1. Go to [cloud.mongodb.com](https://cloud.mongodb.com)
+2. Sign up / Log in
+3. Click "Build a Database"
+4. Choose **FREE Shared Cluster** (M0)
+5. Select cloud provider: AWS
+6. Region: Choose closest to backend (e.g., Oregon)
+7. Cluster name: `EmailCluster`
+8. Click "Create"
+
+#### Step 2: Create Database User
+1. Go to "Database Access" tab
+2. Click "Add New Database User"
+3. Authentication: Password
+4. Username: `emailapp`
+5. Password: Generate secure password (save it!)
+6. Database User Privileges: "Read and write to any database"
+7. Click "Add User"
+
+#### Step 3: Whitelist IP Addresses
+1. Go to "Network Access" tab
+2. Click "Add IP Address"
+3. For development: Click "Allow Access from Anywhere" (0.0.0.0/0)
+4. For production: Add Render's IP ranges (see Render docs)
+5. Click "Confirm"
+
+#### Step 4: Get Connection String
+1. Go to "Database" tab
+2. Click "Connect" on your cluster
+3. Choose "Connect your application"
+4. Driver: Node.js, Version: 4.1 or later
+5. Copy connection string:
+```
+mongodb+srv://emailapp:<password>@emailcluster.xxxxx.mongodb.net/?retryWrites=true&w=majority
+```
+6. Replace `<password>` with your actual password
+7. Add database name: `mongodb+srv://emailapp:password@emailcluster.xxxxx.mongodb.net/emaildb`
+
+---
+
+### Post-Deployment Checklist
+
+- [ ] Frontend loads without errors
+- [ ] Backend health check responds: `GET https://your-backend.onrender.com/health`
+- [ ] CORS configured correctly (frontend can call backend)
+- [ ] Google OAuth works (test Sign In with Google)
+- [ ] Email/password login works
+- [ ] JWT tokens issued and stored correctly
+- [ ] Gmail API calls succeed (inbox loads)
+- [ ] Compose/Reply/Forward work
+- [ ] Token refresh works (wait 15 min, check auto-renewal)
+- [ ] Logout clears tokens
+- [ ] MongoDB collections populated (users, sessions)
+- [ ] HTTPS enforced (redirect HTTP → HTTPS)
+- [ ] Environment variables match between services
 
 ## 📸 Screenshots
 
@@ -547,17 +740,191 @@ Key directories:
 - Dark mode
 - Demo video/GIF
 
-## 🔧 Third-Party Services
+## 🔧 Google Cloud Setup Guide
 
-### Google Cloud Platform
-- OAuth 2.0 authentication
-- Gmail API integration
-- Setup: https://console.cloud.google.com
+### Step 1: Create Google Cloud Project
 
-### MongoDB Atlas
-- Database hosting
-- Free tier available
-- Setup: https://cloud.mongodb.com
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Click project dropdown → "New Project"
+3. Project name: `Email Dashboard App`
+4. Organization: (leave as is)
+5. Click "Create"
+6. Wait for project creation, then select it
+
+### Step 2: Enable Gmail API
+
+1. In sidebar, go to **"APIs & Services"** → **"Library"**
+2. Search for "Gmail API"
+3. Click "Gmail API" card
+4. Click **"Enable"** button
+5. Wait for activation (30 seconds)
+
+### Step 3: Configure OAuth Consent Screen
+
+1. Go to **"APIs & Services"** → **"OAuth consent screen"**
+2. Select **"External"** (for testing with any Google account)
+3. Click **"Create"**
+
+#### App Information
+```
+App name: Email Dashboard
+User support email: your-email@gmail.com
+App logo: (optional)
+```
+
+#### App Domain
+```
+Application home page: https://your-frontend.vercel.app
+Application privacy policy: https://your-frontend.vercel.app/privacy
+Application terms of service: https://your-frontend.vercel.app/terms
+```
+(Note: For testing, you can use placeholder URLs)
+
+#### Developer Contact
+```
+Email addresses: your-email@gmail.com
+```
+
+4. Click **"Save and Continue"**
+
+#### Scopes
+5. Click **"Add or Remove Scopes"**
+6. Select these Gmail API scopes:
+```
+https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.send
+https://www.googleapis.com/auth/gmail.modify
+https://www.googleapis.com/auth/gmail.compose
+```
+7. Click **"Update"** → **"Save and Continue"**
+
+#### Test Users (for External app)
+8. Click **"Add Users"**
+9. Add your test email addresses (max 100):
+```
+your-email@gmail.com
+tester@example.com
+```
+10. Click **"Add"** → **"Save and Continue"**
+
+#### Summary
+11. Review settings
+12. Click **"Back to Dashboard"**
+
+### Step 4: Create OAuth 2.0 Credentials
+
+1. Go to **"APIs & Services"** → **"Credentials"**
+2. Click **"+ Create Credentials"** → **"OAuth client ID"**
+
+#### Application Type
+3. Select **"Web application"**
+
+#### Configuration
+```
+Name: Email Dashboard Web Client
+```
+
+#### Authorized JavaScript Origins
+4. Click **"+ Add URI"** and add:
+```
+Development:
+http://localhost:3000
+http://localhost:5000
+
+Production:
+https://your-frontend.vercel.app
+https://your-backend.onrender.com
+```
+
+#### Authorized Redirect URIs
+5. Click **"+ Add URI"** and add:
+```
+Development:
+http://localhost:5000/auth/google/callback
+http://localhost:3000/callback
+
+Production:
+https://your-backend.onrender.com/auth/google/callback
+https://your-frontend.vercel.app/callback
+```
+
+6. Click **"Create"**
+
+#### Save Credentials
+7. Modal shows **Client ID** and **Client Secret**
+8. **IMPORTANT:** Copy and save both:
+```
+Client ID: 123456789-abcdefghijklmnop.apps.googleusercontent.com
+Client Secret: GOCSPX-aBcDeFgHiJkLmNoPqRsTuVwXyZ
+```
+9. Click **"OK"**
+
+### Step 5: Add Credentials to Environment Variables
+
+#### Backend (.env)
+```env
+GOOGLE_CLIENT_ID=123456789-abcdefghijklmnop.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-aBcDeFgHiJkLmNoPqRsTuVwXyZ
+GOOGLE_CALLBACK_URL=http://localhost:5000/auth/google/callback
+```
+
+#### Frontend (.env.local)
+```env
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=123456789-abcdefghijklmnop.apps.googleusercontent.com
+```
+
+### Step 6: Test OAuth Flow
+
+1. Start backend: `cd backend && npm run start:dev`
+2. Start frontend: `cd frontend && npm run dev`
+3. Open browser: `http://localhost:3000/login`
+4. Click **"Sign in with Google"**
+5. Google consent screen should appear
+6. Select test account
+7. Review permissions:
+   - Read email
+   - Send email  
+   - Modify labels
+8. Click **"Allow"**
+9. Should redirect back to app with tokens
+10. Check console logs for successful token exchange
+
+### Step 7: Publish App (Optional)
+
+For production with >100 users:
+
+1. Go to **"OAuth consent screen"**
+2. Click **"Publish App"**
+3. Click **"Confirm"**
+4. Google will review your app (1-2 weeks)
+5. Once approved, app status: **"In Production"**
+6. Remove test user restrictions
+
+### Troubleshooting
+
+**Error: redirect_uri_mismatch**
+- Solution: Double-check redirect URIs match exactly (including http/https, trailing slashes)
+
+**Error: Access blocked - App not verified**
+- Solution: Click "Advanced" → "Go to Email Dashboard (unsafe)" during testing
+- For production: Complete Google's verification process
+
+**Error: Invalid client**
+- Solution: Verify CLIENT_ID and CLIENT_SECRET are correct
+
+**Error: Gmail API not enabled**
+- Solution: Enable Gmail API in "APIs & Services" → "Library"
+
+---
+
+## 📚 Third-Party Services Summary
+
+| Service | Purpose | Plan | Setup Guide |
+|---------|---------|------|-------------|
+| **Google Cloud Platform** | OAuth 2.0 + Gmail API | Free (with quotas) | See above |
+| **MongoDB Atlas** | Database hosting | Free M0 Cluster (512 MB) | See Deployment section |
+| **Vercel** | Frontend hosting | Free (Hobby plan) | See Deployment section |
+| **Render** | Backend hosting | Free (with spin-down) | See Deployment section |
 
 ### Vercel/Netlify
 - Frontend hosting

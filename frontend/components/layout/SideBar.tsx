@@ -219,7 +219,14 @@ const SideBar = ({ user, isExpanded, toggleSidebar, onComposeClick }: SideBarPro
             {isExpanded && <span>Help & Feedback</span>}
           </button>
 
-          <div className="mt-4 flex justify-between items-center"><ThemeSwitcher /> <LogoutButton /></div>
+          <div 
+            className={`mt-4 flex items-center ${
+              isExpanded ? "flex-row justify-between gap-2" : "flex-col gap-3"
+            }`}
+          >
+            <ThemeSwitcher /> 
+            <LogoutButton showText={isExpanded} size={isExpanded ? "default" : "icon"} />
+          </div>
 
         </div>
       </div>

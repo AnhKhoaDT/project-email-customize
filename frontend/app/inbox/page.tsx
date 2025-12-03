@@ -24,6 +24,11 @@ export default function Home() {
   const [isMailsLoading, setIsMailsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
+  // Pagination state
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  
   // State for keyboard navigation
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   
@@ -44,7 +49,7 @@ export default function Home() {
     }
   }, [isAuthenticated, isAuthLoading, router]);
 
-  // 2. Call API lấy danh sách mail
+  // 2. Call API lấy danh sách mail (initial load)
   useEffect(() => {
     // Chỉ gọi API khi đã xác thực user thành công
     if (isAuthenticated) {
@@ -53,12 +58,8 @@ export default function Home() {
           setIsMailsLoading(true);
           setError(null);
 
-          // Thay '/api/mails' bằng endpoint thực tế của bạn
-          // Ví dụ: const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/emails`);
-          const id = "INBOX"; // Hoặc lấy từ nơi khác nếu cần
-          const limit = 50;
-          const page = 1;
-          const pageToken = ""; // Nếu có token phân trang, hãy thay thế ở đây
+          const id = "INBOX";
+          const limit = 20; // Reduced for better infinite scroll UX
           
           // 🔒 Get access token from window (in-memory storage)
           const token = typeof window !== 'undefined' ? window.__accessToken : null;
@@ -72,14 +73,14 @@ export default function Home() {
           const maiURL =
             process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
           const response = await fetch(
-            `${maiURL}/mailboxes/${id}/emails?page=${page}&limit=${limit}&pageToken=${pageToken}`,
+            `${maiURL}/mailboxes/${id}/emails?limit=${limit}`,
             {
               method: "GET",
               headers: {
                 "Content-Type": "application/json",
                 Authorization: `Bearer ${token}`,
               },
-              credentials: 'include',  // 🔒 Send HttpOnly cookie for refresh token
+              credentials: 'include',
             }
           );
 
@@ -89,14 +90,16 @@ export default function Home() {
 
           const data = await response.json();
           console.log("Fetched mails:", data);
-          // Giả sử API trả về mảng mail trong `messages` hoặc trả về mảng trực tiếp
-          // Bảo đảm luôn set một mảng mặc định để tránh `undefined`
+          
           const fetched = Array.isArray(data?.messages)
             ? data.messages
             : Array.isArray(data)
             ? data
             : [];
+          
           setMails(fetched);
+          setNextPageToken(data.nextPageToken || null);
+          setHasMore(!!data.nextPageToken);
         } catch (err: any) {
           console.error("Error fetching mails:", err);
           setError(err.message || "Something went wrong");
@@ -109,7 +112,73 @@ export default function Home() {
     }
   }, [isAuthenticated]);
 
-  // 3. Logic Auto select trên Desktop
+  // Function to load more emails (infinite scroll)
+  const loadMoreMails = async () => {
+    if (!hasMore || isLoadingMore || !nextPageToken) return;
+
+    try {
+      setIsLoadingMore(true);
+      
+      const token = typeof window !== 'undefined' ? window.__accessToken : null;
+      if (!token) return;
+
+      const maiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+      const response = await fetch(
+        `${maiURL}/mailboxes/INBOX/emails?limit=20&pageToken=${nextPageToken}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          credentials: 'include',
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to load more mails");
+
+      const data = await response.json();
+      const newMails = Array.isArray(data?.messages) ? data.messages : [];
+      
+      // Append new emails to existing list, filter out duplicates by ID
+      setMails(prev => {
+        const existingIds = new Set(prev.map(m => m.id));
+        const uniqueNewMails = newMails.filter((m: Mail) => !existingIds.has(m.id));
+        return [...prev, ...uniqueNewMails];
+      });
+      setNextPageToken(data.nextPageToken || null);
+      setHasMore(!!data.nextPageToken);
+    } catch (err: any) {
+      console.error("Error loading more mails:", err);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
+  // 3. Infinite Scroll Handler
+  useEffect(() => {
+    const handleScroll = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains('mailbox-scroll-container')) return;
+
+      const { scrollTop, scrollHeight, clientHeight } = target;
+      const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
+
+      // Load more when scrolled 80% down
+      if (scrollPercentage > 0.8 && hasMore && !isLoadingMore) {
+        loadMoreMails();
+      }
+    };
+
+    // Add scroll listener to mailbox container
+    const mailboxContainer = document.querySelector('.mailbox-scroll-container');
+    if (mailboxContainer) {
+      mailboxContainer.addEventListener('scroll', handleScroll);
+      return () => mailboxContainer.removeEventListener('scroll', handleScroll);
+    }
+  }, [hasMore, isLoadingMore, nextPageToken]);
+
+  // 4. Logic Auto select trên Desktop
   useEffect(() => {
     const isDesktop = window.innerWidth >= 768;
 
@@ -170,7 +239,7 @@ export default function Home() {
     return await response.json();
   };
 
-  // 4. Keyboard Navigation
+  // 5. Keyboard Navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if user is typing in an input/textarea
@@ -349,6 +418,8 @@ export default function Home() {
               selectedMail={selectedMail}
               onSelectMail={handleSelectMail}
               focusedIndex={focusedIndex}
+              isLoadingMore={isLoadingMore}
+              hasMore={hasMore}
             />
           )}
         </div>
