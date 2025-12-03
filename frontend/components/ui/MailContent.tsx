@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CiMail } from "react-icons/ci";
 import {
   IoMdArrowBack,
@@ -20,6 +20,8 @@ interface MailContentProps {
   mail?: Mail | null;
   onBack?: () => void;
   onForwardClick?: () => void;
+  onReplyClick?: () => void;
+  triggerReply?: number;
 }
 
 // ... (Giữ nguyên các hàm Helper: getSenderName, getSenderEmail, formatDate) ...
@@ -49,10 +51,27 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-const MailContent = ({ mail, onBack, onForwardClick }: MailContentProps) => {
+const MailContent = ({ mail, onBack, onForwardClick, onReplyClick, triggerReply }: MailContentProps) => {
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Trigger reply mode from parent (keyboard shortcut)
+  useEffect(() => {
+    if (triggerReply && triggerReply > 0) {
+      setIsReplying(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerReply]);
+
+  // Focus and scroll to reply textarea when reply mode is activated
+  useEffect(() => {
+    if (isReplying && replyTextareaRef.current) {
+      replyTextareaRef.current.focus();
+      replyTextareaRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [isReplying]);
 
   if (!mail) {
     return (
@@ -91,8 +110,8 @@ const MailContent = ({ mail, onBack, onForwardClick }: MailContentProps) => {
     setIsSending(true);
 
     try {
-      // 1. Lấy Token (Thay đổi logic này tùy theo cách bạn lưu token: localStorage, cookie, hay Context)
-      const token = localStorage.getItem("access_token");
+      // 1. Lấy Token từ in-memory storage
+      const token = typeof window !== 'undefined' ? window.__accessToken : null;
 
       if (!token) {
         alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
@@ -234,6 +253,7 @@ const MailContent = ({ mail, onBack, onForwardClick }: MailContentProps) => {
               <span className="text-white">{senderName}</span>
             </div>
             <textarea
+              ref={replyTextareaRef}
               autoFocus
               className="w-full bg-[#1e1e1e] border border-white/20 rounded-md p-4 text-gray-200 focus:outline-none focus:border-blue-500 min-h-[150px] resize-y"
               placeholder="Type your reply here..."

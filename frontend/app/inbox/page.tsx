@@ -32,6 +32,9 @@ export default function Home() {
   
   // State for forward modal
   const [isForwardOpen, setIsForwardOpen] = useState(false);
+  
+  // Counter to trigger reply mode (increment to trigger)
+  const [replyTrigger, setReplyTrigger] = useState(0);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -222,9 +225,9 @@ export default function Home() {
 
         case 'r':
           e.preventDefault();
-          // TODO: Reply to selected email
+          // Reply to selected email
           if (selectedMail) {
-            console.log('[Keyboard] Reply (r) to:', selectedMail.id);
+            setReplyTrigger(prev => prev + 1);
           }
           break;
 
@@ -362,6 +365,8 @@ export default function Home() {
             mail={selectedMail}
             onBack={() => setSelectedMail(null)}
             onForwardClick={() => selectedMail && setIsForwardOpen(true)}
+            onReplyClick={() => setReplyTrigger(prev => prev + 1)}
+            triggerReply={replyTrigger}
           />
         </div>
       </main>
