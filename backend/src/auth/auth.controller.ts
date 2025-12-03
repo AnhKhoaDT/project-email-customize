@@ -16,11 +16,34 @@ export class AuthController {
   }
 
   @Post('google')
-  async google(@Body() body: { token?: string; email?: string; name?: string }) {
-    // Accept either a third-party token (not validated here) or direct email+name for mocking
-    if (!body.email) throw new UnauthorizedException('Google token missing');
-    return this.authService.exchangeGoogleToken({ email: body.email, name: body.name });
+  async google(@Body() body: { code?: string; token?: string }, @Res({ passthrough: true }) res: Response) {
+    // Accept authorization code (recommended) or legacy token (mock)
+    if (!body.code && !body.token) throw new UnauthorizedException('Google code or token missing');
+    
+    const result = await this.authService.exchangeGoogleToken({ code: body.code });
+    
+    // Set app refresh token as HttpOnly cookie
+    const cookieOptions = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax' as const,
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+    };
+    res.cookie('refreshToken', result.refreshToken, cookieOptions);
+    
+    // Return access token + user (omit refreshToken from body since it's in cookie)
+    return {
+      accessToken: result.accessToken,
+      user: { id: result.user._id?.toString() || result.user.id, email: result.user.email, name: result.user.name },
+    };
   }
+
+  // @Post('google')
+  // async google(@Body() body: { token?: string; email?: string; name?: string }) {
+  //   // Accept either a third-party token (not validated here) or direct email+name for mocking
+  //   if (!body.email) throw new UnauthorizedException('Google token missing');
+  //   return this.authService.exchangeGoogleToken({ email: body.email, name: body.name });
+  // }
 
   // Build Google OAuth consent URL; if ?redirect=true is provided, this endpoint will
   // redirect the browser to Google consent directly. Otherwise it returns JSON { url }.

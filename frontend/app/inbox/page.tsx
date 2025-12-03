@@ -67,9 +67,14 @@ export default function Home() {
 
           const data = await response.json();
           console.log("Fetched mails:", data);
-          // Giả sử API trả về mảng mail trực tiếp hoặc object { data: [...] }
-          // Hãy điều chỉnh 'data' hoặc 'data.data' tùy theo response thực tế
-          setMails(data.messages);
+          // Giả sử API trả về mảng mail trong `messages` hoặc trả về mảng trực tiếp
+          // Bảo đảm luôn set một mảng mặc định để tránh `undefined`
+          const fetched = Array.isArray(data?.messages)
+            ? data.messages
+            : Array.isArray(data)
+            ? data
+            : [];
+          setMails(fetched);
         } catch (err: any) {
           console.error("Error fetching mails:", err);
           setError(err.message || "Something went wrong");
@@ -87,7 +92,7 @@ export default function Home() {
     const isDesktop = window.innerWidth >= 768;
 
     // Nếu là desktop, đã load xong mail, có mail, và chưa chọn mail nào
-    if (isDesktop && !isMailsLoading && mails.length > 0 && !selectedMail) {
+    if (isDesktop && !isMailsLoading && Array.isArray(mails) && mails.length > 0 && !selectedMail) {
       // Logic cũ của bạn là setSelectedMail(null) -> có thể bạn muốn giữ trạng thái trống
       // Tuy nhiên, UX tốt thường sẽ auto-select mail đầu tiên:
       // setSelectedMail(mails[0]);

@@ -193,7 +193,86 @@ BASE_URL=http://localhost:3000
 - **Backend:** http://localhost:5000
 - **Login Page:** http://localhost:3000/login
 
-### 5. Test Credentials
+### 5. Quick Start - Login Flow
+
+**Option 1: Email/Password Login**
+```
+1. Truy cập URL: http://localhost:3000
+   → Tự động redirect đến /login (chưa authenticated)
+
+2. Trang Login hiển thị:
+   - Email input field
+   - Password input field
+   - "Sign In" button
+   - "Sign in with Google" button
+   - Link đến Register page
+
+3. Nhập test credentials:
+   Email: demo@demo.com
+   Password: demo123
+
+4. Click "Sign In"
+   → Frontend validates input
+   → POST /auth/login to backend
+   → Backend returns: { accessToken, refreshToken, user }
+   → Tokens được lưu (access: in-memory, refresh: localStorage)
+
+5. Redirect to /inbox
+   → 3-column email dashboard loads
+   → Gmail emails displayed
+```
+
+**Option 2: Google Sign-In**
+```
+1. Truy cập URL: http://localhost:3000/login
+
+2. Click "Sign in with Google" button
+   → Google OAuth popup opens
+   → Chọn Google account
+
+3. Google requests permissions:
+   - Read email
+   - Send email
+   - Modify labels
+   → Click "Allow"
+
+4. Google returns to app với authorization code
+   → Frontend exchanges code for tokens
+   → POST /auth/google to backend
+   → Backend stores Gmail refresh token
+   → Returns app tokens: { accessToken, refreshToken, user }
+
+5. Redirect to /inbox
+   → Your actual Gmail inbox displayed
+   → Can read, reply, compose emails
+```
+
+**After Login:**
+```
+/inbox page shows:
+├── Column 1 (Left): Gmail folders (Inbox, Sent, Starred, etc.)
+├── Column 2 (Center): Email list with previews
+└── Column 3 (Right): Selected email detail
+
+Actions available:
+- Click folder → Load emails from that folder
+- Click email → Show full email in detail pane
+- Compose button → Open new email modal
+- Reply/Forward/Delete buttons in detail pane
+- Star/Unstar emails
+- Mark as Read/Unread
+```
+
+**Logout:**
+```
+1. Click user profile → Logout button (top-right)
+2. POST /auth/logout to backend
+   → Backend revokes refresh token
+3. Frontend clears tokens from memory & localStorage
+4. Redirect to /login
+```
+
+### 6. Test Credentials
 
 **Email/Password Login:**
 - Email: `demo@demo.com`

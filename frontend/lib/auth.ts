@@ -49,17 +49,24 @@ export const register = async (credentials: RegisterCredentials): Promise<User> 
 /**
  * Login với Google OAuth
  * 
- * @param token - Google OAuth token
+ * @param code - Google authorization code
+ * Flow:
+ * 1. POST /auth/google với code
+ * 2. Backend exchanges code with Google, gets tokens
+ * 3. Backend stores Google refresh token server-side
+ * 4. Backend sets app refreshToken as HttpOnly cookie
+ * 5. Backend returns: { accessToken, user }
+ * 6. Frontend only saves accessToken (refreshToken is in cookie)
  */
-export const loginWithGoogle = async (token: string): Promise<LoginResponse> => {
-  const response = await api.post<LoginResponse>('/auth/google', { token });
-  const { accessToken, refreshToken, user } = response.data;
+export const loginWithGoogle = async (code: string): Promise<LoginResponse> => {
+  const response = await api.post<{ accessToken: string; user: User }>('/auth/google', { code });
+  const { accessToken, user } = response.data;
   
-  // Save both tokens
+  // Save access token only (refresh token is in HttpOnly cookie)
   setAccessToken(accessToken);
-  setRefreshToken(refreshToken);
   
-  return { accessToken, refreshToken, user };
+  // Return with refreshToken as empty string for compatibility
+  return { accessToken, refreshToken: '', user };
 };
 
 /**
