@@ -20,7 +20,7 @@ export class AuthService {
     if (!user) return null;
     const match = await bcrypt.compare(password, user.passwordHash);
     if (!match) return null;
-    return { id: user.id, email: user.email, name: user.name };
+    return { id: user._id.toString(), email: user.email, name: user.name };
   }
 
   signAccessToken(payload: object) {
@@ -88,9 +88,10 @@ export class AuthService {
       if (!user) {
         user = await this.usersService.createFromOAuth({ email: payload.email, name: payload.name || 'Google User' });
       }
-      const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
-      const refreshToken = this.signRefreshToken({ sub: user.id });
-      await this.sessionsService.createOrReplace(refreshToken, user.id);
+      const userId = user._id.toString();
+      const accessToken = this.signAccessToken({ sub: userId, email: user.email });
+      const refreshToken = this.signRefreshToken({ sub: userId });
+      await this.sessionsService.createOrReplace(refreshToken, userId);
       return { accessToken, refreshToken, user };
     }
 
@@ -113,7 +114,7 @@ export class AuthService {
       if (session.user.toString() !== payload.sub) throw new UnauthorizedException('Invalid refresh token (mismatch)');
       const user = await this.usersService.findById(payload.sub);
       if (!user) throw new UnauthorizedException('User not found');
-      const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
+      const accessToken = this.signAccessToken({ sub: user._id.toString(), email: user.email });
       return { accessToken };
     } catch (err) {
       throw new UnauthorizedException('Refresh failed');
@@ -121,6 +122,35 @@ export class AuthService {
   }
 
   async logout(refreshToken: string) {
+    // Delete session from database
     await this.sessionsService.deleteByToken(refreshToken).catch(() => {});
+  }
+
+  /**
+   * Revoke Google OAuth refresh token
+   * Call this during logout to revoke Google access
+   */
+  async revokeGoogleRefreshToken(userId: string) {
+    try {
+      const user = await this.usersService.findById(userId);
+      if (!user?.googleRefreshToken) {
+        return; // No Google token to revoke
+      }
+
+      // Use Google API client to revoke token
+      const { google } = require('googleapis');
+      const oauth2Client = new google.auth.OAuth2();
+      
+      // Revoke the refresh token
+      await oauth2Client.revokeToken(user.googleRefreshToken);
+
+      // Clear the stored Google refresh token
+      await this.usersService.setGoogleRefreshToken(userId, '');
+      
+      console.log(`✅ Successfully revoked Google token for user ${userId}`);
+    } catch (err) {
+      // Log but don't throw - logout should succeed even if revocation fails
+      console.error('Failed to revoke Google token:', err.message);
+    }
   }
 }
