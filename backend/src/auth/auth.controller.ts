@@ -10,9 +10,25 @@ export class AuthController {
   constructor(private authService: AuthService, private usersService: UsersService) {}
 
   @Post('login')
-  async login(@Body() body: LoginDto) {
+  async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { email, password } = body;
-    return this.authService.loginLocal(email, password);
+    const result = await this.authService.loginLocal(email, password);
+    
+    // Set refresh token as HttpOnly, Secure cookie (persistent, 7 days)
+    const cookieOptions = {
+      httpOnly: true,        // Prevent XSS access
+      secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+      sameSite: 'lax' as const,  // CSRF protection
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days (persistent cookie)
+      path: '/',             // Available across entire domain
+    };
+    res.cookie('refreshToken', result.refreshToken, cookieOptions);
+    
+    // Return access token + user (omit refreshToken from body since it's in cookie)
+    return {
+      accessToken: result.accessToken,
+      user: { id: result.user.id, email: result.user.email, name: result.user.name },
+    };
   }
 
   @Post('google')
@@ -22,12 +38,13 @@ export class AuthController {
     
     const result = await this.authService.exchangeGoogleToken({ code: body.code });
     
-    // Set app refresh token as HttpOnly cookie
+    // Set app refresh token as HttpOnly, Secure cookie (persistent, 7 days)
     const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      httpOnly: true,        // Prevent XSS access
+      secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+      sameSite: 'lax' as const,  // CSRF protection
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days (persistent cookie)
+      path: '/',             // Available across entire domain
     };
     res.cookie('refreshToken', result.refreshToken, cookieOptions);
     
@@ -139,12 +156,13 @@ export class AuthController {
     const session = this.authService.createSessionForUser({ id: user._id.toString(), email: user.email });
 
     const target = redirectTo || process.env.FE_URL || 'http://localhost:3000';
-    // Set refresh token as HttpOnly cookie and redirect to frontend without tokens in URL
+    // Set refresh token as HttpOnly, Secure cookie and redirect to frontend without tokens in URL
     const cookieOptions = {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+      httpOnly: true,        // Prevent XSS access
+      secure: process.env.NODE_ENV === 'production',  // HTTPS only in production
+      sameSite: 'lax' as const,  // CSRF protection
+      maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days (persistent cookie)
+      path: '/',             // Available across entire domain
     };
     if (res) {
       res.cookie('refreshToken', session.refreshToken, cookieOptions);
@@ -204,15 +222,39 @@ export class AuthController {
   }
 
   @Post('logout')
-  async logout(@Body() body: { refreshToken?: string }, @Req() req?: Request, @Res() res?: Response) {
+  async logout(@Body() body: { refreshToken?: string }, @Req() req?: Request, @Res({ passthrough: true }) res?: Response) {
     const token = body?.refreshToken || (req && (req as any).cookies && (req as any).cookies.refreshToken);
+    
     if (token) {
+      // Decode token to get userId for OAuth revocation
+      let userId: string | null = null;
+      try {
+        const jwt = require('jsonwebtoken');
+        const decoded: any = jwt.decode(token);
+        userId = decoded?.sub;
+      } catch (err) {
+        // Token invalid, continue with cleanup
+      }
+
+      // Revoke refresh token in database
       await this.authService.logout(token);
+      
+      // Revoke Google OAuth refresh token if exists
+      if (userId) {
+        await this.authService.revokeGoogleRefreshToken(userId);
+      }
     }
+    
+    // Clear refresh token cookie with same attributes used when setting
     if (res) {
-      res.clearCookie('refreshToken');
-      return res.json({ ok: true });
+      res.clearCookie('refreshToken', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax' as const,
+        path: '/',
+      });
     }
+    
     return { ok: true };
   }
 }

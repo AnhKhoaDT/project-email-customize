@@ -455,13 +455,45 @@ Key directories:
 1. User makes API request with expired access token
 2. Backend returns 401 Unauthorized
 3. Axios interceptor catches error
-4. Interceptor calls `/auth/refresh` with refresh token
-5. Backend validates and issues new access token
-6. Interceptor updates token in memory
-7. Original request retried with new token
-8. Seamless experience for user
+4. Interceptor calls `/auth/refresh` (refresh token sent via HttpOnly cookie)
+5. Backend validates refresh token from cookie and database
+6. Backend issues new access token
+7. Interceptor updates token in memory (`window.__accessToken`)
+8. Original request retried with new token
+9. Seamless experience for user
 
 **Concurrency:** Multiple simultaneous failed requests trigger only one refresh call.
+
+### Logout Flow (Complete Token Cleanup)
+**Frontend:**
+1. User clicks Logout button
+2. Frontend calls `POST /auth/logout` (refresh token sent via HttpOnly cookie)
+3. Frontend clears in-memory access token: `window.__accessToken = null`
+4. Frontend clears React context state
+5. Redirect to `/login`
+
+**Backend:**
+1. Decode refresh token to get `userId`
+2. Delete refresh token from `sessions` collection (revoke app session)
+3. Fetch user's `googleRefreshToken` from database
+4. Call Google's revocation endpoint: `POST https://oauth2.googleapis.com/revoke`
+5. Clear user's `googleRefreshToken` field in database
+6. Clear HttpOnly cookie with proper attributes:
+   ```typescript
+   res.clearCookie('refreshToken', {
+     httpOnly: true,
+     secure: process.env.NODE_ENV === 'production',
+     sameSite: 'lax',
+     path: '/',
+   });
+   ```
+7. Return success response
+
+**Security Notes:**
+- ✅ All tokens revoked on both client and server
+- ✅ Google OAuth access revoked (meets security requirement)
+- ✅ Session invalidated in database (cannot be reused)
+- ✅ HttpOnly cookie cleared with same attributes used when setting
 
 ## 📧 Email Dashboard Features
 
@@ -519,26 +551,47 @@ Key directories:
 - No built-in expiration mechanism
 
 #### Why HttpOnly Cookie for Refresh Token?
-**Decision:** Store refresh token in HttpOnly, Secure, SameSite cookie (server-side only)
+**Decision:** Store refresh token in HttpOnly, Secure, SameSite cookie (persistent, 7 days)
 
 **Rationale:**
-- **XSS Protection:** JavaScript cannot access HttpOnly cookies
-- **CSRF Protection:** SameSite=Strict prevents cross-site requests
-- **Secure Flag:** Only transmitted over HTTPS in production
-- **Server-Side Control:** Backend manages rotation and revocation
+- **XSS Protection:** JavaScript cannot access HttpOnly cookies (`httpOnly: true`)
+- **CSRF Protection:** `SameSite=lax` prevents most cross-site attacks
+- **Secure Flag:** Only transmitted over HTTPS in production (`secure: true`)
+- **Persistent Cookie:** `maxAge: 7 days` - survives browser restarts for better UX
+- **Server-Side Storage:** Refresh tokens also stored in `sessions` collection for revocation
+- **Path Control:** `path: '/'` ensures cookie sent to all backend routes
+
+**Cookie Configuration:**
+```typescript
+{
+  httpOnly: true,        // Prevent XSS access
+  secure: NODE_ENV === 'production',  // HTTPS only
+  sameSite: 'lax',      // CSRF protection
+  maxAge: 604800000,    // 7 days (persistent cookie)
+  path: '/',            // Available across entire domain
+}
+```
 
 **Why NOT localStorage for refresh token?**
 - 7-day lifetime means higher risk if exposed via XSS
 - No automatic secure transmission flags
+- Cannot be revoked server-side without additional API calls
+
+**Google OAuth Refresh Token:**
+- Stored **server-side only** in `users.googleRefreshToken` field
+- Never exposed to frontend
+- Revoked on logout via Google's revocation endpoint
 
 ### Implemented Security Measures
 
 **Authentication:**
 - ✅ JWT tokens with short access token lifetime (15 min)
-- ✅ Refresh token rotation on each use
+- ✅ Refresh tokens stored server-side in `sessions` collection
+- ✅ HttpOnly, Secure cookies for refresh token transmission
 - ✅ bcrypt password hashing (10 rounds)
 - ✅ Google OAuth 2.0 with token validation
-- ✅ Session tracking in database for revocation
+- ✅ Google refresh token revocation on logout
+- ✅ Session tracking in database for instant revocation
 
 **API Security:**
 - ✅ CORS whitelist (only frontend origin allowed)

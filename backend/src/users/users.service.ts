@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcrypt';
@@ -26,7 +26,7 @@ export class UsersService {
 
   async createUser(payload: { email: string; password: string; name?: string; phone?: string; address?: string; dateOfBirth?: string }) {
     const existing = await this.userModel.findOne({ email: payload.email.toLowerCase() }).exec();
-    if (existing) throw new Error('Email already registered');
+    if (existing) throw new ConflictException('Email already registered');
     const hash = await bcrypt.hash(payload.password, 10);
     const doc = {
       email: payload.email.toLowerCase(),
