@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { CiMail } from "react-icons/ci";
 import {
   IoMdArrowBack,
@@ -9,16 +9,18 @@ import {
 } from "react-icons/io";
 import { BsArchive, BsTrash3 } from "react-icons/bs";
 import { FaReply, FaShare } from "react-icons/fa";
-
-import { Mail } from "@/types";
+import { type EmailData } from "@/types/index";
 
 // --- CẤU HÌNH API ---
 // Thay thế đường dẫn này bằng URL backend thực tế của bạn
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 interface MailContentProps {
-  mail?: Mail | null;
+  mail?: EmailData | null;
   onBack?: () => void;
+  onForwardClick?: () => void;
+  onReplyClick?: () => void;
+  triggerReply?: number;
 }
 
 // ... (Giữ nguyên các hàm Helper: getSenderName, getSenderEmail, formatDate) ...
@@ -48,10 +50,36 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-const MailContent = ({ mail, onBack }: MailContentProps) => {
+const MailContent = ({
+  mail,
+  onBack,
+  onForwardClick,
+  onReplyClick,
+  triggerReply,
+}: MailContentProps) => {
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Trigger reply mode from parent (keyboard shortcut)
+  useEffect(() => {
+    if (triggerReply && triggerReply > 0) {
+      setIsReplying(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerReply]);
+
+  // Focus and scroll to reply textarea when reply mode is activated
+  useEffect(() => {
+    if (isReplying && replyTextareaRef.current) {
+      replyTextareaRef.current.focus();
+      replyTextareaRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }
+  }, [isReplying]);
 
   if (!mail) {
     return (
@@ -90,8 +118,8 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
     setIsSending(true);
 
     try {
-      // 1. Lấy Token (Thay đổi logic này tùy theo cách bạn lưu token: localStorage, cookie, hay Context)
-      const token = localStorage.getItem("access_token");
+      // 1. Lấy Token từ in-memory storage
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
 
       if (!token) {
         alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
@@ -212,7 +240,7 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
         </div>
 
         {/* Original Mail Body */}
-        <div className="w-full bg-background text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
+        <div className="w-full bg-white text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
           <div
             className="email-content-wrapper text-[15px] leading-relaxed"
             dangerouslySetInnerHTML={{
@@ -233,6 +261,7 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
               <span className="text-white">{senderName}</span>
             </div>
             <textarea
+              ref={replyTextareaRef}
               autoFocus
               className="w-full bg-[#1e1e1e] border border-white/20 rounded-md p-4 text-gray-200 focus:outline-none focus:border-blue-500 min-h-[150px] resize-y"
               placeholder="Type your reply here..."
@@ -279,7 +308,10 @@ const MailContent = ({ mail, onBack }: MailContentProps) => {
           >
             <FaReply /> Reply
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg">
+          <button
+            onClick={onForwardClick}
+            className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg"
+          >
             <FaShare /> Forward
           </button>
         </div>

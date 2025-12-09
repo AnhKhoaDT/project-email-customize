@@ -1,27 +1,20 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// Routes that require authentication
-const protectedRoutes = ['/inbox'];
+// ========================================
+// MIDDLEWARE - DISABLED FOR IN-MEMORY TOKENS
+// ========================================
+// Since access tokens are now stored in-memory only (not in cookies),
+// middleware cannot check authentication state.
+// Auth protection is handled client-side in page components via useUserQuery.
+// ========================================
 
 export function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  
-  // Get access token from cookies
-  const accessToken = request.cookies.get('access_token')?.value;
-  
-  // Check if the current route is protected
-  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
-  
-  // If trying to access protected route without token, redirect to login
-  if (isProtectedRoute && !accessToken) {
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('redirect', pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-  
-  // Allow access to all other routes (including /login and /register)
-  // This allows users to logout and login with different accounts
+  // Allow all requests - auth protection handled client-side
+  // Client-side protection:
+  // 1. useUserQuery checks accessToken in AuthContext
+  // 2. If no token, tries to refresh from HttpOnly cookie
+  // 3. If refresh fails, redirects to login
   return NextResponse.next();
 }
 

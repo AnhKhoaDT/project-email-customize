@@ -12,21 +12,64 @@ import ThemeSwitcher from "@/components/theme-switcher";
 import LogoutButton from "@/components/logout-button";
 import { User } from "@/types/auth.types";
 
+import { type NavItem, Label } from "@/types";
+
 export interface SideBarProps {
   user: User | null;
+  navigation?: {
+    core: NavItem[];
+    management: NavItem[];
+    labels: Label[];
+  };
   isExpanded: boolean; // Prop mới
   toggleSidebar: () => void; // Prop mới (dùng cho mobile để đóng)
+  onComposeClick?: () => void; // Handler for New email button
 }
 
-const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
+const nav = {
+  core: [
+    { title: "Inbox", path: "/inbox", icon: FaInbox, isActive: true },
+    {
+      title: "Favorites",
+      path: "/favorites",
+      icon: FaRegStar,
+      isActive: false,
+    },
+    { title: "Drafts", path: "/drafts", icon: FaPenToSquare, isActive: false },
+    { title: "Send", path: "/send", icon: IoSend, isActive: false },
+  ],
+  management: [
+    { title: "Archive", path: "/archive", icon: FaBoxArchive, isActive: false },
+    { title: "Spam", path: "/spam", icon: RiErrorWarningFill, isActive: false },
+    { title: "Trash", path: "/trash", icon: FaTrashCan, isActive: false },
+    {
+      title: "Settings",
+      path: "/settings",
+      icon: IoSettingsOutline,
+      isActive: false,
+    },
+  ],
+  labels: [
+    { id: "1", name: "Work", color: "red" },
+    { id: "2", name: "Personal", color: "blue" },
+  ],
+};
+
+const SideBar = ({
+  user,
+  isExpanded,
+  navigation = nav,
+  toggleSidebar,
+  onComposeClick,
+}: SideBarProps) => {
   // Class chung cho các item
   const itemClass = `cursor-pointer flex flex-row items-center ${
     isExpanded ? "justify-between px-2" : "justify-center"
   } h-10 hover:bg-muted/50 rounded-md transition-all duration-200`;
 
   // Get user display data
-  const userName = user?.name || user?.email?.split('@')[0] || 'User';
-  const userEmail = user?.email || 'user@example.com';
+  const userName = user?.name || user?.email?.split("@")[0] || "User";
+  const userEmail = user?.email || "user@example.com";
   const userInitial = userName.charAt(0).toUpperCase();
 
   return (
@@ -48,9 +91,9 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
         <div className={`px-4 flex flex-col ${!isExpanded && "items-center"}`}>
           {/* User Container */}
           <div
-            className={`flex flex-row ${
+            className={`flex flex-row  items-center gap-2 ${
               isExpanded ? "justify-between" : "justify-center"
-            } items-center w-full`}
+            } w-full`}
           >
             <div className="flex flex-row items-center gap-2">
               <div className="w-8 h-8 rounded-sm bg-muted border border-primary flex items-center justify-center shrink-0">
@@ -58,28 +101,26 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
               </div>
             </div>
             {isExpanded && (
-              <div>
-                <button className="cursor-pointer">•••</button>
+              <div
+                className={`flex flex-col  gap-px overflow-hidden align-middle h-fit  ${
+                  isExpanded
+                    ? "opacity-100 max-h-20"
+                    : "opacity-0 max-h-0 md:hidden"
+                }`}
+              >
+                <span className="whitespace-nowrap">{userName}</span>
+                <span className="text-secondary text-base truncate">
+                  {userEmail}
+                </span>
               </div>
             )}
           </div>
 
           {/* User Info Text */}
-          <div
-            className={`flex flex-col mt-5 gap-0.5 overflow-hidden transition-all duration-300 ${
-              isExpanded
-                ? "opacity-100 max-h-20"
-                : "opacity-0 max-h-0 md:hidden"
-            }`}
-          >
-            <span className="whitespace-nowrap">{userName}</span>
-            <span className="text-secondary text-base truncate">
-              {userEmail}
-            </span>
-          </div>
 
           {/* Create Mail Button */}
           <button
+            onClick={onComposeClick}
             className={`mt-6 flex flex-row items-center gap-2 h-10 bg-muted rounded-md cursor-pointer hover:bg-muted/80 transition-all
               ${
                 isExpanded
@@ -103,58 +144,34 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
             )}
             <div className="flex flex-col gap-1">
               {/* Menu Item: Inbox */}
-              <div className={itemClass}>
-                <div className="flex items-center justify-center">
-                  <FaInbox
-                    className={isExpanded ? "mr-2" : ""}
-                    size={isExpanded ? 14 : 20}
-                  />
-                  {isExpanded && <span>Inbox</span>}
-                </div>
-                {isExpanded && (
-                  <span className="text-secondary text-sm">3</span>
-                )}
-              </div>
+              {
+                /* Sử dụng lại itemClass cho đồng nhất */
 
-              {/* Menu Item: Favorites */}
-              <div className={itemClass}>
-                <div className="flex items-center justify-center">
-                  <FaRegStar
-                    className={isExpanded ? "mr-2" : ""}
-                    size={isExpanded ? 14 : 20}
-                  />
-                  {isExpanded && <span>Favorites</span>}
-                </div>
-                {isExpanded && (
-                  <span className="text-secondary text-sm">5</span>
-                )}
-              </div>
-
-              <div className={itemClass}>
-                <div className="flex items-center justify-center">
-                  <FaPenToSquare
-                    className={isExpanded ? "mr-2" : ""}
-                    size={isExpanded ? 14 : 20}
-                  />
-                  {isExpanded && <span>Drafts</span>}
-                </div>
-                {isExpanded && (
-                  <span className="text-secondary text-sm">2</span>
-                )}
-              </div>
-
-              <div className={itemClass}>
-                <div className="flex items-center justify-center">
-                  <IoSend
-                    className={isExpanded ? "mr-2" : ""}
-                    size={isExpanded ? 14 : 20}
-                  />
-                  {isExpanded && <span>Send</span>}
-                </div>
-                {isExpanded && (
-                  <span className="text-secondary text-sm">2</span>
-                )}
-              </div>
+                nav.core.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div
+                      key={item.title}
+                      className={`cursor-pointer flex flex-row items-center ${
+                        isExpanded ? "justify-between px-2" : "justify-center"
+                      }
+                        ${item.isActive ? "bg-primary/20" : "hover:bg-muted/50"}
+                       h-10 hover:bg-muted/50 rounded-md transition-all duration-200`}
+                    >
+                      <div className="flex items-center justify-center">
+                        <Icon
+                          className={isExpanded ? "mr-2" : ""}
+                          size={isExpanded ? 14 : 20}
+                        />
+                        {isExpanded && <span>{item.title}</span>}
+                      </div>
+                      {/* {isExpanded && (
+                        <span className="text-secondary text-sm">3</span>
+                      )} */}
+                    </div>
+                  );
+                })
+              }
             </div>
           </div>
 
@@ -217,8 +234,17 @@ const SideBar = ({ user, isExpanded, toggleSidebar }: SideBarProps) => {
             {isExpanded && <span>Help & Feedback</span>}
           </button>
 
-          <div className="mt-4 flex justify-between items-center"><ThemeSwitcher /> <LogoutButton /></div>
-
+          <div
+            className={`mt-4 flex items-center ${
+              isExpanded ? "flex-row justify-between gap-2" : "flex-col gap-3"
+            }`}
+          >
+            <ThemeSwitcher />
+            <LogoutButton
+              showText={isExpanded}
+              size={isExpanded ? "default" : "icon"}
+            />
+          </div>
         </div>
       </div>
 
