@@ -2,18 +2,23 @@ import { TbLayoutSidebarRightExpandFilled } from "react-icons/tb";
 // ... import khác giữ nguyên ...
 import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
+import { LuSquareKanban } from "react-icons/lu";
+
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
+import { EmailData } from "@/types";
 import { useEffect, useRef } from "react";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
-  selectedMail?: Mail | null;
+  selectedMail?: EmailData | null;
   mails: Mail[];
   onSelectMail: (mail: Mail) => void;
   focusedIndex?: number;
   isLoadingMore?: boolean;
   hasMore?: boolean;
+  kanbanMode: boolean;
+  kanbanClick: () => void;
 }
 
 const MailBox = ({
@@ -24,6 +29,8 @@ const MailBox = ({
   focusedIndex = 0,
   isLoadingMore = false,
   hasMore = true,
+  kanbanMode = false,
+  kanbanClick,
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
@@ -32,8 +39,8 @@ const MailBox = ({
   useEffect(() => {
     if (focusedItemRef.current) {
       focusedItemRef.current.scrollIntoView({
-        behavior: 'smooth',
-        block: 'nearest',
+        behavior: "smooth",
+        block: "nearest",
       });
     }
   }, [focusedIndex]);
@@ -41,24 +48,31 @@ const MailBox = ({
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
   return (
-    <div className="mailbox-scroll-container flex flex-col w-full bg-background border-x border-amber-50/50 h-full overflow-y-auto scrollbar-hide">
+    <div className="mailbox-scroll-container flex flex-col w- bg-background border-x border-amber-50/50 h-full overflow-y-auto scrollbar-hide">
       {/* ... (Phần Header, Search, Filter Buttons giữ nguyên) ... */}
-      <div className="flex flex-row justify-between p-5 sticky top-0 bg-background z-10">
-        <div className="flex flex-row items-center gap-2">
+      <div className="flex flex-col justify-between p-5 sticky top-0 bg-background z-10">
+        <div className="flex flex-row justify-between items-center">
+          <div className="flex flex-row items-center gap-2">
+            <button
+              onClick={toggleSidebar}
+              className="flex justify-center items-center h-8 w-8 hover:bg-secondary/10 rounded-md transition-colors cursor-pointer"
+            >
+              <TbLayoutSidebarRightExpandFilled size={20} className="" />
+            </button>
+            <h1 className="text-base font-semibold">Inbox</h1>
+          </div>
+          {/* kanban active/ unactive*/}
           <button
-            onClick={toggleSidebar}
-            className="flex justify-center items-center h-8 w-8 hover:bg-secondary/10 rounded-md transition-colors cursor-pointer"
+            onClick={kanbanClick}
+            className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${
+              kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
+            }`}
           >
-            <TbLayoutSidebarRightExpandFilled size={20} className="" />
+            <LuSquareKanban size={20} />
           </button>
-          <h1 className="text-base font-semibold">Inbox</h1>
         </div>
-      </div>
-      <div className="w-full bg-secondary h-px opacity-30"></div>
-
-      <main className="p-5 ">
         {/* Search */}
-        <div className="flex flex-row items-center justify-center gap-3 p-2 rounded-md bg-background/70 border border-secondary focus-within:ring-1 ring-primary transition-all">
+        <div className="flex flex-row items-center mt-4 justify-center gap-3 p-2 rounded-md bg-background/70 border border-secondary focus-within:ring-1 ring-primary transition-all">
           <FaSearch className="text-gray-400" />
           <input
             type="text"
@@ -66,19 +80,12 @@ const MailBox = ({
             className="w-full focus:outline-none placeholder-secondary bg-transparent"
           />
         </div>
+      </div>
+      <div className="w-full bg-secondary h-px opacity-30"></div>
 
-        {/* Filter Buttons (Giữ nguyên) */}
-        <div className="flex flex-row gap-2 mt-4 h-9 overflow-x-auto pb-1 scrollbar-hide">
-          {/* ... buttons ... */}
-          <button className="flex flex-row items-center px-4 gap-2 bg-primary rounded-md justify-center text-white shrink-0 hover:bg-primary/90 cursor-pointer">
-            <BsFillLightningChargeFill />
-            <span>Primary</span>
-          </button>
-          {/* ... các button khác giữ nguyên ... */}
-        </div>
-
+      <main className="p-5 ">
         {/* Mail List */}
-        <div className="mt-8">
+        <div className="">
           <div className="flex flex-col gap-2 ">
             {mails && mails.length > 0 ? (
               mails.map((mail, index) => {
@@ -90,7 +97,8 @@ const MailBox = ({
                     key={mail.id}
                     ref={isFocused ? focusedItemRef : null}
                     onClick={() => onSelectMail(mail)}
-                    className={`
+                    draggable={true}
+                    className={` 
                       flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border
                       ${
                         isSelected
@@ -149,15 +157,17 @@ const MailBox = ({
                 No mails found.
               </div>
             )}
-            
+
             {/* Loading More Indicator */}
             {isLoadingMore && (
               <div className="flex justify-center items-center py-4">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                <span className="ml-2 text-sm text-secondary">Loading more...</span>
+                <span className="ml-2 text-sm text-secondary">
+                  Loading more...
+                </span>
               </div>
             )}
-            
+
             {/* End of List Indicator */}
             {!hasMore && mails.length > 0 && (
               <div className="text-center text-secondary text-xs py-4">

@@ -1,10 +1,11 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Button } from './button';
-import { Input } from './input';
-import { Label } from './label';
-import { Mail } from '@/types';
+import { useState } from "react";
+import { Button } from "./button";
+import { Input } from "./input";
+import { Label } from "./label";
+import { Mail } from "@/types";
+import { type EmailData } from "@/types";
 
 interface ForwardModalProps {
   isOpen: boolean;
@@ -17,16 +18,27 @@ interface ForwardModalProps {
     body: string;
     isHtml: boolean;
   }) => Promise<void>;
-  originalMail: Mail;
+  originalMail: EmailData;
 }
 
-const ForwardModal = ({ isOpen, onClose, onSend, originalMail }: ForwardModalProps) => {
-  const [to, setTo] = useState('');
-  const [cc, setCc] = useState('');
-  const [bcc, setBcc] = useState('');
-  const [subject, setSubject] = useState(`Fwd: ${originalMail.subject || 'No subject'}`);
+const ForwardModal = ({
+  isOpen,
+  onClose,
+  onSend,
+  originalMail,
+}: ForwardModalProps) => {
+  const [to, setTo] = useState("");
+  const [cc, setCc] = useState("");
+  const [bcc, setBcc] = useState("");
+  const [subject, setSubject] = useState(
+    `Fwd: ${originalMail.subject || "No subject"}`
+  );
   const [body, setBody] = useState(
-    `\n\n---------- Forwarded message ---------\nFrom: ${originalMail.from}\nDate: ${originalMail.date}\nSubject: ${originalMail.subject}\nTo: ${originalMail.to || ''}\n\n${originalMail.snippet || ''}`
+    `\n\n---------- Forwarded message ---------\nFrom: ${
+      originalMail.from
+    }\nDate: ${originalMail.date}\nSubject: ${originalMail.subject}\nTo: ${
+      originalMail.to || ""
+    }\n\n${originalMail.snippet || ""}`
   );
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
@@ -34,31 +46,44 @@ const ForwardModal = ({ isOpen, onClose, onSend, originalMail }: ForwardModalPro
 
   const handleSend = async () => {
     if (!to.trim()) {
-      alert('Please fill in recipient');
+      alert("Please fill in recipient");
       return;
     }
 
     setIsSending(true);
     try {
       await onSend({
-        to: to.split(',').map(email => email.trim()).filter(Boolean),
-        cc: cc ? cc.split(',').map(email => email.trim()).filter(Boolean) : undefined,
-        bcc: bcc ? bcc.split(',').map(email => email.trim()).filter(Boolean) : undefined,
+        to: to
+          .split(",")
+          .map((email) => email.trim())
+          .filter(Boolean),
+        cc: cc
+          ? cc
+              .split(",")
+              .map((email) => email.trim())
+              .filter(Boolean)
+          : undefined,
+        bcc: bcc
+          ? bcc
+              .split(",")
+              .map((email) => email.trim())
+              .filter(Boolean)
+          : undefined,
         subject,
         body,
         isHtml: false,
       });
 
       // Reset form
-      setTo('');
-      setCc('');
-      setBcc('');
+      setTo("");
+      setCc("");
+      setBcc("");
       setShowCc(false);
       setShowBcc(false);
       onClose();
     } catch (error) {
-      console.error('Failed to forward email:', error);
-      alert('Failed to forward email. Please try again.');
+      console.error("Failed to forward email:", error);
+      alert("Failed to forward email. Please try again.");
     } finally {
       setIsSending(false);
     }
@@ -180,7 +205,7 @@ const ForwardModal = ({ isOpen, onClose, onSend, originalMail }: ForwardModalPro
             Cancel
           </Button>
           <Button onClick={handleSend} disabled={isSending}>
-            {isSending ? 'Sending...' : 'Send'}
+            {isSending ? "Sending..." : "Send"}
           </Button>
         </div>
       </div>

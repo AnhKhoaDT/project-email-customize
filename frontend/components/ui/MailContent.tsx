@@ -9,15 +9,14 @@ import {
 } from "react-icons/io";
 import { BsArchive, BsTrash3 } from "react-icons/bs";
 import { FaReply, FaShare } from "react-icons/fa";
-
-import { Mail } from "@/types";
+import { type EmailData } from "@/types/index";
 
 // --- CẤU HÌNH API ---
 // Thay thế đường dẫn này bằng URL backend thực tế của bạn
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 interface MailContentProps {
-  mail?: Mail | null;
+  mail?: EmailData | null;
   onBack?: () => void;
   onForwardClick?: () => void;
   onReplyClick?: () => void;
@@ -51,7 +50,13 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-const MailContent = ({ mail, onBack, onForwardClick, onReplyClick, triggerReply }: MailContentProps) => {
+const MailContent = ({
+  mail,
+  onBack,
+  onForwardClick,
+  onReplyClick,
+  triggerReply,
+}: MailContentProps) => {
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -69,7 +74,10 @@ const MailContent = ({ mail, onBack, onForwardClick, onReplyClick, triggerReply 
   useEffect(() => {
     if (isReplying && replyTextareaRef.current) {
       replyTextareaRef.current.focus();
-      replyTextareaRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      replyTextareaRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
     }
   }, [isReplying]);
 
@@ -111,7 +119,7 @@ const MailContent = ({ mail, onBack, onForwardClick, onReplyClick, triggerReply 
 
     try {
       // 1. Lấy Token từ in-memory storage
-      const token = typeof window !== 'undefined' ? window.__accessToken : null;
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
 
       if (!token) {
         alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
@@ -232,7 +240,7 @@ const MailContent = ({ mail, onBack, onForwardClick, onReplyClick, triggerReply 
         </div>
 
         {/* Original Mail Body */}
-        <div className="w-full bg-background text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
+        <div className="w-full bg-white text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
           <div
             className="email-content-wrapper text-[15px] leading-relaxed"
             dangerouslySetInnerHTML={{
@@ -300,7 +308,7 @@ const MailContent = ({ mail, onBack, onForwardClick, onReplyClick, triggerReply 
           >
             <FaReply /> Reply
           </button>
-          <button 
+          <button
             onClick={onForwardClick}
             className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg"
           >
