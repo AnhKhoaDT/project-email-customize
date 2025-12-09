@@ -84,3 +84,9 @@ export interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   isActive?: boolean;
 }
+
+export interface Label {
+  id: string;
+  name: string;
+  color: string;
+}
