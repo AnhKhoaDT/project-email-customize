@@ -162,7 +162,7 @@ const MailContent = ({
   };
 
   return (
-    <div className="flex flex-col w-full h-full bg-background text-gray-200 overflow-hidden relative">
+    <div className="flex flex-col w-full h-full bg-background overflow-hidden relative isolate">
       {/* --- TOP ACTION BAR --- */}
       <div className="flex flex-row justify-between items-center p-3 border-b border-white/10 shrink-0">
         <div className="flex items-center gap-4 text-gray-400">
@@ -198,7 +198,7 @@ const MailContent = ({
       </div>
 
       {/* --- SCROLLABLE CONTENT AREA --- */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-20">
+      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-20 text-gray-400">
         {/* Subject Header */}
         <div className="mb-6">
           <div className="flex flex-row justify-between items-start">
@@ -241,15 +241,39 @@ const MailContent = ({
 
         {/* Original Mail Body */}
         <div className="w-full bg-white text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
-          <div
-            className="email-content-wrapper text-[15px] leading-relaxed"
-            dangerouslySetInnerHTML={{
-              __html:
-                mail.htmlBody ||
-                mail.textBody ||
-                mail.snippet ||
-                '<p class="text-secondary italic text-center mt-10">(No content available for this email)</p>',
-            }}
+          <iframe
+            sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            className="w-full min-h-[400px] border-0"
+            srcDoc={`
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <meta charset="utf-8">
+                  <base target="_blank">
+                  <style>
+                    body {
+                      margin: 0;
+                      padding: 0;
+                      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                      font-size: 15px;
+                      line-height: 1.7;
+                      color: #475569;
+                    }
+                    a { 
+                      color: #2563eb; 
+                      text-decoration: underline;
+                      cursor: pointer;
+                    }
+                    a:hover { text-decoration: none; }
+                    * { max-width: 100%; }
+                    img { max-width: 100%; height: auto; }
+                  </style>
+                </head>
+                <body>
+                  ${mail.htmlBody || mail.textBody || mail.snippet || '<p style="text-align: center; font-style: italic; margin-top: 2.5rem;">(No content available)</p>'}
+                </body>
+              </html>
+            `}
           />
         </div>
 

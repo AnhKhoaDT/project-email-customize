@@ -15,6 +15,90 @@
     -ms-overflow-style: none; /* IE and Edge */
     scrollbar-width: none; /* Firefox */
   }
+
+  /* Custom scrollbar for Kanban columns */
+  .kanban-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .kanban-scrollbar::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+  }
+
+  .dark .kanban-scrollbar::-webkit-scrollbar-track {
+    background: #1e1e1e;
+  }
+
+  .kanban-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+
+  .dark .kanban-scrollbar::-webkit-scrollbar-thumb {
+    background: #3f3f3f;
+  }
+
+  .kanban-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+
+  .dark .kanban-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #525252;
+  }
+
+  /* Firefox scrollbar */
+  .kanban-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+  }
+
+  .dark .kanban-scrollbar {
+    scrollbar-color: #3f3f3f #1e1e1e;
+  }
+
+  /* Custom scrollbar for MailBox (Inbox page) */
+  .mailbox-scrollbar::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .mailbox-scrollbar::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 4px;
+  }
+
+  .dark .mailbox-scrollbar::-webkit-scrollbar-track {
+    background: #1e1e1e;
+  }
+
+  .mailbox-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+    transition: background 0.2s;
+  }
+
+  .dark .mailbox-scrollbar::-webkit-scrollbar-thumb {
+    background: #3f3f3f;
+  }
+
+  .mailbox-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+
+  .dark .mailbox-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #525252;
+  }
+
+  /* Firefox scrollbar */
+  .mailbox-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+  }
+
+  .dark .mailbox-scrollbar {
+    scrollbar-color: #3f3f3f #1e1e1e;
+  }
 }
 
 :root {

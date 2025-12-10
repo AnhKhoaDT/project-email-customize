@@ -8,6 +8,7 @@ import {
   DropResult,
 } from "@hello-pangea/dnd";
 import { useKanbanData } from "@/hooks/useKanbanData";
+import { useTheme } from "@/contexts/ThemeContext";
 import api from "@/lib/api";
 // Icons for Kanban
 import {
@@ -326,9 +327,9 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
-      <div className="bg-white rounded-lg p-6 w-80 shadow-2xl animate-in fade-in zoom-in duration-200">
+      <div className="bg-white dark:bg-[#1e1e1e] rounded-lg p-6 w-80 shadow-2xl animate-in fade-in zoom-in duration-200">
         <div className="flex justify-between items-center mb-4">
-          <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+          <h3 className="font-bold text-lg text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <TbClock className="text-blue-500" /> Snooze until...
           </h3>
           <button onClick={onClose}>
@@ -339,19 +340,19 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
         <div className="flex flex-col gap-2">
           <button
             onClick={() => onConfirm(5000)}
-            className="p-3 text-left hover:bg-blue-50 rounded border transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
           >
             Later today (5 seconds )
           </button>
           <button
             onClick={() => onConfirm(10000)}
-            className="p-3 text-left hover:bg-blue-50 rounded border transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
           >
             Tomorrow (10 seconds )
           </button>
           <button
             onClick={() => onConfirm(60000)}
-            className="p-3 text-left hover:bg-blue-50 rounded border transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
           >
             Next Week (1 minute )
           </button>
@@ -370,7 +371,7 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          className={`bg-white rounded-lg border p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${
+          className={`bg-white dark:bg-[#1a1a1a] rounded-lg border dark:border-gray-800 p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${
             snapshot.isDragging
               ? "shadow-xl ring-2 ring-blue-400 rotate-2 opacity-90 cursor-grabbing"
               : ""
@@ -385,39 +386,39 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
 
           <div className="flex flex-row justify-between items-start mb-2 pl-2">
             <div className="flex gap-3 items-center">
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-600 text-xs">
+              <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-xs">
                 {item.avatar}
               </div>
               <div className="flex flex-col">
-                <span className="font-semibold text-sm text-gray-800">
+                <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">
                   {item.sender}
                 </span>
-                <span className="text-xs text-gray-400">{item.time}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{item.time}</span>
               </div>
             </div>
           </div>
 
-          <h3 className="font-bold text-sm text-gray-900 mb-2 pl-2">
+          <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-2 pl-2">
             {item.subject}
           </h3>
 
-          <div className="bg-gray-50 rounded p-3 mb-3 ml-2 text-xs text-gray-600 border border-gray-100">
-            <div className="flex items-center gap-1 mb-1 text-gray-500 font-semibold">
-              <HiSparkles className="text-purple-500" /> <span>AI Summary</span>
+          <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 mb-3 ml-2 text-xs text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-800">
+            <div className="flex items-center gap-1 mb-1 text-gray-500 dark:text-gray-400 font-semibold">
+              <HiSparkles className="text-purple-500 dark:text-purple-400" /> <span>AI Summary</span>
             </div>
             <p className="line-clamp-2">{item.summary}</p>
           </div>
 
-          <div className="flex justify-between items-center pl-2 pt-2 border-t border-gray-50">
+          <div className="flex justify-between items-center pl-2 pt-2 border-t border-gray-50 dark:border-gray-800">
             <button
               onClick={() => onSnoozeClick(item)}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-orange-600 transition-colors font-medium cursor-pointer"
+              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors font-medium cursor-pointer"
             >
               <TbClock /> Snooze
             </button>
             <button
               onClick={() => onOpenClick(item)}
-              className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 transition-colors cursor-pointer"
+              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
             >
               Open Mail <TbMailOpened />
             </button>
@@ -546,10 +547,10 @@ export default function KanbanPage() {
   // Show loading state
   if (isLoading) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-gray-50">
+      <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-[#0a0a0a]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading Kanban board...</p>
+          <p className="text-gray-600 dark:text-gray-300">Loading Kanban board...</p>
         </div>
       </div>
     );
@@ -558,9 +559,9 @@ export default function KanbanPage() {
   // Show error state
   if (error) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-gray-50">
+      <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-[#0a0a0a]">
         <div className="text-center max-w-md">
-          <p className="text-red-600 mb-4">{error}</p>
+          <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
           <button 
             onClick={() => window.location.reload()}
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
@@ -573,7 +574,7 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-gray-50 text-slate-800">
+    <div className="flex flex-col h-full w-full bg-gray-50 dark:bg-[#0a0a0a] text-slate-800 dark:text-gray-100">
       <DragDropContext onDragEnd={onDragEnd}>
         {/* Modals */}
         <SnoozeModal
@@ -589,15 +590,15 @@ export default function KanbanPage() {
           onClose={() => setOpenedMail(null)}
         />
 
-        <main className="grid grid-cols-3 h-full w-full divide-x divide-gray-200">
+        <main className="grid grid-cols-3 flex-1 w-full divide-x divide-gray-200 dark:divide-gray-800 min-h-0">
           {/* --- COLUMN INBOX --- */}
-          <div className="flex flex-col h-full bg-white">
-            <div className="p-4 border-b flex justify-between items-center">
-              <div className="flex items-center gap-2 font-bold text-gray-700">
+          <div className="flex flex-col h-full bg-white dark:bg-[#121212] min-h-0">
+            <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2 font-bold text-gray-700 dark:text-gray-200">
                 <FaInbox /> INBOX ({columns.inbox.length})
               </div>
               {columns.snoozed.length > 0 && (
-                <div className="text-xs text-orange-500 flex items-center gap-1 bg-orange-50 px-2 py-1 rounded-full">
+                <div className="text-xs text-orange-500 dark:text-orange-400 flex items-center gap-1 bg-orange-50 dark:bg-orange-900/30 px-2 py-1 rounded-full">
                   <TbZzz /> {columns.snoozed.length} Snoozed
                 </div>
               )}
@@ -608,7 +609,7 @@ export default function KanbanPage() {
                 <div
                   {...provided.droppableProps}
                   ref={provided.innerRef}
-                  className="flex-1 p-3 overflow-y-auto"
+                  className="flex-1 p-3 overflow-y-auto kanban-scrollbar"
                 >
                   {columns.inbox.map((item: any, index: number) => (
                     <MailCard
@@ -627,18 +628,18 @@ export default function KanbanPage() {
           </div>
 
           {/* --- COLUMN TODO --- */}
-          <div className="flex flex-col h-full overflow-hidden bg-white">
-            <div className="p-4 flex flex-row items-center justify-between border-b border-gray-100 bg-white">
+          <div className="flex flex-col h-full bg-white dark:bg-[#121212] min-h-0">
+            <div className="p-4 flex flex-row items-center justify-between border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#121212] shrink-0">
               <div className="flex items-center gap-2">
                 <FaRegCircle size={16} className="text-orange-500" />
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-700">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
                   To Do
                 </h2>
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">
+                <span className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
                   {columns.todo.length}
                 </span>
               </div>
-              <button className="text-gray-400 hover:text-gray-600">
+              <button className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <BsThreeDots />
               </button>
             </div>
@@ -648,8 +649,8 @@ export default function KanbanPage() {
                 <div
                   {...provided.droppableProps}
                   ref={provided.innerRef}
-                  className={`flex-1 overflow-y-auto p-3 transition-colors ${
-                    snapshot.isDraggingOver ? "bg-orange-50/50" : ""
+                  className={`flex-1 overflow-y-auto kanban-scrollbar p-3 transition-colors ${
+                    snapshot.isDraggingOver ? "bg-orange-50/50 dark:bg-orange-900/20" : ""
                   }`}
                 >
                   {columns.todo.map((item: any, index: number) => (
@@ -669,18 +670,18 @@ export default function KanbanPage() {
           </div>
 
           {/* --- COLUMN DONE --- */}
-          <div className="flex flex-col h-full overflow-hidden bg-white">
-            <div className="p-4 flex flex-row items-center justify-between border-b border-gray-100 bg-white">
+          <div className="flex flex-col h-full bg-white dark:bg-[#121212] min-h-0">
+            <div className="p-4 flex flex-row items-center justify-between border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#121212] shrink-0">
               <div className="flex items-center gap-2">
                 <FaRegCheckCircle size={16} className="text-green-500" />
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-700">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
                   Done
                 </h2>
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs font-bold">
+                <span className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
                   {columns.done.length}
                 </span>
               </div>
-              <button className="text-gray-400 hover:text-gray-600">
+              <button className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <BsThreeDots />
               </button>
             </div>
@@ -690,8 +691,8 @@ export default function KanbanPage() {
                 <div
                   {...provided.droppableProps}
                   ref={provided.innerRef}
-                  className={`flex-1 overflow-y-auto p-3 transition-colors ${
-                    snapshot.isDraggingOver ? "bg-green-50/50" : ""
+                  className={`flex-1 overflow-y-auto kanban-scrollbar p-3 transition-colors ${
+                    snapshot.isDraggingOver ? "bg-green-50/50 dark:bg-green-900/20" : ""
                   }`}
                 >
                   {columns.done.map((item: any, index: number) => (
