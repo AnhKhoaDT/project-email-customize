@@ -133,11 +133,11 @@ export default function Home() {
     }
   };
 
-  // Scroll handler ... (Giữ nguyên)
+  // Scroll handler for infinite scroll
   useEffect(() => {
     const handleScroll = (e: Event) => {
       const target = e.target as HTMLElement;
-      if (!target.classList.contains("mailbox-scroll-container")) return;
+      if (!target.classList.contains("mailbox-scroll-target")) return;
       const { scrollTop, scrollHeight, clientHeight } = target;
       if (
         (scrollTop + clientHeight) / scrollHeight > 0.8 &&
@@ -147,7 +147,7 @@ export default function Home() {
         loadMoreMails();
       }
     };
-    const container = document.querySelector(".mailbox-scroll-container");
+    const container = document.querySelector(".mailbox-scroll-target");
     if (container) {
       container.addEventListener("scroll", handleScroll);
       return () => container.removeEventListener("scroll", handleScroll);

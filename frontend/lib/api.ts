@@ -232,6 +232,15 @@ export const fetchInboxEmails = async (limit = 50) => {
 };
 
 /**
+ * Fetch single email detail by ID
+ * @param emailId - Gmail message ID
+ */
+export const fetchEmailById = async (emailId: string) => {
+  const response = await api.get(`/emails/${emailId}`);
+  return response.data;
+};
+
+/**
  * Fetch snoozed emails
  */
 export const fetchSnoozedEmails = async () => {

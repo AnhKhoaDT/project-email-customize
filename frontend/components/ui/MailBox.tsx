@@ -83,7 +83,7 @@ const MailBox = ({
       </div>
       <div className="w-full bg-secondary h-px opacity-30"></div>
 
-      <main className="flex-1 p-5 overflow-y-auto mailbox-scrollbar">
+      <main className="flex-1 p-5 overflow-y-auto mailbox-scrollbar mailbox-scroll-target">
         {/* Mail List */}
         <div className="">
           <div className="flex flex-col gap-2 ">

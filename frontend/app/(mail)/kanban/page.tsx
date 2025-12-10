@@ -154,35 +154,35 @@ const MailReadingModal = ({
 
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      {/* Main Content Container - Dark Mode Style */}
-      <div className="w-[90vw] h-[90vh] md:w-[800px] bg-[#121212] rounded-xl shadow-2xl border border-white/10 flex flex-col overflow-hidden text-gray-200">
+      {/* Main Content Container */}
+      <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
         {/* --- TOP ACTION BAR --- */}
-        <div className="flex flex-row justify-between items-center p-4 border-b border-white/10 shrink-0 bg-[#1e1e1e]">
-          <div className="flex items-center gap-4 text-gray-400">
+        <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background dark:bg-[#1e1e1e]">
+          <div className="flex items-center gap-4 text-secondary dark:text-gray-400">
             <button
-              className="hover:text-white transition-colors cursor-pointer"
+              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
               onClick={onClose}
             >
               <IoMdClose size={24} />
             </button>
-            <div className="h-4 w-px bg-white/20 mx-1"></div>
+            <div className="h-4 w-px bg-divider dark:bg-white/20 mx-1"></div>
             <button
-              className="hover:text-white transition-colors cursor-pointer"
-              onClick={onClose} // Back acts as close here
+              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+              onClick={onClose}
             >
               <IoMdArrowBack size={20} />
             </button>
           </div>
 
-          <div className="flex items-center gap-2 text-gray-400">
+          <div className="flex items-center gap-2 text-secondary dark:text-gray-400">
             <button
-              className="p-2 hover:bg-white/10 rounded-md transition-colors cursor-pointer"
+              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors cursor-pointer"
               title="Archive"
             >
               <BsArchive size={18} />
             </button>
             <button
-              className="p-2 hover:bg-white/10 rounded-md transition-colors hover:text-red-400 cursor-pointer"
+              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors hover:text-red-400 cursor-pointer"
               title="Delete"
             >
               <BsTrash3 size={18} />
@@ -191,80 +191,121 @@ const MailReadingModal = ({
         </div>
 
         {/* --- SCROLLABLE CONTENT AREA --- */}
-        <div className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-20 bg-[#121212]">
-          {/* Subject Header */}
-          <div className="mb-6">
-            <div className="flex flex-row justify-between items-start">
-              <h1 className="text-xl md:text-2xl font-semibold text-white mb-2 leading-tight">
-                {mail.subject || "(No Subject)"}
-              </h1>
-              <div className="flex gap-2">
-                {mail.labelIds?.includes("SENT") && (
-                  <span className="bg-gray-700 text-xs px-2 py-1 rounded text-gray-300">
-                    Sent
-                  </span>
-                )}
-                <span className="bg-blue-900/50 text-blue-200 text-xs px-2 py-1 rounded border border-blue-500/30">
-                  Inbox
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Sender Info Row */}
-          <div className="flex flex-row justify-between items-start mb-8">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-linear-to-br from-blue-600 to-purple-700 flex items-center justify-center text-white font-bold border border-white/10 text-xl shrink-0 shadow-lg">
-                {senderName.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-white text-lg">
-                    {senderName}
-                  </span>
+        <div className="flex-1 overflow-y-auto mailbox-scrollbar pb-20">
+          {/* Subject and Sender Info - Unified Section */}
+          <div className="px-6 pt-6 pb-4 bg-background dark:bg-[#121212] border-b border-divider dark:border-gray-800">
+            {/* Subject Header */}
+            <div className="mb-4">
+              <div className="flex flex-row justify-between items-start gap-4">
+                <h1 className="text-xl md:text-2xl font-semibold text-foreground dark:text-white flex-1">
+                  {mail.subject || "(No Subject)"}
+                </h1>
+                <div className="flex gap-2 shrink-0">
+                  {mail.labelIds?.includes("SENT") && (
+                    <span className="bg-muted dark:bg-gray-700 text-xs px-2 py-1 rounded text-secondary dark:text-gray-300">
+                      Sent Mail
+                    </span>
+                  )}
                 </div>
-                <span className="text-sm text-gray-400">
-                  &lt;{senderEmail}&gt;
-                </span>
-                <span className="text-xs text-gray-500 mt-0.5">
-                  To: {mail.to}
-                </span>
               </div>
             </div>
-            <div className="flex flex-col items-end gap-1">
-              <span className="text-sm text-gray-400">
-                {formatDate(mail.date)}
-              </span>
-              <button className="text-gray-500 hover:text-white">
-                <IoMdMore size={20} />
-              </button>
+
+            {/* Sender Info Row */}
+            <div className="flex flex-row justify-between items-start">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
+                  {senderName.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-foreground dark:text-white">{senderName}</span>
+                    <span className="text-xs text-secondary dark:text-gray-400">
+                      &lt;{senderEmail}&gt;
+                    </span>
+                  </div>
+                  <span className="text-xs text-secondary dark:text-gray-500">To: {mail.to}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-secondary dark:text-gray-400 text-sm">
+                <span>{formatDate(mail.date)}</span>
+                <button className="p-1 hover:bg-muted dark:hover:bg-white/10 rounded hover:text-foreground dark:hover:text-white cursor-pointer">
+                  <IoMdMore size={20} />
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Mail Body */}
-          <div className="w-full bg-[#1e1e1e] text-gray-200 rounded-lg p-8 shadow-sm min-h-[250px] border border-white/5 mb-6">
-            <div
-              className="email-content-wrapper text-[15px] leading-relaxed whitespace-pre-wrap"
-              dangerouslySetInnerHTML={{
-                __html:
-                  mail.htmlBody ||
-                  mail.textBody ||
-                  '<p class="text-gray-500 italic">No content available</p>',
-              }}
-            />
+          {/* Mail Body with Iframe */}
+          <div className="px-6 py-6">
+            <div className="w-full bg-white dark:bg-[#1a1a1a] rounded-lg overflow-hidden border border-divider dark:border-gray-800 shadow-sm">
+              <iframe
+                ref={(iframe) => {
+                  if (iframe) {
+                    iframe.onload = () => {
+                      try {
+                        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                        if (iframeDoc) {
+                          const height = iframeDoc.documentElement.scrollHeight;
+                          iframe.style.height = Math.max(height + 20, 200) + 'px';
+                        }
+                      } catch (e) {
+                        // Cross-origin restriction - fallback to min height
+                        iframe.style.height = '500px';
+                      }
+                    };
+                  }
+                }}
+                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                className="w-full border-0"
+                style={{ height: '200px' }}
+                srcDoc={`
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <meta charset="utf-8">
+                      <base target="_blank">
+                      <style>
+                        body {
+                          margin: 0;
+                          padding: 2rem;
+                          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                          font-size: 15px;
+                          line-height: 1.7;
+                          color: #475569;
+                          background-color: transparent;
+                          overflow: hidden;
+                        }
+                        a { 
+                          color: #2563eb; 
+                          text-decoration: underline;
+                          cursor: pointer;
+                        }
+                        a:hover { text-decoration: none; }
+                        * { max-width: 100%; }
+                        img { max-width: 100%; height: auto; }
+                        pre { white-space: pre-wrap; word-wrap: break-word; }
+                      </style>
+                    </head>
+                    <body>
+                      ${mail.htmlBody || mail.textBody || mail.snippet || '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'}
+                    </body>
+                  </html>
+                `}
+              />
+            </div>
           </div>
 
           {/* --- REPLY EDITOR AREA --- */}
           {isReplying && (
-            <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200 border-t border-white/10 pt-6">
-              <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
+            <div className="px-6 pb-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+              <div className="flex items-center gap-2 text-sm text-secondary dark:text-gray-400 mb-1">
                 <FaReply /> Replying to{" "}
-                <span className="text-white">{senderName}</span>
+                <span className="text-foreground dark:text-white font-medium">{senderName}</span>
               </div>
               <textarea
                 ref={replyTextareaRef}
                 autoFocus
-                className="w-full bg-[#1e1e1e] border border-white/20 rounded-md p-4 text-gray-200 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 min-h-[150px] resize-y"
+                className="w-full bg-background dark:bg-[#1e1e1e] border border-divider dark:border-gray-700 rounded-md p-4 text-foreground dark:text-gray-200 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
                 placeholder="Type your reply here..."
                 value={replyBody}
                 onChange={(e) => setReplyBody(e.target.value)}
@@ -288,29 +329,27 @@ const MailReadingModal = ({
                 <button
                   onClick={() => setIsReplying(false)}
                   disabled={isSending}
-                  className="px-4 py-2 hover:bg-white/10 text-gray-400 hover:text-white text-sm rounded transition-colors cursor-pointer"
+                  className="px-4 py-2 hover:bg-muted dark:hover:bg-white/10 text-secondary dark:text-gray-400 hover:text-foreground dark:hover:text-white text-sm rounded transition-colors cursor-pointer"
                 >
                   Discard
                 </button>
               </div>
             </div>
           )}
-
-          <div className="h-10"></div>
         </div>
 
-        {/* --- BOTTOM ACTION BAR (Sticky) --- */}
+        {/* --- BOTTOM ACTION BAR --- */}
         {!isReplying && (
-          <div className="absolute bottom-6 left-6 flex flex-row gap-3 z-10">
+          <div className="border-t border-divider dark:border-gray-800 p-4 flex flex-row gap-3 bg-background dark:bg-[#121212]">
             <button
               onClick={handleReplyClick}
-              className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] hover:scale-105 active:scale-95 text-gray-200 text-sm rounded-full border border-white/10 transition-all cursor-pointer shadow-lg"
+              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded transition-colors cursor-pointer"
             >
               <FaReply /> Reply
             </button>
             <button
               onClick={() => alert("Forward clicked")}
-              className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] hover:scale-105 active:scale-95 text-gray-200 text-sm rounded-full border border-white/10 transition-all cursor-pointer shadow-lg"
+              className="flex items-center gap-2 px-4 py-2 bg-muted dark:bg-[#2c2c2c] hover:bg-muted/80 dark:hover:bg-[#383838] text-foreground dark:text-gray-200 text-sm rounded transition-colors cursor-pointer"
             >
               <FaShare /> Forward
             </button>
@@ -482,33 +521,39 @@ export default function KanbanPage() {
   };
 
   // --- LOGIC TO OPEN MAIL ---
-  const handleOpenMail = (item: MailItem) => {
-    // Convert Kanban MailItem to detailed EmailData
-    const detailedMail: EmailData = {
-      id: item.id,
-      subject: item.subject,
-      from: `${item.sender} <support@${item.sender
-        .toLowerCase()
-        .replace(/\s/g, "")}.com>`,
-      to: "me@example.com",
-      date: new Date().toISOString(), // Use current time or parse item.time
-      textBody: item.summary,
-      // Generating a fake body for demo purposes since Kanban item doesn't have it
-      htmlBody: `
-            <p style="font-size: 16px; color: #fff;">Hi there,</p>
-            <p>${item.summary}</p>
-            <br/>
-            <p>Here are the details you requested. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
-            <ul>
-                <li>Item 1: Checked</li>
-                <li>Item 2: Pending</li>
-                <li>Item 3: <b>Done</b></li>
-            </ul>
-            <br/>
-            <p>Best Regards,<br/>${item.sender}</p>
-        `,
-    };
-    setOpenedMail(detailedMail);
+  const handleOpenMail = async (item: MailItem) => {
+    try {
+      // Fetch real email data from API
+      const response = await api.get(`/emails/${item.id}`);
+      const emailData = response.data;
+      
+      // Convert to EmailData format
+      const detailedMail: EmailData = {
+        id: emailData.id,
+        subject: emailData.subject,
+        from: emailData.from,
+        to: emailData.to,
+        date: emailData.date,
+        textBody: emailData.textBody,
+        htmlBody: emailData.htmlBody,
+        snippet: emailData.snippet,
+        labelIds: emailData.labelIds,
+      };
+      setOpenedMail(detailedMail);
+    } catch (error) {
+      console.error('Failed to fetch email details:', error);
+      // Fallback to summary if API fails
+      const detailedMail: EmailData = {
+        id: item.id,
+        subject: item.subject,
+        from: item.from || `${item.sender} <${item.sender.toLowerCase().replace(/\s/g, "")}@example.com>`,
+        to: "me@example.com",
+        date: item.date || new Date().toISOString(),
+        textBody: item.summary,
+        snippet: item.summary,
+      };
+      setOpenedMail(detailedMail);
+    }
   };
 
   const onDragEnd = async (result: DropResult) => {
