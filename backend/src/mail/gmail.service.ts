@@ -32,6 +32,89 @@ export class GmailService {
     return res.data.labels || [];
   }
 
+  // ============================================
+  // KANBAN LABEL MANAGEMENT
+  // ============================================
+
+  /**
+   * Tạo custom label trong Gmail
+   * Gmail sẽ tự động lưu label này vào tài khoản user
+   */
+  async createLabel(userId: string, name: string, color?: { backgroundColor: string; textColor: string }) {
+    const client = await this.getOAuthClientForUser(userId);
+    const gmail = google.gmail({ version: 'v1', auth: client });
+    
+    try {
+      const res = await gmail.users.labels.create({
+        userId: 'me',
+        requestBody: {
+          name,
+          labelListVisibility: 'labelShow',
+          messageListVisibility: 'show',
+          color: color || {
+            backgroundColor: '#16a765',
+            textColor: '#ffffff'
+          }
+        }
+      });
+      
+      logger.log(`✅ Created label "${name}" with ID: ${res.data.id}`);
+      return res.data;
+    } catch (err) {
+      // Nếu label đã tồn tại, trả về label hiện có
+      if (err.code === 409 || err.message?.includes('already exists')) {
+        logger.log(`Label "${name}" already exists, fetching existing...`);
+        const labels = await this.listLabels(userId);
+        const existing = labels.find(l => l.name === name);
+        return existing;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Khởi tạo tất cả Kanban labels cần thiết
+   * Gọi method này khi user login lần đầu hoặc khi cần setup
+   */
+  async initializeKanbanLabels(userId: string) {
+    const kanbanLabels = [
+      { name: 'TODO', color: { backgroundColor: '#fb4c2f', textColor: '#ffffff' } },      // Red
+      { name: 'IN_PROGRESS', color: { backgroundColor: '#fad165', textColor: '#000000' } }, // Yellow
+      { name: 'DONE', color: { backgroundColor: '#16a765', textColor: '#ffffff' } },       // Green
+      { name: 'SNOOZED', color: { backgroundColor: '#a479e2', textColor: '#ffffff' } },    // Purple
+    ];
+
+    const createdLabels = [];
+    
+    for (const label of kanbanLabels) {
+      try {
+        const created = await this.createLabel(userId, label.name, label.color);
+        createdLabels.push(created);
+      } catch (err) {
+        logger.error(`Failed to create label ${label.name}:`, err);
+      }
+    }
+
+    logger.log(`✅ Initialized ${createdLabels.length} Kanban labels`);
+    return createdLabels;
+  }
+
+  /**
+   * Lấy Kanban labels của user
+   * Labels này được LƯU TRONG GMAIL, không phải MongoDB
+   */
+  async getKanbanLabels(userId: string) {
+    const allLabels = await this.listLabels(userId);
+    
+    // Filter chỉ lấy các labels Kanban
+    const kanbanLabelNames = ['TODO', 'IN_PROGRESS', 'DONE', 'SNOOZED'];
+    const kanbanLabels = allLabels.filter(label => 
+      kanbanLabelNames.includes(label.name)
+    );
+
+    return kanbanLabels;
+  }
+
   async listMessagesInLabel(userId: string, labelId: string, pageSize = 20, pageToken?: string) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
@@ -306,5 +389,73 @@ export class GmailService {
     });
 
     return res.data;
+  }
+
+  // ============================================
+  // KANBAN WORKFLOW - MOVE EMAILS BETWEEN COLUMNS
+  // ============================================
+
+  /**
+   * Move email giữa các Kanban columns
+   * @param userId - User ID
+   * @param messageId - Email ID cần move
+   * @param fromColumn - Column hiện tại (optional) - sẽ remove label này
+   * @param toColumn - Column đích - sẽ add label này
+   * 
+   * Ví dụ: moveEmailBetweenColumns(userId, emailId, 'TODO', 'DONE')
+   * → Remove label TODO, Add label DONE
+   */
+  async moveEmailBetweenColumns(
+    userId: string, 
+    messageId: string, 
+    fromColumn: string | null,
+    toColumn: string
+  ) {
+    const client = await this.getOAuthClientForUser(userId);
+    const gmail = google.gmail({ version: 'v1', auth: client });
+
+    // Get all labels để tìm label IDs
+    const allLabels = await this.listLabels(userId);
+    
+    // Tìm label IDs dựa trên tên
+    const fromLabel = fromColumn ? allLabels.find(l => l.name === fromColumn) : null;
+    const toLabel = allLabels.find(l => l.name === toColumn);
+
+    if (!toLabel) {
+      throw new Error(`Label "${toColumn}" not found. Please initialize Kanban labels first.`);
+    }
+
+    const addLabelIds = [toLabel.id];
+    const removeLabelIds = fromLabel ? [fromLabel.id] : [];
+
+    logger.log(`Moving email ${messageId}: ${fromColumn || 'none'} → ${toColumn}`);
+    logger.log(`Remove labels: ${removeLabelIds.join(', ')}`);
+    logger.log(`Add labels: ${addLabelIds.join(', ')}`);
+
+    const res = await gmail.users.messages.modify({
+      userId: 'me',
+      id: messageId,
+      requestBody: { addLabelIds, removeLabelIds }
+    });
+
+    return res.data;
+  }
+
+  /**
+   * Get emails by Kanban column
+   * @param userId - User ID
+   * @param columnName - Tên column: 'TODO', 'IN_PROGRESS', 'DONE', 'SNOOZED'
+   */
+  async getEmailsByColumn(userId: string, columnName: string, pageSize = 50, pageToken?: string) {
+    // Get label ID from column name
+    const allLabels = await this.listLabels(userId);
+    const columnLabel = allLabels.find(l => l.name === columnName);
+
+    if (!columnLabel) {
+      throw new Error(`Column "${columnName}" not found. Please initialize Kanban labels first.`);
+    }
+
+    // Reuse existing method
+    return this.listMessagesInLabel(userId, columnLabel.id, pageSize, pageToken);
   }
 }
