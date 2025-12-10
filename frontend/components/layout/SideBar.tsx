@@ -92,6 +92,12 @@ const SideBar = ({
               : "hover:bg-muted/50 text-foreground"
           }
         `}
+        onClick={() => {
+          // Nếu trên mobile và sidebar đang mở, đóng nó khi click vào link
+          if (isKanbanMode) {
+            kanbanClick();
+          }
+        }}
       >
         <div className="flex items-center justify-center">
           <Icon
@@ -126,7 +132,7 @@ const SideBar = ({
           {/* User Container */}
           <div
             className={`flex flex-row items-center gap-2 ${
-              isExpanded ? "justify-between" : "justify-center"
+              isExpanded ? "" : "justify-center"
             } w-full`}
           >
             <div className="flex flex-row items-center gap-2">
@@ -164,7 +170,7 @@ const SideBar = ({
               <FaPenToSquare size={16} />
             </div>
             {isExpanded && (
-              <span className="whitespace-nowrap font-medium">Compose</span>
+              <span className="whitespace-nowrap font-medium">New email</span>
             )}
           </button>
 

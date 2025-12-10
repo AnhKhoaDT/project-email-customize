@@ -240,17 +240,13 @@ export default function Home() {
           md:flex md:w-2/3 w-full
         `}
       >
-        {isKanBanMode ? (
-          <Kanban />
-        ) : (
-          <MailContent
-            mail={selectedMail}
-            onBack={() => setSelectedMail(null)}
-            onForwardClick={() => selectedMail && setIsForwardOpen(true)}
-            onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
-            triggerReply={replyTrigger}
-          />
-        )}
+        <MailContent
+          mail={selectedMail}
+          onBack={() => setSelectedMail(null)}
+          onForwardClick={() => selectedMail && setIsForwardOpen(true)}
+          onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
+          triggerReply={replyTrigger}
+        />
       </div>
 
       {/* Forward Modal vẫn giữ ở Page vì nó phụ thuộc vào selectedMail */}
