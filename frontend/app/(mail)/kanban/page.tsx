@@ -36,6 +36,7 @@ import {
   IoMdClose,
   IoMdMore,
   IoMdSend,
+  IoMdRefresh,
 } from "react-icons/io";
 
 // --- TYPES ---
@@ -402,7 +403,34 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
 };
 
 // --- COMPONENT: MAIL CARD ---
-const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
+const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary }: any) => {
+  const [isRegenerating, setIsRegenerating] = React.useState(false);
+  const [rateLimitError, setRateLimitError] = React.useState<string | null>(null);
+
+  const handleRegenerate = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsRegenerating(true);
+    setRateLimitError(null);
+    try {
+      const result = await onRegenerateSummary(item.id, true); // forceRegenerate = true
+      
+      // Check for rate limit error
+      if (result === null) {
+        setRateLimitError("Rate limit exceeded. Please wait a moment.");
+      }
+    } catch (error: any) {
+      if (error?.response?.status === 429) {
+        setRateLimitError("Too many requests. Please try again later.");
+      }
+    } finally {
+      setIsRegenerating(false);
+      // Clear error after 3 seconds
+      if (rateLimitError) {
+        setTimeout(() => setRateLimitError(null), 3000);
+      }
+    }
+  };
+
   return (
     <Draggable draggableId={item.id} index={index}>
       {(provided, snapshot) => (
@@ -442,9 +470,22 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
           </h3>
 
           <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 mb-3 ml-2 text-xs text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-800">
-            <div className="flex items-center gap-1 mb-1 text-gray-500 dark:text-gray-400 font-semibold">
-              <HiSparkles className="text-purple-500 dark:text-purple-400" /> <span>AI Summary</span>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-semibold">
+                <HiSparkles className="text-purple-500 dark:text-purple-400" /> <span>AI Summary</span>
+              </div>
+              <button
+                onClick={handleRegenerate}
+                disabled={isRegenerating}
+                className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Regenerate summary (10/min limit)"
+              >
+                <IoMdRefresh className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
+              </button>
             </div>
+            {rateLimitError && (
+              <p className="text-red-500 dark:text-red-400 text-xs mb-1">{rateLimitError}</p>
+            )}
             <p className="line-clamp-2">{item.summary}</p>
           </div>
 
@@ -663,7 +704,7 @@ export default function KanbanPage() {
                       index={index}
                       onSnoozeClick={handleOpenSnooze}
                       onOpenClick={handleOpenMail}
-                      onGenerateSummary={generateSummary}
+                      onRegenerateSummary={generateSummary}
                     />
                   ))}
                   {provided.placeholder}
@@ -705,7 +746,7 @@ export default function KanbanPage() {
                       index={index}
                       onSnoozeClick={handleOpenSnooze}
                       onOpenClick={handleOpenMail}
-                      onGenerateSummary={generateSummary}
+                      onRegenerateSummary={generateSummary}
                     />
                   ))}
                   {provided.placeholder}
@@ -747,7 +788,7 @@ export default function KanbanPage() {
                       index={index}
                       onSnoozeClick={handleOpenSnooze}
                       onOpenClick={handleOpenMail}
-                      onGenerateSummary={generateSummary}
+                      onRegenerateSummary={generateSummary}
                     />
                   ))}
                   {provided.placeholder}

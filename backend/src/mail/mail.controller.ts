@@ -27,12 +27,54 @@ function readJSON(p: string) {
 @Controller()
 export class MailController {
   private dataDir = path.join(__dirname, 'data');
+  
+  // Rate limiting: Track summarize requests per user
+  // Map<userId, Array<timestamp>>
+  private summarizeRateLimit = new Map<string, number[]>();
+  private readonly MAX_REQUESTS_PER_MINUTE = 10;
+  
   constructor(
     private gmailService: GmailService,
     private aiService: AiService,
     private snoozeService: SnoozeService,
     private emailMetadataService: EmailMetadataService,
   ) {}
+  
+  /**
+   * Check if user has exceeded rate limit for summarize requests
+   * @param userId - User ID
+   * @returns true if rate limit exceeded, false otherwise
+   */
+  private checkRateLimit(userId: string): { allowed: boolean; remaining: number } {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    
+    // Get user's request history
+    let userRequests = this.summarizeRateLimit.get(userId) || [];
+    
+    // Remove requests older than 1 minute
+    userRequests = userRequests.filter(timestamp => timestamp > oneMinuteAgo);
+    
+    // Update map
+    this.summarizeRateLimit.set(userId, userRequests);
+    
+    // Check if limit exceeded
+    const allowed = userRequests.length < this.MAX_REQUESTS_PER_MINUTE;
+    const remaining = Math.max(0, this.MAX_REQUESTS_PER_MINUTE - userRequests.length);
+    
+    return { allowed, remaining };
+  }
+  
+  /**
+   * Record a summarize request for rate limiting
+   * @param userId - User ID
+   */
+  private recordRequest(userId: string): void {
+    const now = Date.now();
+    const userRequests = this.summarizeRateLimit.get(userId) || [];
+    userRequests.push(now);
+    this.summarizeRateLimit.set(userId, userRequests);
+  }
 
   @UseGuards(JwtAuthGuard)
   @Get('mailboxes')
@@ -297,21 +339,41 @@ export class MailController {
 
   @UseGuards(JwtAuthGuard)
   @Post('emails/:id/summarize')
-  async summarizeEmail(@Req() req: any, @Param('id') emailId: string) {
+  async summarizeEmail(@Req() req: any, @Param('id') emailId: string, @Body() body?: { forceRegenerate?: boolean; structured?: boolean }) {
     try {
+      const forceRegenerate = body?.forceRegenerate || false;
+      
+      // Rate limiting check
+      const rateLimitCheck = this.checkRateLimit(req.user.id);
+      if (!rateLimitCheck.allowed) {
+        return { 
+          status: 429, 
+          message: `Rate limit exceeded. You can make ${this.MAX_REQUESTS_PER_MINUTE} summarize requests per minute. Please try again later.`,
+          data: {
+            remaining: 0,
+            resetIn: 60 // seconds
+          }
+        };
+      }
+      
+      // Record this request for rate limiting
+      this.recordRequest(req.user.id);
+      
       // BƯỚC 1: Fetch full email từ Gmail
       const email = await this.gmailService.getMessage(req.user.id, emailId);
       
-      // BƯỚC 2: Check xem đã có summary trong cache chưa
-      const existingSummary = await this.emailMetadataService.getSummary(req.user.id, emailId);
-      if (existingSummary) {
-        return { 
-          status: 200, 
-          data: { 
-            summary: existingSummary, 
-            cached: true 
-          } 
-        };
+      // BƯỚC 2: Check xem đã có summary trong cache chưa (skip nếu forceRegenerate)
+      if (!forceRegenerate) {
+        const existingSummary = await this.emailMetadataService.getSummary(req.user.id, emailId);
+        if (existingSummary) {
+          return { 
+            status: 200, 
+            data: { 
+              summary: existingSummary, 
+              cached: true 
+            } 
+          };
+        }
       }
 
       // BƯỚC 3: Generate summary bằng AI
@@ -334,11 +396,17 @@ export class MailController {
         'gemini-1.5-flash'
       );
 
+      const rateLimitStatus = this.checkRateLimit(req.user.id);
+      
       return { 
         status: 200, 
         data: { 
           summary: summaryText, 
-          cached: false 
+          cached: false,
+          rateLimit: {
+            remaining: rateLimitStatus.remaining,
+            max: this.MAX_REQUESTS_PER_MINUTE
+          }
         } 
       };
 

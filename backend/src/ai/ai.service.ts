@@ -28,6 +28,15 @@ export class AiService {
     
     // In-memory cache for summaries (in production, use Redis or MongoDB)
     private summaryCache: Map<string, { summary: string; createdAt: Date }> = new Map();
+    
+    // Fallback models in priority order (best to worst)
+    private readonly FALLBACK_MODELS = [
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-pro',
+        'gemini-2.0-flash',
+        'gemini-2.0-flash-lite',
+    ];
 
     constructor(private configService: ConfigService) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
@@ -36,10 +45,34 @@ export class AiService {
             this.logger.warn('Get your API key from: https://ai.google.dev/');
         } else {
             this.genAI = new GoogleGenerativeAI(apiKey);
-            // Use a stable model name
-            this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-            this.logger.log('✅ Gemini AI initialized successfully');
+            // Use primary model: Gemini 2.5 Flash - Best for price-performance
+            this.model = this.genAI.getGenerativeModel({ model: this.FALLBACK_MODELS[0] });
+            this.logger.log(`✅ Gemini AI initialized with primary model: ${this.FALLBACK_MODELS[0]}`);
         }
+    }
+    
+    /**
+     * Get a Gemini model by name
+     */
+    private getModel(modelName: string): GenerativeModel {
+        return this.genAI.getGenerativeModel({ model: modelName });
+    }
+    
+    /**
+     * Check if error is a quota/rate limit error
+     */
+    private isQuotaError(error: any): boolean {
+        const errorMessage = error?.message?.toLowerCase() || '';
+        const errorStatus = error?.status || error?.statusCode || 0;
+        
+        return (
+            errorStatus === 429 ||
+            errorStatus === 503 ||
+            errorMessage.includes('quota') ||
+            errorMessage.includes('rate limit') ||
+            errorMessage.includes('resource exhausted') ||
+            errorMessage.includes('429')
+        );
     }
 
     /**
@@ -101,34 +134,73 @@ Respond ONLY with valid JSON in this exact format:
             } else {
                 // Simple summary (default) - Optimized for Kanban cards
                 prompt = `
-You are an intelligent email assistant specializing in creating concise, actionable summaries.
+You are an expert email analyst. Your job is to READ, UNDERSTAND, and CREATE a super short summary.
 
-Task: Create a brief, scannable summary of this email in ONE sentence (max 15 words) using the SAME language as the email content.
+EXAMPLES (Learn from these):
+- Email: "Google AI Studio và Vertex AI hỗ trợ Gemini models..." → Summary: "Gemini models có sẵn trên Google AI Studio"
+- Email: "Meeting rescheduled to 3pm tomorrow due to conflict" → Summary: "Meeting moved to 3pm tomorrow"
+- Email: "Your package #12345 has been delivered to your address" → Summary: "Package delivered successfully"
 
-Guidelines:
-- Start with the main action or topic (not "Email from...")
-- Remove unnecessary details (greetings, signatures, footers)
-- Focus on: What does the sender want? What's the key information?
-- For notifications: Extract the core update or change
-- For social media: Summarize the main content, not metadata
-- Keep it conversational and natural
+YOUR TASK:
+1. Read the email below carefully
+2. Identify the MAIN point (not just copy text)
+3. Write ONE sentence summary (max 12 words)
+4. Use the SAME language as the email body
+
+DO NOT:
+- Copy/paste email text directly
+- Start with "Email from..." or "Hiện tại..."
+- Include greetings or signatures
+- Use more than 12 words
 
 Email Details:
 From: ${sender}
 Subject: ${subject}
+Content: ${truncatedBody}
 
-Body:
-${truncatedBody}
-
-Summary (one sentence, max 15 words):
-                `.trim();
+Think: What is the ONE key message?
+Your summary (max 12 words):`.trim();
             }
 
-            // 3. Call Gemini API
-            this.logger.debug(`Generating ${options?.structured ? 'structured ' : ''}summary for email from ${sender}`);
-            const result = await this.model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
+            // 3. Call Gemini API with fallback
+            let text: string;
+            let usedModel: string | null = null;
+            
+            // Try each model in fallback order
+            for (let i = 0; i < this.FALLBACK_MODELS.length; i++) {
+                const modelName = this.FALLBACK_MODELS[i];
+                
+                try {
+                    const model = this.getModel(modelName);
+                    const result = await model.generateContent(prompt);
+                    const response = await result.response;
+                    text = response.text();
+                    usedModel = modelName;
+                    
+                    // Log if using fallback model
+                    if (i > 0) {
+                        this.logger.log(`✅ Succeeded with fallback model: ${modelName} (attempt ${i + 1}/${this.FALLBACK_MODELS.length})`);
+                    }
+                    
+                    break; // Success, exit loop
+                } catch (error) {
+                    const isLastModel = i === this.FALLBACK_MODELS.length - 1;
+                    
+                    if (this.isQuotaError(error)) {
+                        this.logger.warn(`⚠️  Model ${modelName} quota exceeded, trying next model...`);
+                        
+                        if (isLastModel) {
+                            this.logger.error('❌ All models exhausted - using fallback summary');
+                            throw new Error('All Gemini models quota exceeded');
+                        }
+                        // Continue to next model
+                    } else {
+                        // Non-quota error, throw immediately
+                        this.logger.error(`❌ Model ${modelName} error: ${error.message}`);
+                        throw error;
+                    }
+                }
+            }
 
             // 4. Parse response
             if (options?.structured) {
@@ -137,7 +209,6 @@ Summary (one sentence, max 15 words):
                     const jsonMatch = text.match(/\{[\s\S]*\}/);
                     if (jsonMatch) {
                         const parsed = JSON.parse(jsonMatch[0]) as SummaryResult;
-                        this.logger.log(`✅ Structured summary generated: [${parsed.urgency}] ${parsed.summary.substring(0, 50)}...`);
                         return parsed;
                     }
                 } catch (parseError) {
@@ -146,8 +217,6 @@ Summary (one sentence, max 15 words):
             }
 
             const summary = text.trim();
-            this.logger.log(`✅ Summary generated: ${summary.substring(0, 80)}...`);
-
             return summary;
         } catch (error) {
             this.logger.error(`Failed to summarize email: ${error.message}`, error.stack);
@@ -188,7 +257,6 @@ Summary (one sentence, max 15 words):
         
         const cached = this.summaryCache.get(emailId);
         if (cached) {
-            this.logger.debug(`Cache hit for email ${emailId}`);
             return cached;
         }
         
@@ -205,8 +273,6 @@ Summary (one sentence, max 15 words):
             summary,
             createdAt: new Date(),
         });
-        
-        this.logger.debug(`Cached summary for email ${emailId}`);
         
         // Optional: Limit cache size (FIFO eviction)
         if (this.summaryCache.size > 1000) {
@@ -245,16 +311,10 @@ Summary (one sentence, max 15 words):
 
         const maxConcurrency = options?.maxConcurrency || 3; // Default: 3 concurrent requests
         const results = [];
-        
-        this.logger.log(`🚀 Starting batch summarization: ${emails.length} emails (concurrency: ${maxConcurrency})`);
 
         // Process emails in chunks
         for (let i = 0; i < emails.length; i += maxConcurrency) {
             const chunk = emails.slice(i, i + maxConcurrency);
-            const chunkNumber = Math.floor(i / maxConcurrency) + 1;
-            const totalChunks = Math.ceil(emails.length / maxConcurrency);
-            
-            this.logger.debug(`Processing chunk ${chunkNumber}/${totalChunks} (${chunk.length} emails)`);
 
             // Process chunk in parallel
             const chunkResults = await Promise.allSettled(
@@ -264,7 +324,6 @@ Summary (one sentence, max 15 words):
                         if (options?.useCache !== false) {
                             const cached = await this.getCachedSummary(email.id);
                             if (cached) {
-                                this.logger.debug(`✓ Cache hit: ${email.id}`);
                                 return { emailId: email.id, summary: cached.summary };
                             }
                         }
@@ -309,14 +368,10 @@ Summary (one sentence, max 15 words):
 
             // Rate limiting: delay between chunks (except after last chunk)
             if (i + maxConcurrency < emails.length) {
-                this.logger.debug(`⏳ Rate limiting: waiting 1s before next chunk...`);
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
         }
 
-        const successCount = results.filter(r => r.summary && r.summary !== '').length;
-        this.logger.log(`✅ Batch summarization completed: ${successCount}/${emails.length} emails successful`);
-        
         return results;
     }
 

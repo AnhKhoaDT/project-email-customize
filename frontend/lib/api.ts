@@ -269,10 +269,11 @@ export const moveEmailToColumn = async (
 /**
  * Generate AI summary for an email
  * @param emailId - Gmail message ID
+ * @param forceRegenerate - Force regenerate summary even if exists
  * @param structured - Return structured output with urgency/action
  */
-export const generateEmailSummary = async (emailId: string, structured = false) => {
-  const response = await api.post(`/emails/${emailId}/summarize`, { structured });
+export const generateEmailSummary = async (emailId: string, forceRegenerate = false, structured = false) => {
+  const response = await api.post(`/emails/${emailId}/summarize`, { forceRegenerate, structured });
   return response.data;
 };
 
