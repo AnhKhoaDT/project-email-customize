@@ -17,15 +17,15 @@ export class AiController {
     @Post('summarize')
     async summarize(@Req() req: any, @Body() dto: SummarizeEmailDto) {
         try {
-            const { sender, subject, body, emailId, forceRegenerate } = dto;
+            const { sender, subject, body, emailId, forceRegenerate, structured } = dto;
 
             // Validate input
             if (!sender || !subject || !body) {
                 throw new BadRequestException('Missing required fields: sender, subject, body');
             }
 
-            // Check cache if emailId provided and not forcing regeneration
-            if (emailId && !forceRegenerate) {
+            // Check cache if emailId provided and not forcing regeneration (only for non-structured)
+            if (emailId && !forceRegenerate && !structured) {
                 const cached = await this.aiService.getCachedSummary(emailId);
                 if (cached) {
                     return {
@@ -38,14 +38,19 @@ export class AiController {
             }
 
             // Generate new summary
-            const summary = await this.aiService.summarizeEmail(sender, subject, body);
+            const summary = await this.aiService.summarizeEmail(
+                sender, 
+                subject, 
+                body,
+                { structured }
+            );
 
             if (!summary) {
                 throw new InternalServerErrorException('Failed to generate summary');
             }
 
-            // Cache summary if emailId provided
-            if (emailId) {
+            // Cache summary if emailId provided (only cache string summaries)
+            if (emailId && typeof summary === 'string') {
                 await this.aiService.cacheSummary(emailId, summary);
             }
 
@@ -53,6 +58,7 @@ export class AiController {
                 summary,
                 emailId,
                 cached: false,
+                structured: !!structured,
                 cachedAt: new Date(),
             };
         } catch (err) {
@@ -64,73 +70,42 @@ export class AiController {
     }
 
     /**
-     * Batch summarize multiple emails
+     * Batch summarize multiple emails (with rate limiting)
      * POST /ai/summarize/batch
-     * Body: { emails: [{ emailId, sender, subject, body }] }
+     * Body: { emails: [{ emailId, sender, subject, body }], structured?: boolean, useCache?: boolean }
      */
     @UseGuards(JwtAuthGuard)
     @Post('summarize/batch')
     async batchSummarize(@Req() req: any, @Body() dto: BatchSummarizeDto) {
         try {
-            const { emails } = dto;
+            const { emails, structured, useCache, maxConcurrency } = dto;
 
             if (!emails || emails.length === 0) {
                 throw new BadRequestException('No emails provided');
             }
 
-            const results = await Promise.allSettled(
-                emails.map(async (email) => {
-                    // Check cache first
-                    if (email.emailId) {
-                        const cached = await this.aiService.getCachedSummary(email.emailId);
-                        if (cached) {
-                            return {
-                                emailId: email.emailId,
-                                summary: cached.summary,
-                                cached: true,
-                            };
-                        }
-                    }
+            // Transform to expected format
+            const emailsFormatted = emails.map(e => ({
+                id: e.emailId || `temp-${Date.now()}-${Math.random()}`,
+                sender: e.sender,
+                subject: e.subject,
+                body: e.body,
+            }));
 
-                    // Generate summary
-                    const summary = await this.aiService.summarizeEmail(
-                        email.sender,
-                        email.subject,
-                        email.body
-                    );
-
-                    // Cache if emailId provided
-                    if (email.emailId && summary) {
-                        await this.aiService.cacheSummary(email.emailId, summary);
-                    }
-
-                    return {
-                        emailId: email.emailId,
-                        summary,
-                        cached: false,
-                    };
-                })
+            // Use the hybrid batch method with controlled concurrency
+            const results = await this.aiService.summarizeMultipleEmails(
+                emailsFormatted,
+                { structured, useCache, maxConcurrency }
             );
 
-            const summaries = [];
-            const failed = [];
-
-            results.forEach((result, index) => {
-                if (result.status === 'fulfilled') {
-                    summaries.push(result.value);
-                } else {
-                    failed.push({
-                        emailId: emails[index].emailId,
-                        error: result.reason?.message || 'Unknown error',
-                    });
-                }
-            });
-
             return {
-                summaries,
-                failed,
+                summaries: results.map(r => ({
+                    emailId: r.emailId,
+                    summary: r.summary,
+                })),
                 total: emails.length,
-                successful: summaries.length,
+                successful: results.length,
+                concurrency: maxConcurrency || 3,
             };
         } catch (err) {
             if (err instanceof BadRequestException) {

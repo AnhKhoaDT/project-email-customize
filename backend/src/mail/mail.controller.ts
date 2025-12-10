@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, Res } from '
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GmailService } from './gmail.service';
-import { AiService } from './ai.service';
+import { AiService } from '../ai/ai.service';
 import { SnoozeService } from './snooze.service';
 import { EmailMetadataService } from './email-metadata.service';
 import { SendEmailDto } from './dto/send-email.dto';
@@ -315,25 +315,29 @@ export class MailController {
       }
 
       // BƯỚC 3: Generate summary bằng AI
-      const summary = await this.aiService.summarizeEmail({
-        subject: email.subject || '',
-        from: email.from || '',
-        body: email.textBody || email.htmlBody || email.snippet || ''
-      });
+      const summary = await this.aiService.summarizeEmail(
+        email.from || '',
+        email.subject || '',
+        email.textBody || email.htmlBody || email.snippet || '',
+        { structured: false } // Simple summary for mail controller
+      );
+
+      // Handle fallback case (when summary is not a string)
+      const summaryText = typeof summary === 'string' ? summary : 'Unable to generate summary';
 
       // BƯỚC 4: Save summary vào MongoDB để cache
       await this.emailMetadataService.saveSummary(
         req.user.id,
         emailId,
         email.threadId,
-        summary,
-        'gemini-pro'
+        summaryText,
+        'gemini-1.5-flash'
       );
 
       return { 
         status: 200, 
         data: { 
-          summary, 
+          summary: summaryText, 
           cached: false 
         } 
       };

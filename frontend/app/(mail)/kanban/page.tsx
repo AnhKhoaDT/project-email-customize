@@ -7,6 +7,8 @@ import {
   Draggable,
   DropResult,
 } from "@hello-pangea/dnd";
+import { useKanbanData } from "@/hooks/useKanbanData";
+import api from "@/lib/api";
 // Icons for Kanban
 import {
   TbLayoutSidebarRightExpandFilled,
@@ -38,13 +40,18 @@ import {
 // --- TYPES ---
 type MailItem = {
   id: string;
+  threadId: string;
   sender: string;
   time: string;
   avatar: string;
   subject: string;
-  summary: string;
+  summary?: string;
   color: string;
   snoozeUntil?: number;
+  from?: string;
+  date?: string;
+  snippet?: string;
+  status?: string;
 };
 
 // Detailed type for the Reading View
@@ -60,33 +67,7 @@ interface EmailData {
   labelIds?: string[];
 }
 
-// --- INITIAL DATA ---
-const initialData = {
-  inbox: [
-    {
-      id: "mail-1",
-      sender: "Google Cloud Platform",
-      time: "10:30 AM",
-      avatar: "G",
-      subject: "Invoice for October 2023",
-      summary: "Hóa đơn dịch vụ Cloud tháng 10. Tổng tiền: $150.00.",
-      color: "bg-red-500",
-    },
-    {
-      id: "mail-2",
-      sender: "Vercel Team",
-      time: "Yesterday",
-      avatar: "V",
-      subject: "Deployment Success",
-      summary:
-        "Your project 'kanban-board' was successfully deployed to production.",
-      color: "bg-black",
-    },
-  ],
-  todo: [],
-  done: [],
-  snoozed: [],
-};
+// Note: initialData removed - now using real data from useKanbanData hook
 
 // --- HELPER FUNCTIONS FOR MAIL VIEW ---
 const getSenderName = (fromStr: string) => {
@@ -389,9 +370,9 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          className={`bg-white rounded-lg border p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all ${
+          className={`bg-white rounded-lg border p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${
             snapshot.isDragging
-              ? "shadow-xl ring-2 ring-blue-400 rotate-2 opacity-90"
+              ? "shadow-xl ring-2 ring-blue-400 rotate-2 opacity-90 cursor-grabbing"
               : ""
           }`}
           style={{ ...provided.draggableProps.style }}
@@ -449,7 +430,8 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
 
 // --- MAIN PAGE ---
 export default function KanbanPage() {
-  const [columns, setColumns] = useState<any>(initialData);
+  // Use custom hook for Kanban data
+  const { columns, setColumns, isLoading, error, moveEmail, generateSummary } = useKanbanData();
   const [enabled, setEnabled] = useState(false);
 
   // State for Snooze Modal
@@ -498,28 +480,43 @@ export default function KanbanPage() {
     setSnoozeModalOpen(true);
   };
 
-  const confirmSnooze = (durationMs: number) => {
+  const confirmSnooze = async (durationMs: number) => {
     if (!selectedItemToSnooze) return;
-    const sourceColKey = Object.keys(columns).find((key) =>
+    
+    const sourceColKey = (Object.keys(columns) as Array<keyof typeof columns>).find((key) =>
       columns[key].find((i: any) => i.id === selectedItemToSnooze.id)
     );
     if (!sourceColKey) return;
 
-    const snoozedItem = {
-      ...selectedItemToSnooze,
-      snoozeUntil: Date.now() + durationMs,
-    };
+    try {
+      const snoozedUntil = new Date(Date.now() + durationMs).toISOString();
+      
+      // Call API to snooze
+      await api.post(`/emails/${selectedItemToSnooze.id}/snooze`, {
+        threadId: selectedItemToSnooze.threadId,
+        snoozedUntil,
+      });
 
-    setColumns((prev: any) => {
-      const sourceList = prev[sourceColKey].filter(
-        (i: any) => i.id !== selectedItemToSnooze.id
-      );
-      return {
-        ...prev,
-        [sourceColKey]: sourceList,
-        snoozed: [...prev.snoozed, snoozedItem],
+      // Optimistic update
+      const snoozedItem = {
+        ...selectedItemToSnooze,
+        snoozeUntil: Date.now() + durationMs,
       };
-    });
+
+      setColumns((prev: any) => {
+        const sourceList = prev[sourceColKey].filter(
+          (i: any) => i.id !== selectedItemToSnooze.id
+        );
+        return {
+          ...prev,
+          [sourceColKey]: sourceList,
+          snoozed: [...prev.snoozed, snoozedItem],
+        };
+      });
+    } catch (err) {
+      console.error('Failed to snooze email:', err);
+    }
+    
     setSnoozeModalOpen(false);
     setSelectedItemToSnooze(null);
   };
@@ -554,30 +551,65 @@ export default function KanbanPage() {
     setOpenedMail(detailedMail);
   };
 
-  const onDragEnd = (result: DropResult) => {
-    const { source, destination } = result;
+  const onDragEnd = async (result: DropResult) => {
+    const { source, destination, draggableId } = result;
     if (!destination) return;
     if (
       source.droppableId === destination.droppableId &&
       source.index === destination.index
     )
       return;
-    const sourceColId = source.droppableId;
-    const destColId = destination.droppableId;
-    const sourceList = [...columns[sourceColId]];
-    const destList =
-      sourceColId === destColId ? sourceList : [...columns[destColId]];
-    const [removed] = sourceList.splice(source.index, 1);
-    destList.splice(destination.index, 0, removed);
 
-    setColumns({
-      ...columns,
-      [sourceColId]: sourceList,
-      [destColId]: destList,
-    });
+    const sourceColId = source.droppableId as keyof typeof columns;
+    const destColId = destination.droppableId as keyof typeof columns;
+    
+    // Find the email being moved
+    const movedEmail = columns[sourceColId].find((e: any) => e.id === draggableId);
+    if (!movedEmail) return;
+
+    try {
+      // Call API to move email (optimistic update handled by hook)
+      await moveEmail(
+        movedEmail.id,
+        movedEmail.threadId,
+        sourceColId,
+        destColId
+      );
+    } catch (err) {
+      console.error('Failed to move email:', err);
+    }
   };
 
   if (!enabled) return null;
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading Kanban board...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-gray-50">
+        <div className="text-center max-w-md">
+          <p className="text-red-600 mb-4">{error}</p>
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-full bg-gray-50 text-slate-800">
@@ -623,7 +655,8 @@ export default function KanbanPage() {
                       item={item}
                       index={index}
                       onSnoozeClick={handleOpenSnooze}
-                      onOpenClick={handleOpenMail} // Pass handler
+                      onOpenClick={handleOpenMail}
+                      onGenerateSummary={generateSummary}
                     />
                   ))}
                   {provided.placeholder}
@@ -658,13 +691,14 @@ export default function KanbanPage() {
                     snapshot.isDraggingOver ? "bg-orange-50/50" : ""
                   }`}
                 >
-                  {columns.todo.map((item: MailItem, index: number) => (
+                  {columns.todo.map((item: any, index: number) => (
                     <MailCard
                       key={item.id}
                       item={item}
                       index={index}
                       onSnoozeClick={handleOpenSnooze}
                       onOpenClick={handleOpenMail}
+                      onGenerateSummary={generateSummary}
                     />
                   ))}
                   {provided.placeholder}
@@ -699,13 +733,14 @@ export default function KanbanPage() {
                     snapshot.isDraggingOver ? "bg-green-50/50" : ""
                   }`}
                 >
-                  {columns.done.map((item: MailItem, index: number) => (
+                  {columns.done.map((item: any, index: number) => (
                     <MailCard
                       key={item.id}
                       item={item}
                       index={index}
                       onSnoozeClick={handleOpenSnooze}
                       onOpenClick={handleOpenMail}
+                      onGenerateSummary={generateSummary}
                     />
                   ))}
                   {provided.placeholder}

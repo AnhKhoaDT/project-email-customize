@@ -17,4 +17,8 @@ export class SummarizeEmailDto {
   @IsOptional()
   @IsBoolean()
   forceRegenerate?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  structured?: boolean; // Return structured JSON with urgency/action
 }

@@ -2,6 +2,24 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 
+/**
+ * Structured summary result with urgency and action items
+ */
+export interface SummaryResult {
+    summary: string;
+    urgency?: 'high' | 'medium' | 'low';
+    action?: string;
+}
+
+/**
+ * Options for summarization
+ */
+export interface SummarizeOptions {
+    structured?: boolean;     // Return structured JSON with urgency/action
+    useCache?: boolean;       // Use cache (default: true)
+    maxConcurrency?: number;  // Max concurrent API calls for batch (default: 3)
+}
+
 @Injectable()
 export class AiService {
     private readonly logger = new Logger(AiService.name);
@@ -14,30 +32,57 @@ export class AiService {
     constructor(private configService: ConfigService) {
         const apiKey = this.configService.get<string>('GEMINI_API_KEY');
         if (!apiKey) {
-            this.logger.warn('GEMINI_API_KEY not configured - AI features will not work');
+            this.logger.warn('⚠️  GEMINI_API_KEY not configured - AI features will not work');
+            this.logger.warn('Get your API key from: https://ai.google.dev/');
+        } else {
+            this.genAI = new GoogleGenerativeAI(apiKey);
+            // Use a stable model name
+            this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+            this.logger.log('✅ Gemini AI initialized successfully');
         }
-        this.genAI = new GoogleGenerativeAI(apiKey);
-
-        // Use a stable model name
-        this.model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     }
 
-    async summarizeEmail(sender: string, subject: string, body: string): Promise<string> {
+    /**
+     * Summarize email with optional structured output
+     * @param sender - Email sender
+     * @param subject - Email subject
+     * @param body - Email body content
+     * @param options - Summarization options (structured output, cache)
+     * @returns Summary string or structured SummaryResult
+     */
+    async summarizeEmail(
+        sender: string, 
+        subject: string, 
+        body: string,
+        options?: SummarizeOptions
+    ): Promise<string | SummaryResult> {
+        if (!this.model) {
+            this.logger.warn('Gemini AI not initialized - using fallback summary');
+            return this.createFallbackSummary(sender, subject, body);
+        }
+
         try {
             // 1. Pre-processing: Clean and truncate body if too long
             const cleanBody = this.cleanEmailBody(body);
             const truncatedBody = cleanBody.substring(0, 5000);
 
-            // 2. Prompt Engineering: Clear instructions for AI
-            const prompt = `
-You are an intelligent email assistant.
+            // 2. Prompt Engineering based on options
+            let prompt: string;
+            
+            if (options?.structured) {
+                // Structured output with urgency and action items (for Kanban)
+                prompt = `
+You are an expert email analyzer.
 
-Task: Summarize the following email into 1-2 concise sentences in the same language as the email content.
+Task: Analyze and summarize the following email in JSON format.
 
-Focus on:
-- Main topic or request
-- Key action items or deadlines
-- Important context
+Requirements:
+1. summary: 1-2 concise sentences summarizing the main topic
+2. urgency: Classify as "high", "medium", or "low" based on:
+   - high: Deadlines within 24 hours, urgent requests, critical issues
+   - medium: Normal business communications, requests with reasonable timeframe
+   - low: FYI emails, newsletters, non-urgent updates
+3. action: Required action or null if no action needed
 
 Email Details:
 From: ${sender}
@@ -46,23 +91,68 @@ Subject: ${subject}
 Body:
 ${truncatedBody}
 
-Provide a clear, concise summary (max 2 sentences):
-            `.trim();
+Respond ONLY with valid JSON in this exact format:
+{
+  "summary": "Your summary here",
+  "urgency": "high|medium|low",
+  "action": "Required action or null"
+}
+                `.trim();
+            } else {
+                // Simple summary (default) - Optimized for Kanban cards
+                prompt = `
+You are an intelligent email assistant specializing in creating concise, actionable summaries.
+
+Task: Create a brief, scannable summary of this email in ONE sentence (max 15 words) using the SAME language as the email content.
+
+Guidelines:
+- Start with the main action or topic (not "Email from...")
+- Remove unnecessary details (greetings, signatures, footers)
+- Focus on: What does the sender want? What's the key information?
+- For notifications: Extract the core update or change
+- For social media: Summarize the main content, not metadata
+- Keep it conversational and natural
+
+Email Details:
+From: ${sender}
+Subject: ${subject}
+
+Body:
+${truncatedBody}
+
+Summary (one sentence, max 15 words):
+                `.trim();
+            }
 
             // 3. Call Gemini API
-            this.logger.debug(`Generating summary for email from ${sender}`);
+            this.logger.debug(`Generating ${options?.structured ? 'structured ' : ''}summary for email from ${sender}`);
             const result = await this.model.generateContent(prompt);
             const response = await result.response;
             const text = response.text();
 
+            // 4. Parse response
+            if (options?.structured) {
+                try {
+                    // Extract JSON from response (handle markdown code blocks)
+                    const jsonMatch = text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        const parsed = JSON.parse(jsonMatch[0]) as SummaryResult;
+                        this.logger.log(`✅ Structured summary generated: [${parsed.urgency}] ${parsed.summary.substring(0, 50)}...`);
+                        return parsed;
+                    }
+                } catch (parseError) {
+                    this.logger.warn('Failed to parse structured response, falling back to simple summary');
+                }
+            }
+
             const summary = text.trim();
-            this.logger.debug(`Generated summary: ${summary.substring(0, 100)}...`);
+            this.logger.log(`✅ Summary generated: ${summary.substring(0, 80)}...`);
 
             return summary;
         } catch (error) {
             this.logger.error(`Failed to summarize email: ${error.message}`, error.stack);
-            // Return null on error - controller will handle it
-            return null;
+            // Return fallback summary instead of null
+            return this.createFallbackSummary(sender, subject, body);
         }
     }
 
@@ -131,6 +221,117 @@ Provide a clear, concise summary (max 2 sentences):
     clearCache(): void {
         this.summaryCache.clear();
         this.logger.log('Summary cache cleared');
+    }
+
+    /**
+     * Batch summarize multiple emails with controlled concurrency
+     * Processes emails in chunks to balance speed vs API quota limits
+     * 
+     * @param emails - Array of emails to summarize
+     * @param options - Summarization options (structured, useCache, maxConcurrency)
+     * @returns Array of email IDs with their summaries
+     * 
+     * @example
+     * // Process 10 emails, 3 at a time
+     * await summarizeMultipleEmails(emails, { maxConcurrency: 3 });
+     */
+    async summarizeMultipleEmails(
+        emails: Array<{ id: string; sender: string; subject: string; body: string }>,
+        options?: SummarizeOptions
+    ): Promise<Array<{ emailId: string; summary: string | SummaryResult }>> {
+        if (!emails || emails.length === 0) {
+            return [];
+        }
+
+        const maxConcurrency = options?.maxConcurrency || 3; // Default: 3 concurrent requests
+        const results = [];
+        
+        this.logger.log(`🚀 Starting batch summarization: ${emails.length} emails (concurrency: ${maxConcurrency})`);
+
+        // Process emails in chunks
+        for (let i = 0; i < emails.length; i += maxConcurrency) {
+            const chunk = emails.slice(i, i + maxConcurrency);
+            const chunkNumber = Math.floor(i / maxConcurrency) + 1;
+            const totalChunks = Math.ceil(emails.length / maxConcurrency);
+            
+            this.logger.debug(`Processing chunk ${chunkNumber}/${totalChunks} (${chunk.length} emails)`);
+
+            // Process chunk in parallel
+            const chunkResults = await Promise.allSettled(
+                chunk.map(async (email) => {
+                    try {
+                        // Check cache first (if enabled)
+                        if (options?.useCache !== false) {
+                            const cached = await this.getCachedSummary(email.id);
+                            if (cached) {
+                                this.logger.debug(`✓ Cache hit: ${email.id}`);
+                                return { emailId: email.id, summary: cached.summary };
+                            }
+                        }
+
+                        // Generate new summary
+                        const summary = await this.summarizeEmail(
+                            email.sender,
+                            email.subject,
+                            email.body,
+                            options
+                        );
+
+                        // Cache it (only cache string summaries)
+                        if (typeof summary === 'string') {
+                            await this.cacheSummary(email.id, summary);
+                        }
+
+                        return { emailId: email.id, summary };
+
+                    } catch (error) {
+                        this.logger.error(`✗ Failed to summarize ${email.id}:`, error.message);
+                        throw error; // Re-throw to be caught by Promise.allSettled
+                    }
+                })
+            );
+
+            // Collect results from chunk
+            chunkResults.forEach((result, idx) => {
+                const email = chunk[idx];
+                
+                if (result.status === 'fulfilled') {
+                    results.push(result.value);
+                } else {
+                    // Use fallback for failed emails
+                    this.logger.warn(`Using fallback summary for ${email.id}`);
+                    results.push({
+                        emailId: email.id,
+                        summary: this.createFallbackSummary(email.sender, email.subject, email.body)
+                    });
+                }
+            });
+
+            // Rate limiting: delay between chunks (except after last chunk)
+            if (i + maxConcurrency < emails.length) {
+                this.logger.debug(`⏳ Rate limiting: waiting 1s before next chunk...`);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        const successCount = results.filter(r => r.summary && r.summary !== '').length;
+        this.logger.log(`✅ Batch summarization completed: ${successCount}/${emails.length} emails successful`);
+        
+        return results;
+    }
+
+    /**
+     * Create fallback summary when AI is not available
+     * @param sender - Email sender
+     * @param subject - Email subject
+     * @param body - Email body
+     * @returns Fallback summary string
+     */
+    private createFallbackSummary(sender: string, subject: string, body: string): string {
+        const cleanBody = this.cleanEmailBody(body);
+        const bodyPreview = cleanBody.substring(0, 150).trim();
+
+        return `Email from ${sender} regarding: ${subject}. ${bodyPreview}${bodyPreview.length >= 150 ? '...' : ''}`;
     }
 }
 
