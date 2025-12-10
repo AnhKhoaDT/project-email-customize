@@ -540,3 +540,1000 @@ Nếu bạn muốn, tôi có thể:
 
 
 *File: `docapi.md` (auto-generated).*
+
+---
+
+# 📊 WEEK 2 APIs - Kanban Board, AI Summary & Snooze
+
+> **⚠️ CHÚ Ý:** Các APIs dưới đây là phần mở rộng cho TUẦN 2, sử dụng **Database-based approach** (lưu status vào MongoDB).
+
+---
+
+## 📋 Mục lục Week 2 APIs
+
+1. [Kanban Board APIs](#kanban-board-apis)
+2. [AI Summarization APIs](#ai-summarization-apis)
+3. [Snooze Feature APIs](#snooze-feature-apis)
+4. [Background Services](#background-services)
+5. [Database Schema](#database-schema)
+
+---
+
+## 1️⃣ Kanban Board APIs
+
+> **🎯 Kiến trúc:** Database **CHỈ** lưu emails mà user đã kéo vào Kanban (TODO/IN_PROGRESS/DONE). INBOX là Gmail inbox thực, không lưu DB.
+
+---
+
+### 📋 GET `/mail/inbox`
+
+**Mô tả:** Lấy danh sách emails từ Gmail inbox (không qua database)
+
+**Authentication:** Required (JWT)
+
+**Query Parameters:**
+- `limit` (optional): Số lượng emails tối đa (default: 50)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "messages": [
+      {
+        "id": "msg_abc123",
+        "threadId": "thread_xyz",
+        "subject": "Weekly meeting notes",
+        "from": "boss@company.com",
+        "to": "you@company.com",
+        "date": "Mon, 9 Dec 2024 14:30:00 +0700",
+        "snippet": "Here are the notes from today's meeting...",
+        "labelIds": ["INBOX", "UNREAD"],
+        "textBody": "Full email content...",
+        "htmlBody": "<html>...</html>"
+      }
+    ],
+    "total": 42
+  }
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+// Load Gmail inbox (source column)
+const loadInbox = async () => {
+  const response = await fetch(
+    'http://localhost:5000/mail/inbox?limit=50',
+    {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      },
+      credentials: 'include'
+    }
+  );
+  
+  const data = await response.json();
+  return data.data.messages; // Pure Gmail data
+};
+```
+
+**Ví dụ cURL:**
+```bash
+curl http://localhost:5000/mail/inbox?limit=50 \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+### 📋 GET `/kanban/columns/:status/emails`
+
+**Mô tả:** Lấy emails theo status từ **database** (chỉ emails đã được user kéo vào Kanban)
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `status`: Enum [`TODO`, `IN_PROGRESS`, `DONE`] ⚠️ **KHÔNG có INBOX**
+
+**Query Parameters:**
+- `limit` (optional): Số lượng emails tối đa (default: 50)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "messages": [
+      {
+        "id": "msg_abc123",
+        "threadId": "thread_xyz",
+        "subject": "Weekly meeting notes",
+        "from": "boss@company.com",
+        "to": "you@company.com",
+        "date": "Mon, 9 Dec 2024 14:30:00 +0700",
+        "snippet": "Here are the notes from today's meeting...",
+        "labelIds": ["INBOX"],
+        "textBody": "Full email content...",
+        "htmlBody": "<html>...</html>",
+        
+        // Từ MongoDB (chỉ có khi email trong Kanban)
+        "status": "TODO",
+        "statusUpdatedAt": "2024-12-09T07:30:00.000Z",
+        "summary": "[Urgency: Medium]\nSummary: Meeting notes..."
+      }
+    ],
+    "total": 8
+  }
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+// Load Kanban board (chỉ emails trong DB)
+const loadKanbanBoard = async () => {
+  const [todoEmails, inProgressEmails, doneEmails] = await Promise.all([
+    fetch('/kanban/columns/TODO/emails').then(r => r.json()),
+    fetch('/kanban/columns/IN_PROGRESS/emails').then(r => r.json()),
+    fetch('/kanban/columns/DONE/emails').then(r => r.json())
+  ]);
+  
+  return {
+    todoEmails: todoEmails.data.messages,
+    inProgressEmails: inProgressEmails.data.messages,
+    doneEmails: doneEmails.data.messages
+  };
+};
+
+// Complete board với INBOX
+const loadCompleteBoard = async () => {
+  const [inbox, kanban] = await Promise.all([
+    loadInbox(),           // Gmail API
+    loadKanbanBoard()      // Database
+  ]);
+  
+  return {
+    inbox,                 // Emails chưa được organize
+    ...kanban             // Emails đã trong Kanban
+  };
+};
+```
+
+**Ví dụ cURL:**
+```bash
+# Get TODO emails (from database)
+curl http://localhost:5000/kanban/columns/TODO/emails \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get DONE emails (from database)
+curl http://localhost:5000/kanban/columns/DONE/emails \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+### 🔄 POST `/emails/:id/move`
+
+**Mô tả:** Di chuyển email giữa các columns
+
+**⚠️ Quan trọng:**
+- **INBOX → TODO/IN_PROGRESS/DONE**: Tạo record mới trong database
+- **TODO ↔ IN_PROGRESS ↔ DONE**: Update status trong database
+- **TODO/IN_PROGRESS/DONE → INBOX**: Xóa record khỏi database (về Gmail inbox)
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `id`: Email ID (Gmail message ID)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "threadId": "thread_xyz",
+  "toStatus": "TODO"
+}
+```
+
+**Fields:**
+- `threadId` (required): Gmail thread ID
+- `toStatus` (required): New status - `TODO` | `IN_PROGRESS` | `DONE` | `INBOX`
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Email moved to TODO",
+  "data": {
+    "emailId": "msg_abc123",
+    "newStatus": "TODO",
+    "created": true
+  }
+}
+```
+
+**Response Fields:**
+- `created`: `true` nếu tạo record mới (INBOX → Kanban), `false` nếu update
+
+**Ví dụ Frontend:**
+```javascript
+// Drag & Drop handler
+const handleDragEnd = async (result) => {
+  const { draggableId: emailId, source, destination } = result;
+  
+  if (!destination) return;
+  
+  const fromColumn = source.droppableId; // 'INBOX'
+  const toColumn = destination.droppableId; // 'TODO'
+  
+  // Optimistic UI update
+  moveEmailInUI(emailId, fromColumn, toColumn);
+  
+  try {
+    const response = await fetch(`http://localhost:5000/emails/${emailId}/move`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      credentials: 'include',
+      body: JSON.stringify({
+        threadId: emailData.threadId,
+        toStatus: toColumn
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.data.created) {
+      console.log('Email added to Kanban');
+    } else {
+      console.log('Email status updated');
+    }
+    
+  } catch (error) {
+    // Rollback UI
+    moveEmailInUI(emailId, toColumn, fromColumn);
+    alert('Failed to move email');
+  }
+};
+
+// Case 1: INBOX → TODO (tạo record mới)
+await fetch('/emails/msg_123/move', {
+  method: 'POST',
+  body: JSON.stringify({
+    threadId: 'thread_xyz',
+    toStatus: 'TODO'
+  })
+});
+// → Database: INSERT new record với status=TODO
+
+// Case 2: TODO → DONE (update existing)
+await fetch('/emails/msg_123/move', {
+  method: 'POST',
+  body: JSON.stringify({
+    threadId: 'thread_xyz',
+    toStatus: 'DONE'
+  })
+});
+// → Database: UPDATE status=DONE
+
+// Case 3: TODO → INBOX (xóa khỏi Kanban)
+await fetch('/emails/msg_123/move', {
+  method: 'POST',
+  body: JSON.stringify({
+    threadId: 'thread_xyz',
+    toStatus: 'INBOX'
+  })
+});
+// → Database: DELETE record
+// → Email về lại Gmail inbox
+```
+
+**Ví dụ cURL:**
+```bash
+# Move from INBOX to TODO (create record)
+curl -X POST http://localhost:5000/emails/msg_abc123/move \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "thread_xyz",
+    "toStatus": "TODO"
+  }'
+
+# Move from TODO to DONE (update record)
+curl -X POST http://localhost:5000/emails/msg_abc123/move \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "thread_xyz",
+    "toStatus": "DONE"
+  }'
+
+# Move back to INBOX (delete record)
+curl -X POST http://localhost:5000/emails/msg_abc123/move \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "thread_xyz",
+    "toStatus": "INBOX"
+  }'
+```
+
+---
+
+## 2️⃣ AI Summarization APIs
+
+### 📝 POST `/emails/:id/summarize`
+
+**Mô tả:** Tạo tóm tắt email bằng Gemini AI (cache trong MongoDB)
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `id`: Email ID (Gmail message ID)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "summary": "[Urgency: High]\nSummary: Client requesting urgent meeting to discuss Q4 budget concerns. Three cost reduction options proposed.\nAction: Review proposals and respond with meeting times by EOD Friday.",
+    "cached": false
+  }
+}
+```
+
+**Fields:**
+- `summary`: AI-generated summary text
+- `cached`: `true` nếu lấy từ cache, `false` nếu vừa generate
+
+**Summary Format:**
+```
+[Urgency: High/Medium/Low]
+Summary: [Concise summary in 2-3 sentences]
+Action: [Required action or "No action needed"]
+```
+
+**Ví dụ Frontend:**
+```javascript
+const getEmailSummary = async (emailId) => {
+  // Show loading
+  setLoading(true);
+  
+  try {
+    const response = await fetch(
+      `http://localhost:5000/emails/${emailId}/summarize`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        },
+        credentials: 'include'
+      }
+    );
+    
+    const data = await response.json();
+    
+    // Display summary
+    console.log('Summary:', data.data.summary);
+    console.log('From cache:', data.data.cached);
+    
+    return data.data.summary;
+    
+  } catch (error) {
+    console.error('Failed to get summary:', error);
+    return 'Failed to generate summary';
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Batch summarize for multiple emails
+const summarizeAllInColumn = async (emailIds) => {
+  const summaries = {};
+  
+  for (const emailId of emailIds) {
+    try {
+      const summary = await getEmailSummary(emailId);
+      summaries[emailId] = summary;
+      
+      // Rate limiting: wait 1 second
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error(`Failed to summarize ${emailId}`);
+    }
+  }
+  
+  return summaries;
+};
+```
+
+**Ví dụ cURL:**
+```bash
+curl -X POST http://localhost:5000/emails/msg_abc123/summarize \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+**⚠️ Notes:**
+- Lần đầu gọi: call Gemini AI (~2-3 giây)
+- Lần sau: lấy từ MongoDB cache (instant)
+- Rate limit: 60 requests/minute (Gemini free tier)
+- Cần `GEMINI_API_KEY` trong `.env`
+
+---
+
+## 3️⃣ Snooze Feature APIs
+
+### 🔕 POST `/emails/:id/snooze`
+
+**Mô tả:** Snooze email đến thời điểm cụ thể
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `id`: Email ID (Gmail message ID)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "threadId": "thread_xyz",
+  "snoozedUntil": "2025-12-10T15:00:00.000Z"
+}
+```
+
+**Fields:**
+- `threadId` (required): Gmail thread ID
+- `snoozedUntil` (required): ISO 8601 date string (thời điểm wake up)
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "success": true,
+    "message": "Email snoozed until 12/10/2025, 3:00:00 PM",
+    "snoozedUntil": "2025-12-10T15:00:00.000Z"
+  }
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+// Snooze for 2 hours
+const snoozeEmail = async (email) => {
+  const snoozeTime = new Date();
+  snoozeTime.setHours(snoozeTime.getHours() + 2);
+  
+  const response = await fetch(`http://localhost:5000/emails/${email.id}/snooze`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    credentials: 'include',
+    body: JSON.stringify({
+      threadId: email.threadId,
+      snoozedUntil: snoozeTime.toISOString()
+    })
+  });
+  
+  const data = await response.json();
+  
+  if (data.status === 200) {
+    // Remove email from current view
+    removeEmailFromUI(email.id);
+    showToast(`Email snoozed until ${new Date(data.data.snoozedUntil).toLocaleString()}`);
+  }
+};
+
+// Snooze options
+const snoozeOptions = [
+  { label: '1 hour', hours: 1 },
+  { label: '2 hours', hours: 2 },
+  { label: 'Tomorrow 9AM', getDate: () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    return tomorrow;
+  }},
+  { label: 'Next week', days: 7 }
+];
+```
+
+**Ví dụ cURL:**
+```bash
+# Snooze until specific time
+curl -X POST http://localhost:5000/emails/msg_abc123/snooze \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "threadId": "thread_xyz",
+    "snoozedUntil": "2025-12-10T15:00:00.000Z"
+  }'
+```
+
+---
+
+### 🔔 POST `/emails/:id/unsnooze`
+
+**Mô tả:** Unsnooze email thủ công (trước khi hết thời gian)
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `id`: Email ID (Gmail message ID)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "success": true,
+    "message": "Email restored"
+  }
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+const unsnoozeEmail = async (emailId) => {
+  const response = await fetch(`http://localhost:5000/emails/${emailId}/unsnooze`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    },
+    credentials: 'include'
+  });
+  
+  if (response.ok) {
+    showToast('Email restored to inbox');
+    await loadKanbanBoard();
+  }
+};
+```
+
+---
+
+### 📋 GET `/emails/snoozed`
+
+**Mô tả:** Lấy danh sách tất cả emails đang được snooze
+
+**Authentication:** Required (JWT)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": [
+    {
+      "userId": "user_123",
+      "emailId": "msg_abc",
+      "threadId": "thread_xyz",
+      "snoozedUntil": "2025-12-10T15:00:00.000Z",
+      "originalLabels": ["INBOX", "Label_TODO"],
+      "isSnoozed": true,
+      "createdAt": "2025-12-09T13:00:00.000Z"
+    }
+  ]
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+const loadSnoozedEmails = async () => {
+  const response = await fetch('http://localhost:5000/emails/snoozed', {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    },
+    credentials: 'include'
+  });
+  
+  const data = await response.json();
+  
+  // Display snoozed emails with countdown
+  data.data.forEach(email => {
+    const timeLeft = new Date(email.snoozedUntil) - new Date();
+    console.log(`Email ${email.emailId} wakes up in ${Math.round(timeLeft / 1000 / 60)} minutes`);
+  });
+  
+  return data.data;
+};
+```
+
+---
+
+## 4️⃣ Background Services
+
+### ⏰ Snooze Scheduler (Cron Job)
+
+**Frequency:** Every 1 minute
+
+**Function:**
+```typescript
+// Auto-runs in background
+1. Query snoozed emails với snoozedUntil <= NOW
+2. For each expired snooze:
+   - Restore email về original location (TODO/IN_PROGRESS/DONE)
+   - Remove SNOOZED label
+   - Delete snooze record từ database
+3. Email tự động xuất hiện lại trong Kanban column
+```
+
+**Frontend không cần gọi API** - tự động chạy!
+
+**⚠️ Note:** Snooze chỉ áp dụng cho emails **đã trong Kanban** (có record trong DB)
+
+---
+
+## 5️⃣ Database Schema
+
+### EmailMetadata Collection
+
+> **⚠️ Quan trọng:** Collection này **CHỈ** chứa emails mà user đã kéo vào Kanban. INBOX emails KHÔNG có trong database.
+
+```typescript
+{
+  // Identifiers
+  userId: String,          // User owner
+  emailId: String,         // Gmail message ID (unique với userId)
+  threadId: String,        // Gmail thread ID
+  
+  // Kanban Status (Week 2)
+  status: Enum [
+    'TODO',
+    'IN_PROGRESS',
+    'DONE'
+  ],
+  // ⚠️ KHÔNG có 'INBOX' - emails trong inbox không lưu DB
+  
+  statusUpdatedAt: Date,   // Timestamp khi status thay đổi
+  
+  // Cached Gmail Data (để giảm API calls)
+  subject: String,
+  from: String,
+  snippet: String,
+  receivedDate: Date,
+  
+  // AI Summary
+  summary: String,         // AI-generated summary
+  summaryGeneratedAt: Date,
+  summaryModel: String,    // e.g., "gemini-pro"
+  
+  // Snooze Data (optional)
+  snoozedUntil: Date,     // Wake up time
+  originalStatus: String,  // Status trước khi snooze (TODO/IN_PROGRESS/DONE)
+  isSnoozed: Boolean,
+  
+  // Timestamps
+  createdAt: Date,         // Khi email được kéo vào Kanban lần đầu
+  updatedAt: Date
+}
+```
+
+**Indexes:**
+```typescript
+// Fast queries
+{ userId: 1, emailId: 1 } // Unique - prevent duplicate
+{ userId: 1, status: 1 }  // Kanban column queries
+{ isSnoozed: 1, snoozedUntil: 1 } // Snooze scheduler
+```
+
+**Lifecycle:**
+```typescript
+// Email trong Gmail inbox
+→ Database: KHÔNG có record
+
+// User kéo INBOX → TODO
+→ Database: INSERT { emailId, status: 'TODO', createdAt: NOW }
+
+// User kéo TODO → IN_PROGRESS
+→ Database: UPDATE status = 'IN_PROGRESS'
+
+// User kéo IN_PROGRESS → INBOX
+→ Database: DELETE record
+→ Email về lại Gmail inbox (không có trong Kanban)
+```
+
+---
+
+## 6️⃣ Error Handling
+
+### Common Errors:
+
+**400 Bad Request:**
+```json
+{
+  "status": 400,
+  "message": "Snooze time must be in the future"
+}
+```
+
+**401 Unauthorized:**
+```json
+{
+  "status": 401,
+  "message": "Unauthorized"
+}
+```
+→ Call `/auth/refresh` để lấy access token mới
+
+**500 Internal Server Error:**
+```json
+{
+  "status": 500,
+  "message": "Failed to move email"
+}
+```
+
+**Gemini API Error:**
+```json
+{
+  "status": 500,
+  "message": "Gemini AI not initialized. Please set GEMINI_API_KEY in .env file"
+}
+```
+→ Cần setup GEMINI_API_KEY
+
+---
+
+## 7️⃣ Frontend Integration Examples
+
+### Complete Kanban Workflow:
+
+```javascript
+// 1. Load Complete Board (4 columns)
+const loadBoard = async () => {
+  // Column 1: INBOX (từ Gmail API)
+  const inbox = await fetch('/mail/inbox?limit=50')
+    .then(r => r.json());
+  
+  // Columns 2-4: TODO, IN_PROGRESS, DONE (từ Database)
+  const [todo, inProgress, done] = await Promise.all([
+    fetch('/kanban/columns/TODO/emails').then(r => r.json()),
+    fetch('/kanban/columns/IN_PROGRESS/emails').then(r => r.json()),
+    fetch('/kanban/columns/DONE/emails').then(r => r.json())
+  ]);
+  
+  setState({
+    inboxEmails: inbox.data.messages,       // Pure Gmail data
+    todoEmails: todo.data.messages,         // Database + Gmail merged
+    inProgressEmails: inProgress.data.messages,
+    doneEmails: done.data.messages
+  });
+};
+
+// 2. Drag & Drop Handler
+const onDragEnd = async (result) => {
+  const { draggableId: emailId, source, destination } = result;
+  
+  if (!destination) return;
+  
+  const fromColumn = source.droppableId;      // 'INBOX'
+  const toColumn = destination.droppableId;   // 'TODO'
+  
+  // Optimistic UI
+  moveEmailInUI(emailId, fromColumn, toColumn);
+  
+  try {
+    const response = await fetch(`/emails/${emailId}/move`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        threadId: emails[emailId].threadId,
+        toStatus: toColumn
+      })
+    });
+    
+    const data = await response.json();
+    
+    // Log behavior
+    if (fromColumn === 'INBOX') {
+      console.log('✅ Email added to Kanban database');
+    } else if (toColumn === 'INBOX') {
+      console.log('✅ Email removed from Kanban database');
+    } else {
+      console.log('✅ Email status updated in database');
+    }
+    
+  } catch (error) {
+    // Rollback UI
+    moveEmailInUI(emailId, toColumn, fromColumn);
+    alert('Failed to move email');
+  }
+};
+
+// 3. Get AI Summary (chỉ cho emails trong Kanban)
+const showEmailDetail = async (emailId, fromColumn) => {
+  if (fromColumn === 'INBOX') {
+    // INBOX emails không có summary (chưa trong DB)
+    alert('Kéo email vào Kanban để tạo summary');
+    return;
+  }
+  
+  const summary = await fetch(`/emails/${emailId}/summarize`, {
+    method: 'POST'
+  }).then(r => r.json());
+  
+  displaySummary(summary.data.summary);
+};
+
+// 4. Snooze email (chỉ cho emails trong Kanban)
+const snooze = async (emailId, hours, currentColumn) => {
+  if (currentColumn === 'INBOX') {
+    alert('Chỉ snooze được emails trong Kanban');
+    return;
+  }
+  
+  const snoozeTime = new Date();
+  snoozeTime.setHours(snoozeTime.getHours() + hours);
+  
+  await fetch(`/emails/${emailId}/snooze`, {
+    method: 'POST',
+    body: JSON.stringify({
+      threadId: email.threadId,
+      snoozedUntil: snoozeTime.toISOString()
+    })
+  });
+  
+  await loadBoard();
+};
+
+// 5. Example: Complete Board Component
+const KanbanBoard = () => {
+  const [board, setBoard] = useState({
+    inbox: [],        // Gmail API
+    todo: [],         // Database
+    inProgress: [],   // Database
+    done: []          // Database
+  });
+  
+  useEffect(() => {
+    loadBoard();
+  }, []);
+  
+  return (
+    <DragDropContext onDragEnd={onDragEnd}>
+      <Column id="INBOX" title="📥 Inbox" emails={board.inbox} />
+      <Column id="TODO" title="📋 To Do" emails={board.todo} />
+      <Column id="IN_PROGRESS" title="🔄 In Progress" emails={board.inProgress} />
+      <Column id="DONE" title="✅ Done" emails={board.done} />
+    </DragDropContext>
+  );
+};
+```
+
+---
+
+## 8️⃣ Environment Setup
+
+### Required Environment Variables:
+
+```env
+# Existing (Week 1)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+MONGODB_URI=...
+
+# New (Week 2)
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+### Get Gemini API Key:
+
+1. Visit: https://ai.google.dev/
+2. Click "Get API Key"
+3. Create project or select existing
+4. Copy API key
+5. Add to `.env`: `GEMINI_API_KEY=AIzaSy...`
+
+---
+
+## 9️⃣ Testing
+
+### Test Complete Flow:
+
+```bash
+# 1. Load INBOX (Gmail API)
+curl http://localhost:5000/mail/inbox?limit=10 \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Returns pure Gmail inbox emails
+
+# 2. Move email from INBOX to TODO (tạo record trong DB)
+curl -X POST http://localhost:5000/emails/msg_123/move \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"threadId":"thread_xyz","toStatus":"TODO"}'
+# → Database: INSERT new record
+
+# 3. Get TODO emails (from database)
+curl http://localhost:5000/kanban/columns/TODO/emails \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Returns emails có status=TODO trong DB
+
+# 4. Move TODO → DONE (update trong DB)
+curl -X POST http://localhost:5000/emails/msg_123/move \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"threadId":"thread_xyz","toStatus":"DONE"}'
+# → Database: UPDATE status=DONE
+
+# 5. Summarize email (chỉ emails trong Kanban)
+curl -X POST http://localhost:5000/emails/msg_123/summarize \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Generate AI summary và save vào DB
+
+# 6. Snooze email (chỉ emails trong Kanban)
+curl -X POST http://localhost:5000/emails/msg_123/snooze \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"threadId":"thread_xyz","snoozedUntil":"2025-12-10T15:00:00Z"}'
+
+# 7. Move DONE → INBOX (xóa khỏi DB)
+curl -X POST http://localhost:5000/emails/msg_123/move \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"threadId":"thread_xyz","toStatus":"INBOX"}'
+# → Database: DELETE record
+# → Email về lại Gmail inbox
+```
+
+---
+
+## 🎯 Summary Week 2 APIs
+
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| **Inbox** | 1 API | Load Gmail inbox (không qua DB) |
+| **Kanban** | 2 APIs | Get columns + Move emails |
+| **AI Summary** | 1 API | Gemini-powered summarization |
+| **Snooze** | 3 APIs | Snooze/unsnooze/list |
+| **Background** | 1 Job | Auto-restore snoozed emails |
+
+**Total:** 7 new endpoints + 1 background service
+
+**Architecture:** 
+- **INBOX**: Pure Gmail API (không lưu DB)
+- **Kanban (TODO/IN_PROGRESS/DONE)**: MongoDB là source of truth
+- **Trigger**: Chỉ tạo DB record khi user kéo email vào Kanban
+
+---
+
+*Last updated: December 10, 2025 - Week 2 Implementation*
