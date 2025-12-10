@@ -10,6 +10,10 @@ Tài liệu này mô tả chi tiết các endpoint backend mà frontend (React S
   - OAuth / Auth: `/auth/google`, `/auth/google/callback`, `/auth/refresh`, `/auth/logout`, `/auth/login` (local)
   - Users: `/users/register`, `/users/me`, `/users/:id`
   - Mail (Gmail proxy): `/mailboxes`, `/mailboxes/:id/emails`, `/emails/:id`
+  - AI APIs: `/ai/summarize`, `/ai/batch-summarize`
+  - Snooze APIs: `/emails/:id/snooze`, `/emails/:id/unsnooze`, `/snooze/list`
+  - Kanban APIs: `/kanban/columns`, `/emails/:id/move`
+- AI và Kanban APIs (Week 2 Features)
 - Ví dụ mã frontend (`fetch`) để login, refresh, gọi API mail
 - Lưu trữ token & hành vi khi đóng/mở app
 - Lỗi thường gặp & cách xử lý
@@ -463,7 +467,262 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
 
 
 ---
-## 4) Ví dụ mã frontend (login → refresh → danh sách mail)
+## 4) AI và Kanban APIs (Week 2 Features)
+
+### AI Summarization APIs
+
+#### POST /ai/summarize
+- **Mục đích**: Tạo tóm tắt AI cho một email đơn lẻ
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "emailId": "19aba6e5873a9087",
+    "subject": "Meeting Notes",
+    "snippet": "Email preview text..."
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "emailId": "19aba6e5873a9087",
+    "summary": "Meeting scheduled for next Monday at 2 PM to discuss Q4 goals."
+  }
+  ```
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + '/ai/summarize', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      emailId: email.id,
+      subject: email.subject,
+      snippet: email.snippet
+    })
+  });
+  const data = await res.json();
+  console.log(data.summary);
+  ```
+
+#### POST /ai/batch-summarize
+- **Mục đích**: Tạo tóm tắt AI cho nhiều emails cùng lúc (batch processing)
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "emails": [
+      {
+        "id": "email1",
+        "subject": "Meeting",
+        "snippet": "..."
+      },
+      {
+        "id": "email2",
+        "subject": "Invoice",
+        "snippet": "..."
+      }
+    ]
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "results": [
+      {
+        "emailId": "email1",
+        "summary": "Summary text...",
+        "status": "success"
+      },
+      {
+        "emailId": "email2",
+        "summary": "Summary text...",
+        "status": "success"
+      }
+    ]
+  }
+  ```
+- **Lưu ý**:
+  - Backend sử dụng hybrid concurrency: 3 sequential batches × 5 parallel requests
+  - Tối ưu cho rate limiting và cost
+  - Graceful error handling cho từng email
+
+### Snooze APIs
+
+#### POST /emails/:id/snooze
+- **Mục đích**: Snooze một email đến thời điểm cụ thể
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Message ID
+- **Body**:
+  ```json
+  {
+    "threadId": "19aba6e5873a9087",
+    "snoozedUntil": "2025-12-10T15:00:00.000Z",
+    "currentStatus": "INBOX"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email snoozed successfully",
+    "data": {
+      "emailId": "19aba6e5873a9087",
+      "threadId": "19aba6e5873a9087",
+      "snoozedUntil": "2025-12-10T15:00:00.000Z",
+      "originalStatus": "INBOX"
+    }
+  }
+  ```
+- **Example**:
+  ```js
+  const snoozedUntil = new Date(Date.now() + 5000).toISOString(); // 5 seconds
+  const res = await fetch(BACKEND + `/emails/${emailId}/snooze`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      threadId: email.threadId,
+      snoozedUntil,
+      currentStatus: 'INBOX'
+    })
+  });
+  ```
+
+#### POST /emails/:id/unsnooze
+- **Mục đích**: Hủy snooze và restore email ngay lập tức
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Message ID
+- **Body**:
+  ```json
+  {
+    "threadId": "19aba6e5873a9087"
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email unsnoozed successfully"
+  }
+  ```
+
+#### GET /snooze/list
+- **Mục đích**: Lấy danh sách tất cả emails đang snooze
+- **Auth**: Required (Bearer token)
+- **Response**:
+  ```json
+  {
+    "snoozedEmails": [
+      {
+        "emailId": "email1",
+        "threadId": "thread1",
+        "snoozedUntil": "2025-12-10T15:00:00.000Z",
+        "originalStatus": "INBOX"
+      }
+    ]
+  }
+  ```
+
+### Kanban APIs
+
+#### GET /kanban/columns
+- **Mục đích**: Lấy tất cả emails trong Kanban board (TODO/DONE columns)
+- **Auth**: Required (Bearer token)
+- **Response**:
+  ```json
+  {
+    "todo": [
+      {
+        "id": "email1",
+        "threadId": "thread1",
+        "subject": "Task 1",
+        "from": "sender@example.com",
+        "snippet": "...",
+        "summary": "AI-generated summary",
+        "status": "TODO",
+        "order": 0
+      }
+    ],
+    "done": [
+      {
+        "id": "email2",
+        "threadId": "thread2",
+        "subject": "Task 2",
+        "status": "DONE",
+        "order": 0
+      }
+    ]
+  }
+  ```
+
+#### POST /emails/:id/move
+- **Mục đích**: Di chuyển email giữa các columns trong Kanban
+- **Auth**: Required (Bearer token)
+- **Params**: `:id` - Message ID
+- **Body**:
+  ```json
+  {
+    "threadId": "19aba6e5873a9087",
+    "fromStatus": "INBOX",
+    "toStatus": "TODO",
+    "destinationIndex": 2
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email moved successfully",
+    "data": {
+      "emailId": "19aba6e5873a9087",
+      "newStatus": "TODO",
+      "order": 2
+    }
+  }
+  ```
+- **Supported statuses**: `INBOX`, `TODO`, `DONE`, `SNOOZED`
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/emails/${emailId}/move`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      threadId: email.threadId,
+      fromStatus: 'INBOX',
+      toStatus: 'TODO',
+      destinationIndex: 2
+    })
+  });
+  ```
+
+### Background Service (Cron Job)
+
+#### Automatic Snooze Expiration
+- **Mục đích**: Tự động restore emails khi hết thời gian snooze
+- **Schedule**: Chạy mỗi 5 giây (`'*/5 * * * * *'`)
+- **Logic**:
+  ```typescript
+  @Cron('*/5 * * * * *')
+  async processExpiredSnoozes() {
+    const expiredSnoozes = await this.findExpiredSnoozes();
+    for (const snooze of expiredSnoozes) {
+      await this.restoreEmail(snooze);
+      await this.deleteSnoozeRecord(snooze.emailId);
+    }
+  }
+  ```
+- **Không cần gọi từ frontend** - chạy tự động trên server
+
+---
+## 5) Ví dụ mã frontend (login → refresh → danh sách mail)
 ```js
 const BACKEND = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 
@@ -1523,17 +1782,31 @@ curl -X POST http://localhost:5000/emails/msg_123/move \
 |----------|-----------|-------------|
 | **Inbox** | 1 API | Load Gmail inbox (không qua DB) |
 | **Kanban** | 2 APIs | Get columns + Move emails |
-| **AI Summary** | 1 API | Gemini-powered summarization |
+| **AI Summary** | 2 APIs | Single + Batch Gemini summarization |
 | **Snooze** | 3 APIs | Snooze/unsnooze/list |
-| **Background** | 1 Job | Auto-restore snoozed emails |
+| **Background** | 1 Job | Auto-restore snoozed emails (cron) |
 
-**Total:** 7 new endpoints + 1 background service
+**Total:** 8 new endpoints + 1 background service
 
 **Architecture:** 
 - **INBOX**: Pure Gmail API (không lưu DB)
-- **Kanban (TODO/IN_PROGRESS/DONE)**: MongoDB là source of truth
+- **Kanban (TODO/DONE)**: MongoDB là source of truth
 - **Trigger**: Chỉ tạo DB record khi user kéo email vào Kanban
+- **AI**: Google Gemini 1.5 Flash với hybrid concurrency (3 batches × 5 parallel)
+- **Snooze**: MongoDB + Gmail labels + node-cron (runs every 5s)
+
+**Performance Optimizations:**
+- Batch AI processing với rate limiting aware
+- Optimistic UI updates với rollback
+- Efficient Gmail API calls với caching
+- Auto-cleanup expired snoozes
+
+**Security:**
+- All endpoints require Bearer token authentication
+- Gmail OAuth scopes properly configured
+- Input validation với DTO classes
+- Error handling với graceful fallbacks
 
 ---
 
-*Last updated: December 10, 2025 - Week 2 Implementation*
+*Last updated: December 10, 2025 - Week 2 Implementation Complete*

@@ -48,7 +48,7 @@ const MailBox = ({
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
   return (
-    <div className="mailbox-scroll-container flex flex-col w- bg-background border-x border-amber-50/50 h-full overflow-y-auto scrollbar-hide">
+    <div className="mailbox-scroll-container flex flex-col w- bg-background border-x border-amber-50/50 h-full overflow-hidden">
       {/* ... (Phần Header, Search, Filter Buttons giữ nguyên) ... */}
       <div className="flex flex-col justify-between p-5 sticky top-0 bg-background z-10">
         <div className="flex flex-row justify-between items-center">
@@ -83,7 +83,7 @@ const MailBox = ({
       </div>
       <div className="w-full bg-secondary h-px opacity-30"></div>
 
-      <main className="p-5 ">
+      <main className="flex-1 p-5 overflow-y-auto mailbox-scrollbar mailbox-scroll-target">
         {/* Mail List */}
         <div className="">
           <div className="flex flex-col gap-2 ">

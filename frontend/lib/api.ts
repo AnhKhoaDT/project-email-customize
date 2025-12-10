@@ -210,4 +210,97 @@ export const getGlobalAccessToken = (): string | null => {
   return null;
 };
 
+// ========================================
+// KANBAN API FUNCTIONS
+// ========================================
+
+/**
+ * Fetch emails by column/status
+ * @param status - Column status: TODO, IN_PROGRESS, DONE
+ */
+export const fetchKanbanColumnEmails = async (status: 'TODO' | 'IN_PROGRESS' | 'DONE') => {
+  const response = await api.get(`/kanban/columns/${status}/emails`);
+  return response.data;
+};
+
+/**
+ * Fetch inbox emails from Gmail
+ */
+export const fetchInboxEmails = async (limit = 50) => {
+  const response = await api.get('/mail/inbox', { params: { limit } });
+  return response.data;
+};
+
+/**
+ * Fetch single email detail by ID
+ * @param emailId - Gmail message ID
+ */
+export const fetchEmailById = async (emailId: string) => {
+  const response = await api.get(`/emails/${emailId}`);
+  return response.data;
+};
+
+/**
+ * Fetch snoozed emails
+ */
+export const fetchSnoozedEmails = async () => {
+  const response = await api.get('/emails/snoozed');
+  return response.data;
+};
+
+/**
+ * Move email between Kanban columns
+ * @param emailId - Gmail message ID
+ * @param threadId - Gmail thread ID
+ * @param toStatus - Destination status (INBOX, TODO, IN_PROGRESS, DONE)
+ */
+export const moveEmailToColumn = async (
+  emailId: string,
+  threadId: string,
+  toStatus: string
+) => {
+  const response = await api.post(`/emails/${emailId}/move`, {
+    threadId,
+    toStatus,
+  });
+  return response.data;
+};
+
+/**
+ * Generate AI summary for an email
+ * @param emailId - Gmail message ID
+ * @param structured - Return structured output with urgency/action
+ */
+export const generateEmailSummary = async (emailId: string, structured = false) => {
+  const response = await api.post(`/emails/${emailId}/summarize`, { structured });
+  return response.data;
+};
+
+/**
+ * Snooze an email
+ * @param emailId - Gmail message ID
+ * @param threadId - Gmail thread ID
+ * @param snoozedUntil - ISO date string when to wake up
+ */
+export const snoozeEmail = async (
+  emailId: string,
+  threadId: string,
+  snoozedUntil: string
+) => {
+  const response = await api.post(`/emails/${emailId}/snooze`, {
+    threadId,
+    snoozedUntil,
+  });
+  return response.data;
+};
+
+/**
+ * Unsnooze an email manually
+ * @param emailId - Gmail message ID
+ */
+export const unsnoozeEmail = async (emailId: string) => {
+  const response = await api.post(`/emails/${emailId}/unsnooze`);
+  return response.data;
+};
+
 export default api;
