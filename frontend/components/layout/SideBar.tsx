@@ -43,7 +43,6 @@ const nav = {
     { title: "Archive", path: "/archive", icon: FaBoxArchive },
     { title: "Spam", path: "/spam", icon: RiErrorWarningFill },
     { title: "Trash", path: "/trash", icon: FaTrashCan },
-    { title: "Settings", path: "/settings", icon: IoSettingsOutline },
   ],
   labels: [
     { id: "1", name: "Work", color: "red" },

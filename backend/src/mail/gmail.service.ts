@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { google } from 'googleapis';
 import { UsersService } from '../users/users.service';
-import { parseEmailMessage } from './helper/email-parser.helper';
+import { parseEmailMessage} from './helper/email-parser.helper';
 
 const logger = new Logger('GmailService');
 
@@ -145,12 +145,32 @@ export class GmailService {
           const headers = detail.data.payload?.headers || [];
           const getHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
           
+          // Decode RFC 2047 encoded subject (fixes Vietnamese/non-ASCII characters)
+          const decodeSubject = (subject: string): string => {
+            if (!subject) return '(No Subject)';
+            // Handle RFC 2047 encoding: =?charset?encoding?encoded-text?=
+            return subject.replace(/=\?([^?]+)\?(B|Q)\?([^?]+)\?=/gi, (match, charset, encoding, encoded) => {
+              try {
+                if (encoding.toUpperCase() === 'B') {
+                  // Base64 decoding
+                  return Buffer.from(encoded, 'base64').toString(charset || 'utf-8');
+                } else if (encoding.toUpperCase() === 'Q') {
+                  // Quoted-printable decoding
+                  return decodeURIComponent(encoded.replace(/=/g, '%'));
+                }
+              } catch (e) {
+                return match;
+              }
+              return match;
+            });
+          };
+          
           return {
             id: detail.data.id,
             threadId: detail.data.threadId,
             labelIds: detail.data.labelIds || [],
             snippet: detail.data.snippet || '',
-            subject: getHeader('Subject') || '(No Subject)',
+            subject: decodeSubject(getHeader('Subject')),
             from: getHeader('From'),
             to: getHeader('To'),
             date: getHeader('Date'),

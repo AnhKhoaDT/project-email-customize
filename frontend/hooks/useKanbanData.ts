@@ -152,6 +152,12 @@ export const useKanbanData = () => {
 
     const toStatus = columnToStatus[toColumn] || toColumn.toUpperCase();
 
+    // Check email BEFORE optimistic update
+    const sourceList = columns[fromColumn as keyof KanbanColumns];
+    const emailToMove = sourceList.find(e => e.id === emailId);
+    const shouldGenerateSummary = fromColumn === 'inbox' && emailToMove && 
+      (!emailToMove.summary || emailToMove.summary === emailToMove.snippet || emailToMove.summary === 'No summary available');
+
     // Optimistic update
     setColumns(prev => {
       const sourceList = prev[fromColumn as keyof KanbanColumns];
@@ -181,8 +187,8 @@ export const useKanbanData = () => {
       await moveEmailToColumn(emailId, threadId, toStatus);
       
       // Auto-generate summary if moving from inbox and no summary exists
-      if (fromColumn === 'inbox') {
-        generateSummary(emailId);
+      if (shouldGenerateSummary) {
+        generateSummary(emailId, false);
       }
     } catch (err: any) {
       console.error('Failed to move email:', err);
@@ -190,12 +196,18 @@ export const useKanbanData = () => {
       await fetchData();
       throw err;
     }
-  }, [fetchData]);
+  }, [columns, fetchData]);
 
   // Generate AI summary for an email
-  const generateSummary = useCallback(async (emailId: string) => {
+  const generateSummary = useCallback(async (emailId: string, forceRegenerate = false) => {
     try {
-      const result = await generateEmailSummary(emailId, false);
+      const result = await generateEmailSummary(emailId, forceRegenerate, false);
+      
+      // Check for rate limit error
+      if (result.status === 429) {
+        console.warn('Rate limit exceeded:', result.message);
+        return null;
+      }
       
       // Update summary in state
       setColumns(prev => {
@@ -215,8 +227,14 @@ export const useKanbanData = () => {
       });
 
       return result.data?.summary;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to generate summary:', err);
+      
+      // Handle rate limit error
+      if (err?.response?.status === 429) {
+        console.warn('Rate limit exceeded');
+      }
+      
       return null;
     }
   }, []);
