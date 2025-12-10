@@ -152,7 +152,7 @@ const MailReadingModal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Main Content Container - Dark Mode Style */}
       <div className="w-[90vw] h-[90vh] md:w-[800px] bg-[#121212] rounded-xl shadow-2xl border border-white/10 flex flex-col overflow-hidden text-gray-200">
         {/* --- TOP ACTION BAR --- */}
@@ -213,7 +213,7 @@ const MailReadingModal = ({
           {/* Sender Info Row */}
           <div className="flex flex-row justify-between items-start mb-8">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-purple-700 flex items-center justify-center text-white font-bold border border-white/10 text-xl shrink-0 shadow-lg">
+              <div className="w-12 h-12 rounded-full bg-linear-to-br from-blue-600 to-purple-700 flex items-center justify-center text-white font-bold border border-white/10 text-xl shrink-0 shadow-lg">
                 {senderName.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col">
@@ -431,7 +431,7 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick }: any) => {
 // --- MAIN PAGE ---
 export default function KanbanPage() {
   // Use custom hook for Kanban data
-  const { columns, setColumns, isLoading, error, moveEmail, generateSummary } = useKanbanData();
+  const { columns, setColumns, isLoading, error, moveEmail, generateSummary, snoozeEmail, unsnoozeEmail } = useKanbanData();
   const [enabled, setEnabled] = useState(false);
 
   // State for Snooze Modal
@@ -446,34 +446,7 @@ export default function KanbanPage() {
     return () => cancelAnimationFrame(animation);
   }, []);
 
-  // Monitor Snooze Logic
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      const snoozedList = columns.snoozed || [];
-      const itemsToWakeUp = snoozedList.filter(
-        (item: any) => item.snoozeUntil && item.snoozeUntil <= now
-      );
-
-      if (itemsToWakeUp.length > 0) {
-        setColumns((prev: any) => {
-          const remainingSnoozed = prev.snoozed.filter(
-            (item: any) => item.snoozeUntil > now
-          );
-          const wokeUpItems = itemsToWakeUp.map((item: any) => {
-            const { snoozeUntil, ...rest } = item;
-            return { ...rest, time: "Just now" };
-          });
-          return {
-            ...prev,
-            snoozed: remainingSnoozed,
-            inbox: [...prev.inbox, ...wokeUpItems],
-          };
-        });
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [columns.snoozed]);
+  // Note: Auto-wake logic removed - backend cron job handles snooze expiration automatically
 
   const handleOpenSnooze = (item: any) => {
     setSelectedItemToSnooze(item);
@@ -491,30 +464,16 @@ export default function KanbanPage() {
     try {
       const snoozedUntil = new Date(Date.now() + durationMs).toISOString();
       
-      // Call API to snooze
-      await api.post(`/emails/${selectedItemToSnooze.id}/snooze`, {
-        threadId: selectedItemToSnooze.threadId,
+      // Call backend API via hook (handles optimistic update)
+      await snoozeEmail(
+        selectedItemToSnooze.id,
+        selectedItemToSnooze.threadId,
         snoozedUntil,
-      });
-
-      // Optimistic update
-      const snoozedItem = {
-        ...selectedItemToSnooze,
-        snoozeUntil: Date.now() + durationMs,
-      };
-
-      setColumns((prev: any) => {
-        const sourceList = prev[sourceColKey].filter(
-          (i: any) => i.id !== selectedItemToSnooze.id
-        );
-        return {
-          ...prev,
-          [sourceColKey]: sourceList,
-          snoozed: [...prev.snoozed, snoozedItem],
-        };
-      });
+        sourceColKey
+      );
     } catch (err) {
       console.error('Failed to snooze email:', err);
+      // Error already handled in hook with rollback
     }
     
     setSnoozeModalOpen(false);
@@ -569,11 +528,13 @@ export default function KanbanPage() {
 
     try {
       // Call API to move email (optimistic update handled by hook)
+      // Pass destination.index to preserve drop position
       await moveEmail(
         movedEmail.id,
         movedEmail.threadId,
         sourceColId,
-        destColId
+        destColId,
+        destination.index
       );
     } catch (err) {
       console.error('Failed to move email:', err);

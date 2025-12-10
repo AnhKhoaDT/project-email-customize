@@ -21,12 +21,13 @@ export class SnoozeService implements OnModuleInit {
    * Khởi động cron job khi module start
    */
   onModuleInit() {
-    // Chạy mỗi phút để check emails cần unsnooze
-    this.cronJob = cron.schedule('* * * * *', async () => {
+    // Chạy mỗi 5 giây để check emails cần unsnooze (tốt cho demo với snooze 5s/10s)
+    // Production với snooze thực tế (giờ/ngày): dùng '* * * * *' (mỗi phút)
+    this.cronJob = cron.schedule('*/5 * * * * *', async () => {
       await this.processExpiredSnoozes();
     });
     
-    logger.log('✅ Snooze scheduler started - checking every minute');
+    logger.log('✅ Snooze scheduler started - checking every 5 seconds');
   }
 
   /**

@@ -4,7 +4,9 @@ import {
   fetchInboxEmails,
   fetchSnoozedEmails,
   moveEmailToColumn, 
-  generateEmailSummary 
+  generateEmailSummary,
+  snoozeEmail as snoozeEmailAPI,
+  unsnoozeEmail as unsnoozeEmailAPI
 } from '@/lib/api';
 
 interface KanbanEmail {
@@ -103,10 +105,20 @@ export const useKanbanData = () => {
       ]);
 
       // Extract data from responses
-      const inbox = inboxRes.status === 'fulfilled' ? (inboxRes.value?.messages || inboxRes.value?.data?.messages || []) : [];
+      const inboxRaw = inboxRes.status === 'fulfilled' ? (inboxRes.value?.messages || inboxRes.value?.data?.messages || []) : [];
       const todo = todoRes.status === 'fulfilled' ? (todoRes.value?.data?.messages || []) : [];
       const done = doneRes.status === 'fulfilled' ? (doneRes.value?.data?.messages || []) : [];
       const snoozed = snoozedRes.status === 'fulfilled' ? (snoozedRes.value?.data || []) : [];
+      
+      // Get email IDs already in Kanban to filter out from inbox
+      const kanbanEmailIds = new Set([
+        ...todo.map((e: any) => e.id),
+        ...done.map((e: any) => e.id),
+        ...snoozed.map((e: any) => e.id),
+      ]);
+
+      // Filter inbox: exclude emails already in TODO/DONE/Snoozed
+      const inbox = inboxRaw.filter((e: any) => !kanbanEmailIds.has(e.id));
       
       setColumns({
         inbox: inbox.map(transformEmail),
@@ -127,7 +139,8 @@ export const useKanbanData = () => {
     emailId: string,
     threadId: string,
     fromColumn: string,
-    toColumn: string
+    toColumn: string,
+    destinationIndex?: number
   ) => {
     // Map column names to backend status values
     const columnToStatus: Record<string, string> = {
@@ -146,10 +159,21 @@ export const useKanbanData = () => {
       
       if (!emailToMove) return prev;
 
+      // Remove from source
+      const newSourceList = sourceList.filter(e => e.id !== emailId);
+      
+      // Add to destination at specific index
+      const destList = [...prev[toColumn as keyof KanbanColumns]];
+      if (destinationIndex !== undefined) {
+        destList.splice(destinationIndex, 0, emailToMove);
+      } else {
+        destList.push(emailToMove);
+      }
+
       return {
         ...prev,
-        [fromColumn]: sourceList.filter(e => e.id !== emailId),
-        [toColumn]: [...prev[toColumn as keyof KanbanColumns], emailToMove],
+        [fromColumn]: newSourceList,
+        [toColumn]: destList,
       };
     });
 
@@ -197,12 +221,80 @@ export const useKanbanData = () => {
     }
   }, []);
 
+  // Snooze an email
+  const snoozeEmail = useCallback(async (
+    emailId: string,
+    threadId: string,
+    snoozedUntil: string,
+    sourceColumn: string
+  ) => {
+    // Optimistic update - move to snoozed column
+    setColumns(prev => {
+      const sourceList = prev[sourceColumn as keyof KanbanColumns];
+      const emailToSnooze = sourceList.find(e => e.id === emailId);
+      
+      if (!emailToSnooze) return prev;
+
+      const newSourceList = sourceList.filter(e => e.id !== emailId);
+
+      return {
+        ...prev,
+        [sourceColumn]: newSourceList,
+        snoozed: [...prev.snoozed, { ...emailToSnooze, isSnoozed: true, snoozedUntil }],
+      };
+    });
+
+    try {
+      await snoozeEmailAPI(emailId, threadId, snoozedUntil);
+    } catch (err: any) {
+      console.error('Failed to snooze email:', err);
+      // Rollback on error
+      await fetchData();
+      throw err;
+    }
+  }, [fetchData]);
+
+  // Unsnooze an email manually
+  const unsnoozeEmail = useCallback(async (emailId: string) => {
+    try {
+      await unsnoozeEmailAPI(emailId);
+      // Refresh data to get updated state from backend
+      await fetchData();
+    } catch (err: any) {
+      console.error('Failed to unsnooze email:', err);
+      throw err;
+    }
+  }, [fetchData]);
+
   // Initial load
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Auto-refresh removed - only refresh on user action or manual refresh
+  // Smart snooze wake-up: Schedule refresh at exact snooze expiry time
+  useEffect(() => {
+    if (columns.snoozed.length === 0) return;
+
+    // Find the earliest snooze time
+    const now = Date.now();
+    const nextWakeUp = columns.snoozed
+      .map(email => email.snoozedUntil ? new Date(email.snoozedUntil).getTime() : Infinity)
+      .filter(time => time > now)
+      .sort((a, b) => a - b)[0];
+
+    if (!nextWakeUp || nextWakeUp === Infinity) return;
+
+    // Calculate delay with buffer (add 2 seconds for backend processing)
+    const delay = Math.max(0, nextWakeUp - now + 2000);
+
+    // Schedule single refresh at wake-up time
+    const timeoutId = setTimeout(() => {
+      console.log('🔔 Snooze expired - refreshing data...');
+      fetchData();
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [columns.snoozed, fetchData]);
 
   return {
     columns,
@@ -212,5 +304,7 @@ export const useKanbanData = () => {
     refreshData: fetchData,
     moveEmail,
     generateSummary,
+    snoozeEmail,
+    unsnoozeEmail,
   };
 };
