@@ -388,5 +388,37 @@ Your summary (max 12 words):`.trim();
 
         return `Email from ${sender} regarding: ${subject}. ${bodyPreview}${bodyPreview.length >= 150 ? '...' : ''}`;
     }
-}
+    /**
+     * Generate embedding vector for text using Gemini API
+     * Used for semantic search (Week 4 Feature I)
+     * @param text - Text to generate embedding for
+     * @returns Vector embedding (array of numbers)
+     */
+    async generateEmbedding(text: string): Promise<number[]> {
+        if (!this.genAI) {
+            throw new Error('Gemini AI not initialized. Please set GEMINI_API_KEY in .env file');
+        }
+
+        try {
+            // Use Gemini embedding model
+            const embeddingModel = this.genAI.getGenerativeModel({ model: 'text-embedding-004' });
+            
+            // Clean and truncate text for embedding (max 2048 tokens)
+            const cleanText = text
+                .replace(/<[^>]*>/g, '') // Remove HTML
+                .replace(/\s+/g, ' ') // Normalize whitespace
+                .trim()
+                .substring(0, 8000); // Rough character limit
+
+            const result = await embeddingModel.embedContent(cleanText);
+            const embedding = result.embedding.values;
+
+            this.logger.log(`✅ Generated embedding (${embedding.length} dimensions) for text: ${cleanText.substring(0, 50)}...`);
+            
+            return embedding;
+        } catch (error) {
+            this.logger.error('Failed to generate embedding:', error.message);
+            throw new Error(`Embedding generation failed: ${error.message}`);
+        }
+    }}
 
