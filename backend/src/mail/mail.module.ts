@@ -32,7 +32,6 @@ import { AiModule } from '../ai/ai.module';
   ],
   exports: [
     GmailService, 
-    AiService, 
     SnoozeService, 
     EmailMetadataService,
     FuzzySearchService,

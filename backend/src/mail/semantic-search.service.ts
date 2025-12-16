@@ -3,7 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EmailMetadata } from './schemas/email-metadata.schema';
 import { GmailService } from './gmail.service';
-import { AiService } from './ai.service';
+import { AiService } from '../ai/ai.service';
 
 /**
  * Semantic Search Service - Week 4 Feature I
