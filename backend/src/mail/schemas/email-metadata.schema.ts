@@ -78,6 +78,18 @@ export class EmailMetadata {
   receivedDate?: Date;
 
   // ============================================
+  // SEMANTIC SEARCH - WEEK 4
+  // ============================================
+  @Prop({ type: [Number] })
+  embedding?: number[]; // Vector embedding for semantic search
+
+  @Prop()
+  embeddingText?: string; // Text used to generate the embedding
+
+  @Prop()
+  embeddingGeneratedAt?: Date; // Timestamp when embedding was created
+
+  // ============================================
   // INDEXES
   // ============================================
   // Index for fast queries
