@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import ThemeProviders from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
-import { AuthInitializer } from "@/components/auth-initializer";
+import { AuthInitializer } from "@/components/auth-initializer"; // Vẫn giữ để check user session
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
 const geistSans = Geist({
@@ -26,8 +26,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
-  
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "";
+
   return (
     <html lang="en">
       <body
@@ -37,6 +37,7 @@ export default function RootLayout({
           <ThemeProviders attribute="class" defaultTheme="system" enableSystem>
             <AuthProvider>
               <AuthInitializer>
+                {/* Chỉ render children thuần túy, layout con sẽ lo phần Sidebar */}
                 {children}
               </AuthInitializer>
             </AuthProvider>

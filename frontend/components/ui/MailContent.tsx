@@ -162,108 +162,157 @@ const MailContent = ({
   };
 
   return (
-    <div className="flex flex-col w-full h-full bg-background text-gray-200 overflow-hidden relative">
+    <div className="flex flex-col w-full h-full bg-background overflow-hidden relative isolate">
       {/* --- TOP ACTION BAR --- */}
-      <div className="flex flex-row justify-between items-center p-3 border-b border-white/10 shrink-0">
-        <div className="flex items-center gap-4 text-gray-400">
+      <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background">
+        <div className="flex items-center gap-4 text-secondary">
           <button
-            className="hover:text-white transition-color cursor-pointer"
+            className="hover:text-foreground transition-colors cursor-pointer"
             onClick={onBack}
           >
             <IoMdClose size={20} />
           </button>
-          <div className="h-4 w-px bg-white/20 mx-1"></div>
+          <div className="h-4 w-px bg-divider dark:bg-gray-700 mx-1"></div>
 
           <button
-            className="hover:text-white transition-colors md:hidden cursor-pointer"
+            className="hover:text-foreground transition-colors md:hidden cursor-pointer"
             title="Back to Inbox"
             onClick={onBack}
           >
             <IoMdArrowBack size={20} />
           </button>
 
-          <button className="hover:text-white transition-colors cursor-pointer">
+          <button className="hover:text-foreground transition-colors cursor-pointer">
             <IoMdArrowForward size={20} />
           </button>
         </div>
 
-        <div className="flex items-center gap-2 text-gray-400">
-          <button className="p-2 hover:bg-white/10 rounded-md transition-colors cursor-pointer">
+        <div className="flex items-center gap-2 text-secondary">
+          <button className="p-2 hover:bg-muted rounded-md transition-colors cursor-pointer">
             <BsArchive size={18} />
           </button>
-          <button className="p-2 hover:bg-white/10 rounded-md transition-colors hover:text-red-400 cursor-pointer">
+          <button className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-400 cursor-pointer">
             <BsTrash3 size={18} />
           </button>
         </div>
       </div>
 
       {/* --- SCROLLABLE CONTENT AREA --- */}
-      <div className="flex-1 overflow-y-auto p-6 custom-scrollbar pb-20">
-        {/* Subject Header */}
-        <div className="mb-6">
-          <div className="flex flex-row justify-between items-start">
-            <h1 className="text-xl md:text-2xl font-semibold text-white mb-3">
-              {mail.subject || "(No Subject)"}
-            </h1>
-            <div className="flex gap-2">
-              {mail.labelIds?.includes("SENT") && (
-                <span className="bg-gray-700 text-xs px-2 py-1 rounded text-gray-300">
-                  Sent Mail
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Sender Info Row */}
-        <div className="flex flex-row justify-between items-start mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold border border-white/10 text-lg shrink-0">
-              {senderName.charAt(0).toUpperCase()}
-            </div>
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-white">{senderName}</span>
-                <span className="text-xs text-gray-400">
-                  &lt;{senderEmail}&gt;
-                </span>
+      <div className="flex-1 overflow-y-auto mailbox-scrollbar pb-20 text-secondary">
+        {/* Subject and Sender Info - Unified Section */}
+        <div className="px-6 pt-6 pb-4 bg-background border-b border-divider dark:border-gray-800">
+          {/* Subject Header */}
+          <div className="mb-4">
+            <div className="flex flex-row justify-between items-start gap-4">
+              <h1 className="text-xl md:text-2xl font-semibold text-foreground flex-1">
+                {mail.subject || "(No Subject)"}
+              </h1>
+              <div className="flex gap-2 shrink-0">
+                {mail.labelIds?.includes("SENT") && (
+                  <span className="bg-muted text-xs px-2 py-1 rounded text-secondary">
+                    Sent Mail
+                  </span>
+                )}
               </div>
-              <span className="text-xs text-gray-500">To: {mail.to}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-gray-500 text-sm">
-            <span>{formatDate(mail.date)}</span>
-            <button className="p-1 hover:bg-white/10 rounded hover:text-white cursor-pointer">
-              <IoMdMore size={20} />
-            </button>
+
+          {/* Sender Info Row */}
+          <div className="flex flex-row justify-between items-start">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
+                {senderName.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-foreground">{senderName}</span>
+                  <span className="text-xs text-secondary">
+                    &lt;{senderEmail}&gt;
+                  </span>
+                </div>
+                <span className="text-xs text-secondary">To: {mail.to}</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-secondary text-sm">
+              <span>{formatDate(mail.date)}</span>
+              <button className="p-1 hover:bg-muted rounded hover:text-foreground cursor-pointer">
+                <IoMdMore size={20} />
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Original Mail Body */}
-        <div className="w-full bg-white text-secondary rounded-sm p-8 shadow-sm min-h-[200px] overflow-hidden border border-white/5">
-          <div
-            className="email-content-wrapper text-[15px] leading-relaxed"
-            dangerouslySetInnerHTML={{
-              __html:
-                mail.htmlBody ||
-                mail.textBody ||
-                mail.snippet ||
-                '<p class="text-secondary italic text-center mt-10">(No content available for this email)</p>',
-            }}
-          />
+        <div className="px-6 py-6">
+          <div className="w-full bg-white dark:bg-[#1a1a1a] rounded-lg overflow-hidden border border-divider dark:border-gray-800 shadow-sm">
+            <iframe
+              ref={(iframe) => {
+                if (iframe) {
+                  iframe.onload = () => {
+                    try {
+                      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                      if (iframeDoc) {
+                        const height = iframeDoc.documentElement.scrollHeight;
+                        iframe.style.height = Math.max(height + 20, 200) + 'px';
+                      }
+                    } catch (e) {
+                      // Cross-origin restriction - fallback to min height
+                      iframe.style.height = '500px';
+                    }
+                  };
+                }
+              }}
+              sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+              className="w-full border-0"
+              style={{ height: '200px' }}
+              srcDoc={`
+                <!DOCTYPE html>
+                <html>
+                  <head>
+                    <meta charset="utf-8">
+                    <base target="_blank">
+                    <style>
+                      body {
+                        margin: 0;
+                        padding: 2rem;
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                        font-size: 15px;
+                        line-height: 1.7;
+                        color: #475569;
+                        background-color: transparent;
+                        overflow: hidden;
+                      }
+                      a { 
+                        color: #2563eb; 
+                        text-decoration: underline;
+                        cursor: pointer;
+                      }
+                      a:hover { text-decoration: none; }
+                      * { max-width: 100%; }
+                      img { max-width: 100%; height: auto; }
+                      pre { white-space: pre-wrap; word-wrap: break-word; }
+                    </style>
+                  </head>
+                  <body>
+                    ${mail.htmlBody || mail.textBody || mail.snippet || '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'}
+                  </body>
+                </html>
+              `}
+            />
+          </div>
         </div>
 
         {/* --- REPLY EDITOR AREA --- */}
         {isReplying && (
-          <div className="mt-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
-            <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
+          <div className="px-6 pb-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+            <div className="flex items-center gap-2 text-sm text-secondary mb-1">
               <FaReply /> Replying to{" "}
-              <span className="text-white">{senderName}</span>
+              <span className="text-foreground font-medium">{senderName}</span>
             </div>
             <textarea
               ref={replyTextareaRef}
               autoFocus
-              className="w-full bg-[#1e1e1e] border border-white/20 rounded-md p-4 text-gray-200 focus:outline-none focus:border-blue-500 min-h-[150px] resize-y"
+              className="w-full bg-background border border-divider dark:border-gray-700 rounded-md p-4 text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
               placeholder="Type your reply here..."
               value={replyBody}
               onChange={(e) => setReplyBody(e.target.value)}
@@ -288,29 +337,27 @@ const MailContent = ({
               <button
                 onClick={handleCancelReply}
                 disabled={isSending}
-                className="px-4 py-2 hover:bg-white/10 text-gray-400 hover:text-white text-sm rounded transition-colors cursor-pointer"
+                className="px-4 py-2 hover:bg-muted text-secondary hover:text-foreground text-sm rounded transition-colors cursor-pointer"
               >
                 Discard
               </button>
             </div>
           </div>
         )}
-
-        <div className="h-10"></div>
       </div>
 
       {/* --- BOTTOM ACTION BAR --- */}
       {!isReplying && (
-        <div className="absolute bottom-6 left-6 flex flex-row gap-3">
+        <div className="border-t border-divider dark:border-gray-800 p-4 flex flex-row gap-3 bg-background">
           <button
             onClick={handleReplyClick}
-            className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg"
+            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded transition-colors cursor-pointer"
           >
             <FaReply /> Reply
           </button>
           <button
             onClick={onForwardClick}
-            className="flex items-center gap-2 px-4 py-2 bg-[#2c2c2c] hover:bg-[#383838] text-gray-200 text-sm rounded border border-white/10 transition-colors cursor-pointer shadow-lg"
+            className="flex items-center gap-2 px-4 py-2 bg-muted hover:bg-muted/80 text-foreground text-sm rounded transition-colors cursor-pointer"
           >
             <FaShare /> Forward
           </button>
