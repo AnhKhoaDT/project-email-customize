@@ -378,6 +378,29 @@ export class GmailService {
     return res.data;
   }
 
+  /**
+   * Modify email labels directly (Week 4 - Kanban Configuration)
+   */
+  async modifyEmailLabels(
+    userId: string, 
+    emailId: string, 
+    labels: { addLabelIds?: string[]; removeLabelIds?: string[] }
+  ) {
+    const client = await this.getOAuthClientForUser(userId);
+    const gmail = google.gmail({ version: 'v1', auth: client });
+
+    const res = await gmail.users.messages.modify({
+      userId: 'me',
+      id: emailId,
+      requestBody: {
+        addLabelIds: labels.addLabelIds || [],
+        removeLabelIds: labels.removeLabelIds || []
+      }
+    });
+
+    return res.data;
+  }
+
   async getAttachment(userId: string, messageId: string, attachmentId: string) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });

@@ -1537,3 +1537,1373 @@ curl -X POST http://localhost:5000/emails/msg_123/move \
 ---
 
 *Last updated: December 10, 2025 - Week 2 Implementation*
+
+---
+---
+
+# 🔍 WEEK 3 APIs - Fuzzy Search & Filtering
+
+> **⚠️ CHÚ Ý:** APIs dưới đây là phần mở rộng cho TUẦN 3, tập trung vào tìm kiếm thông minh và lọc/sắp xếp email.
+
+---
+
+## 📋 Mục lục Week 3 APIs
+
+1. [Fuzzy Search APIs](#fuzzy-search-apis)
+2. [Search Suggestions API](#search-suggestions-api)
+3. [Filtering & Sorting APIs](#filtering--sorting-apis)
+4. [Testing Examples](#testing-examples-week-3)
+
+---
+
+## 1️⃣ Fuzzy Search APIs
+
+> **🎯 Mục đích:** Tìm kiếm email với khả năng chịu lỗi đánh máy (typo tolerance) và khớp một phần (partial matching). Không cần gõ đúng 100% từ khóa.
+
+---
+
+### 🔍 POST `/search/fuzzy`
+
+**Mô tả:** Thực hiện tìm kiếm fuzzy trên subject, sender (name + email), và body (optional)
+
+**Authentication:** Required (JWT)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "query": "marketing",
+  "limit": 20,
+  "includeBody": false
+}
+```
+
+**Fields:**
+- `query` (required): Từ khóa tìm kiếm
+- `limit` (optional, default=50): Số kết quả tối đa
+- `includeBody` (optional, default=false): Có tìm trong nội dung email không (chậm hơn)
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "query": "marketing",
+    "results": [
+      {
+        "id": "msg_123",
+        "threadId": "thread_456",
+        "subject": "New Marketing Campaign",
+        "from": "marketing@example.com",
+        "date": "2025-12-17T10:00:00Z",
+        "snippet": "We are launching a new marketing initiative...",
+        "isUnread": true,
+        "hasAttachment": false,
+        "relevanceScore": 0.95
+      }
+    ],
+    "totalResults": 8
+  }
+}
+```
+
+**Response Fields:**
+- `relevanceScore`: Độ liên quan (0-1), càng cao càng khớp
+- Kết quả được sắp xếp theo `relevanceScore` giảm dần
+
+**Typo Tolerance Examples:**
+- Query: `"markting"` → Tìm được emails về "marketing"
+- Query: `"recieve"` → Tìm được emails về "receive"
+- Query: `"Nguy"` → Tìm được senders như "Nguyễn Văn A"
+
+**Partial Matching Examples:**
+- Query: `"john"` → Tìm được "john@example.com", "John Doe", "Johnny Smith"
+- Query: `"inv"` → Tìm được emails về "invoice", "invitation", "inventory"
+
+**Ví dụ Frontend:**
+```javascript
+const fuzzySearch = async (query) => {
+  const response = await fetch('http://localhost:5000/search/fuzzy', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query,
+      limit: 20,
+      includeBody: false // Set true for more accurate results (slower)
+    })
+  });
+
+  const data = await response.json();
+  
+  // Display results
+  data.data.results.forEach(email => {
+    console.log(`[${email.relevanceScore.toFixed(2)}] ${email.subject}`);
+  });
+  
+  return data.data.results;
+};
+
+// Usage
+await fuzzySearch('marketing');
+```
+
+**Ví dụ cURL:**
+```bash
+curl -X POST http://localhost:5000/search/fuzzy \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "markting",
+    "limit": 20,
+    "includeBody": false
+  }'
+```
+
+---
+
+## 2️⃣ Search Suggestions API
+
+> **🎯 Mục đích:** Cung cấp gợi ý tìm kiếm khi user đang gõ (auto-suggestion/type-ahead).
+
+---
+
+### 💡 GET `/search/suggestions?q={query}`
+
+**Mô tả:** Lấy danh sách gợi ý search dựa trên query
+
+**Authentication:** Required (JWT)
+
+**Query Parameters:**
+- `q` (required): Query string (tối thiểu 2 ký tự)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "suggestions": [
+      "marketing@example.com",
+      "Marketing Team",
+      "marketing campaign",
+      "New Marketing Strategy",
+      "Marketing Budget"
+    ]
+  }
+}
+```
+
+**Suggestions Include:**
+- Sender names và emails khớp với query
+- Keywords từ subject khớp với query
+- Tối đa 10 suggestions
+
+**Ví dụ Frontend (Auto-complete Search Bar):**
+```javascript
+// Debounced search suggestions
+let suggestionTimeout;
+
+const searchInput = document.getElementById('search-input');
+const suggestionsDiv = document.getElementById('suggestions');
+
+searchInput.addEventListener('input', (e) => {
+  const query = e.target.value.trim();
+  
+  clearTimeout(suggestionTimeout);
+  
+  if (query.length < 2) {
+    suggestionsDiv.innerHTML = '';
+    return;
+  }
+  
+  suggestionTimeout = setTimeout(async () => {
+    const response = await fetch(
+      `http://localhost:5000/search/suggestions?q=${encodeURIComponent(query)}`,
+      {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      }
+    );
+    
+    const data = await response.json();
+    
+    // Display suggestions dropdown
+    suggestionsDiv.innerHTML = data.data.suggestions
+      .map(s => `<div class="suggestion-item">${s}</div>`)
+      .join('');
+  }, 300); // 300ms debounce
+});
+
+// Click suggestion → trigger search
+suggestionsDiv.addEventListener('click', (e) => {
+  if (e.target.classList.contains('suggestion-item')) {
+    const selectedQuery = e.target.textContent;
+    searchInput.value = selectedQuery;
+    performFuzzySearch(selectedQuery);
+  }
+});
+```
+
+**Ví dụ cURL:**
+```bash
+curl "http://localhost:5000/search/suggestions?q=mark" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+## 3️⃣ Filtering & Sorting APIs
+
+> **🎯 Mục đích:** Lọc và sắp xếp emails trong Kanban columns hoặc mailboxes.
+
+---
+
+### 📊 GET `/mailboxes/:id/emails/filtered`
+
+**Mô tả:** Lấy emails từ mailbox/label với filtering và sorting
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `:id` - Label ID (e.g., `INBOX`, `SENT`, custom label ID)
+
+**Query Parameters:**
+- `sortBy` (optional): 
+  - `date-desc` - Mới nhất trước (default)
+  - `date-asc` - Cũ nhất trước
+  - `sender` - Sắp xếp theo tên người gửi
+- `filterUnread` (optional): `true` | `false` - Chỉ hiển thị emails chưa đọc
+- `filterAttachment` (optional): `true` | `false` - Chỉ hiển thị emails có đính kèm
+- `limit` (optional, default=50): Số lượng emails
+- `pageToken` (optional): Token cho pagination
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "messages": [
+      {
+        "id": "msg_123",
+        "subject": "Important Document",
+        "from": "boss@example.com",
+        "date": "2025-12-17T14:30:00Z",
+        "isUnread": true,
+        "hasAttachment": true,
+        "snippet": "Please review the attached document..."
+      }
+    ],
+    "nextPageToken": "page_token_xyz",
+    "resultSizeEstimate": 42
+  }
+}
+```
+
+**Ví dụ Frontend (Kanban Board với Filters):**
+```javascript
+const loadColumnWithFilters = async (labelId, filters) => {
+  const params = new URLSearchParams({
+    limit: 50,
+    sortBy: filters.sortBy || 'date-desc',
+  });
+  
+  if (filters.showUnreadOnly) {
+    params.append('filterUnread', 'true');
+  }
+  
+  if (filters.showAttachmentsOnly) {
+    params.append('filterAttachment', 'true');
+  }
+  
+  const response = await fetch(
+    `http://localhost:5000/mailboxes/${labelId}/emails/filtered?${params}`,
+    {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    }
+  );
+  
+  const data = await response.json();
+  return data.data.messages;
+};
+
+// UI Controls
+const filterControls = {
+  sortBy: 'date-desc', // 'date-desc' | 'date-asc' | 'sender'
+  showUnreadOnly: false,
+  showAttachmentsOnly: false,
+};
+
+// Apply filters
+document.getElementById('sort-select').addEventListener('change', (e) => {
+  filterControls.sortBy = e.target.value;
+  refreshColumn();
+});
+
+document.getElementById('filter-unread').addEventListener('change', (e) => {
+  filterControls.showUnreadOnly = e.target.checked;
+  refreshColumn();
+});
+
+document.getElementById('filter-attachments').addEventListener('change', (e) => {
+  filterControls.showAttachmentsOnly = e.target.checked;
+  refreshColumn();
+});
+
+async function refreshColumn() {
+  const emails = await loadColumnWithFilters('INBOX', filterControls);
+  renderEmailCards(emails);
+}
+```
+
+**Ví dụ cURL:**
+```bash
+# Get unread emails sorted by date (newest first)
+curl "http://localhost:5000/mailboxes/INBOX/emails/filtered?sortBy=date-desc&filterUnread=true&limit=20" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# Get emails with attachments sorted by sender
+curl "http://localhost:5000/mailboxes/INBOX/emails/filtered?sortBy=sender&filterAttachment=true" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+## 4️⃣ Testing Examples (Week 3)
+
+### Complete Search Flow:
+
+```bash
+# 1. Get search suggestions
+curl "http://localhost:5000/search/suggestions?q=mar" \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Returns: ["marketing@example.com", "Marketing Team", ...]
+
+# 2. Perform fuzzy search with typo
+curl -X POST http://localhost:5000/search/fuzzy \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"markting","limit":10}'
+# → Finds emails about "marketing" despite typo
+
+# 3. Search with partial match
+curl -X POST http://localhost:5000/search/fuzzy \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Nguy","limit":10}'
+# → Finds all senders starting with "Nguy" (e.g., Nguyễn)
+```
+
+### Complete Filtering Flow:
+
+```bash
+# 1. Get all emails in INBOX (default sort)
+curl "http://localhost:5000/mailboxes/INBOX/emails/filtered" \
+  -H "Authorization: Bearer YOUR_JWT"
+
+# 2. Filter: Only unread emails, sorted newest first
+curl "http://localhost:5000/mailboxes/INBOX/emails/filtered?filterUnread=true&sortBy=date-desc" \
+  -H "Authorization: Bearer YOUR_JWT"
+
+# 3. Filter: Only emails with attachments, sorted by sender
+curl "http://localhost:5000/mailboxes/INBOX/emails/filtered?filterAttachment=true&sortBy=sender" \
+  -H "Authorization: Bearer YOUR_JWT"
+
+# 4. Combine filters: Unread + Attachments, sorted oldest first
+curl "http://localhost:5000/mailboxes/INBOX/emails/filtered?filterUnread=true&filterAttachment=true&sortBy=date-asc" \
+  -H "Authorization: Bearer YOUR_JWT"
+```
+
+---
+
+## 🎯 Summary Week 3 APIs
+
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| **Fuzzy Search** | 1 API | Typo-tolerant search với relevance scoring |
+| **Auto-Suggestion** | 1 API | Real-time search suggestions |
+| **Filtering & Sorting** | 1 API | Filter by unread/attachment, sort by date/sender |
+
+**Total:** 3 new endpoints
+
+**Key Features:**
+- **Typo Tolerance**: "markting" → finds "marketing"
+- **Partial Match**: "Nguy" → finds "Nguyễn Văn A"
+- **Relevance Scoring**: Results ranked by best match first
+- **Real-time Suggestions**: Type-ahead autocomplete
+- **Flexible Filtering**: Unread, attachments, custom combinations
+- **Multiple Sorting**: Date (asc/desc), sender name
+
+---
+
+*Last updated: December 17, 2025 - Week 3 Implementation*
+
+---
+---
+
+# 🧠 WEEK 4 APIs - Semantic Search & Dynamic Kanban
+
+> **⚠️ CHÚ Ý:** APIs dưới đây là phần mở rộng cho TUẦN 4, bao gồm tìm kiếm ngữ nghĩa (semantic search) và cấu hình Kanban động.
+
+---
+
+## 📋 Mục lục Week 4 APIs
+
+1. [Semantic Search APIs](#semantic-search-apis)
+2. [Email Indexing APIs](#email-indexing-apis)
+3. [Kanban Configuration APIs](#kanban-configuration-apis)
+4. [Testing Examples](#testing-examples-week-4)
+5. [Environment Setup](#environment-setup-week-4)
+
+---
+
+## 1️⃣ Semantic Search APIs
+
+> **🎯 Mục đích:** Tìm kiếm dựa trên **ý nghĩa** (semantic meaning) chứ không phải chỉ từ khóa. Sử dụng vector embeddings để tìm emails liên quan về mặt khái niệm.
+
+**Ví dụ:**
+- Query: `"financial matters"` → Tìm emails về "invoice", "payment", "salary", "budget"
+- Query: `"urgent tasks"` → Tìm emails về "deadline", "ASAP", "priority", "critical"
+
+---
+
+### 🔍 POST `/search/semantic`
+
+**Mô tả:** Thực hiện tìm kiếm ngữ nghĩa sử dụng vector embeddings
+
+**Authentication:** Required (JWT)
+
+**⚠️ Prerequisites:** 
+- Emails must be indexed first (see `/search/index` endpoint)
+- `GEMINI_API_KEY` must be set in `.env`
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "query": "financial matters",
+  "limit": 20,
+  "threshold": 0.5
+}
+```
+
+**Fields:**
+- `query` (required): Câu query ngữ nghĩa (có thể là câu dài, khái niệm)
+- `limit` (optional, default=20): Số kết quả tối đa
+- `threshold` (optional, default=0.5): Ngưỡng similarity (0-1), càng cao càng khắt khe
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "query": "financial matters",
+    "results": [
+      {
+        "id": "msg_789",
+        "threadId": "thread_012",
+        "subject": "Q4 Budget Review",
+        "from": "finance@example.com",
+        "date": "2025-12-15T09:00:00Z",
+        "snippet": "Please review the quarterly budget allocation...",
+        "similarityScore": 0.87,
+        "matchedText": "Q4 Budget Review Please review the quarterly budget..."
+      },
+      {
+        "id": "msg_456",
+        "subject": "Invoice Payment Due",
+        "from": "accounting@example.com",
+        "similarityScore": 0.82,
+        "matchedText": "Invoice Payment Due Your payment is due by..."
+      }
+    ],
+    "totalResults": 12,
+    "searchedEmails": 150
+  }
+}
+```
+
+**Response Fields:**
+- `similarityScore`: Độ tương đồng ngữ nghĩa (0-1), càng cao càng liên quan
+- `matchedText`: Đoạn text đã được dùng để tạo embedding
+- `searchedEmails`: Tổng số emails đã được indexed
+
+**Conceptual Search Examples:**
+- Query: `"money"` → Finds: "invoice", "payment", "salary", "budget", "cost"
+- Query: `"meeting schedule"` → Finds: "appointment", "calendar", "conference", "agenda"
+- Query: `"customer complaints"` → Finds: "feedback", "issue", "problem", "dissatisfied"
+
+**Ví dụ Frontend:**
+```javascript
+const semanticSearch = async (query) => {
+  // Check if emails are indexed first
+  const statsResponse = await fetch('http://localhost:5000/search/index/stats', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const stats = await statsResponse.json();
+  
+  if (stats.data.indexedEmails === 0) {
+    alert('Please index your emails first!');
+    // Trigger indexing
+    await indexEmails();
+    return;
+  }
+  
+  // Perform semantic search
+  const response = await fetch('http://localhost:5000/search/semantic', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query,
+      limit: 20,
+      threshold: 0.5 // Adjust for more/less strict matching
+    })
+  });
+
+  const data = await response.json();
+  
+  // Display results
+  console.log(`Found ${data.data.totalResults} related emails:`);
+  data.data.results.forEach(email => {
+    console.log(`[${(email.similarityScore * 100).toFixed(0)}%] ${email.subject}`);
+  });
+  
+  return data.data.results;
+};
+
+// Usage
+await semanticSearch('financial matters');
+await semanticSearch('urgent tasks that need attention');
+```
+
+**Ví dụ cURL:**
+```bash
+curl -X POST http://localhost:5000/search/semantic \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "financial matters",
+    "limit": 20,
+    "threshold": 0.5
+  }'
+```
+
+---
+
+## 2️⃣ Email Indexing APIs
+
+> **🎯 Mục đích:** Generate và lưu trữ vector embeddings cho emails để support semantic search.
+
+---
+
+### 📥 POST `/search/index`
+
+**Mô tả:** Index (generate embeddings) cho emails trong inbox
+
+**Authentication:** Required (JWT)
+
+**⚠️ Note:** 
+- Process có thể mất vài phút tùy số lượng emails
+- Chỉ cần chạy 1 lần hoặc khi có emails mới
+- Rate limit: ~60 emails/minute (Gemini API limit)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "limit": 100
+}
+```
+
+**Fields:**
+- `limit` (optional, default=100): Số emails tối đa cần index
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Successfully indexed 100 emails",
+  "indexed": 100
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+const indexEmails = async (limit = 100) => {
+  // Show loading indicator
+  showLoadingSpinner('Indexing emails for semantic search...');
+  
+  const response = await fetch('http://localhost:5000/search/index', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ limit })
+  });
+
+  const data = await response.json();
+  
+  hideLoadingSpinner();
+  
+  if (data.status === 200) {
+    alert(`Successfully indexed ${data.indexed} emails!`);
+  }
+  
+  return data;
+};
+
+// Run indexing on first app load or manually
+document.getElementById('btn-index-emails').addEventListener('click', () => {
+  indexEmails(100);
+});
+```
+
+**Ví dụ cURL:**
+```bash
+# Index 100 emails
+curl -X POST http://localhost:5000/search/index \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 100}'
+```
+
+---
+
+### 📊 GET `/search/index/stats`
+
+**Mô tả:** Lấy thống kê về indexing progress
+
+**Authentication:** Required (JWT)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "totalEmails": 150,
+    "indexedEmails": 100,
+    "pendingIndexing": 50,
+    "indexingProgress": 66.67
+  }
+}
+```
+
+**Response Fields:**
+- `totalEmails`: Tổng số emails trong database
+- `indexedEmails`: Số emails đã có embeddings
+- `pendingIndexing`: Số emails chưa index
+- `indexingProgress`: % hoàn thành (0-100)
+
+**Ví dụ Frontend:**
+```javascript
+const showIndexingStats = async () => {
+  const response = await fetch('http://localhost:5000/search/index/stats', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  
+  const data = await response.json();
+  const stats = data.data;
+  
+  // Display progress bar
+  document.getElementById('index-progress').style.width = `${stats.indexingProgress}%`;
+  document.getElementById('index-text').textContent = 
+    `${stats.indexedEmails}/${stats.totalEmails} emails indexed`;
+  
+  // Show index button if needed
+  if (stats.pendingIndexing > 0) {
+    document.getElementById('btn-index-emails').style.display = 'block';
+  }
+};
+
+// Check stats on page load
+await showIndexingStats();
+```
+
+**Ví dụ cURL:**
+```bash
+curl http://localhost:5000/search/index/stats \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+## 3️⃣ Kanban Configuration APIs
+
+> **🎯 Mục đích:** Cho phép users tùy chỉnh Kanban board của họ - tạo, sửa, xóa columns và map với Gmail labels.
+
+---
+
+### ⚙️ GET `/kanban/config`
+
+**Mô tả:** Lấy cấu hình Kanban board của user
+
+**Authentication:** Required (JWT)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "userId": "user_123",
+    "columns": [
+      {
+        "id": "todo",
+        "name": "To Do",
+        "order": 0,
+        "gmailLabel": "STARRED",
+        "color": "#FFA500",
+        "isVisible": true
+      },
+      {
+        "id": "in_progress",
+        "name": "In Progress",
+        "order": 1,
+        "gmailLabel": "IMPORTANT",
+        "color": "#4169E1",
+        "isVisible": true
+      },
+      {
+        "id": "done",
+        "name": "Done",
+        "order": 2,
+        "gmailLabel": null,
+        "color": "#32CD32",
+        "isVisible": true
+      }
+    ],
+    "showInbox": true,
+    "defaultSort": "date",
+    "lastModified": "2025-12-17T10:00:00Z"
+  }
+}
+```
+
+**Response Fields:**
+- `columns`: Danh sách các columns trên board
+- `gmailLabel`: Gmail label được map với column này (null nếu không map)
+- `order`: Thứ tự hiển thị
+- `isVisible`: Column có được hiển thị không
+
+**Ví dụ Frontend:**
+```javascript
+const loadKanbanConfig = async () => {
+  const response = await fetch('http://localhost:5000/kanban/config', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  
+  const data = await response.json();
+  const config = data.data;
+  
+  // Render Kanban board based on config
+  config.columns
+    .filter(col => col.isVisible)
+    .sort((a, b) => a.order - b.order)
+    .forEach(col => {
+      renderColumn(col);
+    });
+  
+  return config;
+};
+```
+
+**Ví dụ cURL:**
+```bash
+curl http://localhost:5000/kanban/config \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+### ➕ POST `/kanban/columns`
+
+**Mô tả:** Tạo column mới trên Kanban board
+
+**Authentication:** Required (JWT)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "Review",
+  "gmailLabel": "Label_Review_123",
+  "color": "#9370DB"
+}
+```
+
+**Fields:**
+- `name` (required): Tên column
+- `gmailLabel` (optional): Gmail label ID để sync
+- `color` (optional): Màu column (hex color)
+
+**Response:**
+```json
+{
+  "status": 201,
+  "message": "Column created successfully",
+  "data": {
+    "id": "col_1702814400000",
+    "name": "Review",
+    "order": 3,
+    "gmailLabel": "Label_Review_123",
+    "color": "#9370DB",
+    "isVisible": true
+  }
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+const createColumn = async (columnData) => {
+  const response = await fetch('http://localhost:5000/kanban/columns', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      name: columnData.name,
+      gmailLabel: columnData.gmailLabel || null,
+      color: columnData.color || '#808080'
+    })
+  });
+
+  const data = await response.json();
+  
+  if (data.status === 201) {
+    // Add column to UI
+    renderNewColumn(data.data);
+  }
+  
+  return data;
+};
+
+// Usage
+await createColumn({
+  name: 'Review',
+  gmailLabel: 'Label_123',
+  color: '#9370DB'
+});
+```
+
+**Ví dụ cURL:**
+```bash
+curl -X POST http://localhost:5000/kanban/columns \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Review",
+    "gmailLabel": "Label_Review_123",
+    "color": "#9370DB"
+  }'
+```
+
+---
+
+### ✏️ POST `/kanban/columns/:columnId`
+
+**Mô tả:** Cập nhật column (rename, change label mapping, color, visibility)
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `:columnId` - Column ID cần update
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "name": "Under Review",
+  "gmailLabel": "IMPORTANT",
+  "color": "#FF69B4",
+  "isVisible": true
+}
+```
+
+**Fields:** (tất cả optional - chỉ gửi fields cần update)
+- `name`: Tên mới
+- `gmailLabel`: Label mapping mới
+- `color`: Màu mới
+- `isVisible`: Hiển thị hoặc ẩn column
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Column updated successfully",
+  "data": {
+    "id": "col_1702814400000",
+    "name": "Under Review",
+    "order": 3,
+    "gmailLabel": "IMPORTANT",
+    "color": "#FF69B4",
+    "isVisible": true
+  }
+}
+```
+
+**Ví dụ Frontend:**
+```javascript
+const updateColumn = async (columnId, updates) => {
+  const response = await fetch(`http://localhost:5000/kanban/columns/${columnId}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(updates)
+  });
+
+  const data = await response.json();
+  
+  if (data.status === 200) {
+    // Update UI
+    updateColumnInUI(columnId, data.data);
+  }
+  
+  return data;
+};
+
+// Usage examples
+await updateColumn('todo', { name: 'Important Tasks' });
+await updateColumn('todo', { gmailLabel: 'STARRED' });
+await updateColumn('todo', { color: '#FF0000' });
+await updateColumn('done', { isVisible: false }); // Hide column
+```
+
+**Ví dụ cURL:**
+```bash
+# Rename column
+curl -X POST http://localhost:5000/kanban/columns/todo \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Important Tasks"}'
+
+# Change label mapping
+curl -X POST http://localhost:5000/kanban/columns/todo \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"gmailLabel": "STARRED"}'
+```
+
+---
+
+### 🗑️ POST `/kanban/columns/:columnId/delete`
+
+**Mô tả:** Xóa column khỏi Kanban board
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `:columnId` - Column ID cần xóa
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Column deleted successfully"
+}
+```
+
+**⚠️ Note:** Emails trong column bị xóa sẽ không bị xóa - chúng vẫn còn trong Gmail.
+
+**Ví dụ Frontend:**
+```javascript
+const deleteColumn = async (columnId) => {
+  if (!confirm('Are you sure you want to delete this column?')) {
+    return;
+  }
+  
+  const response = await fetch(`http://localhost:5000/kanban/columns/${columnId}/delete`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+
+  const data = await response.json();
+  
+  if (data.status === 200) {
+    // Remove column from UI
+    removeColumnFromUI(columnId);
+  }
+  
+  return data;
+};
+```
+
+**Ví dụ cURL:**
+```bash
+curl -X POST http://localhost:5000/kanban/columns/col_123/delete \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+### 🔄 POST `/kanban/columns/reorder`
+
+**Mô tả:** Thay đổi thứ tự các columns
+
+**Authentication:** Required (JWT)
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "columnOrder": ["done", "in_progress", "todo"]
+}
+```
+
+**Fields:**
+- `columnOrder` (required): Array of column IDs theo thứ tự mới
+
+**Response:**
+```json
+{
+  "status": 200,
+  "message": "Columns reordered successfully",
+  "data": [
+    {
+      "id": "done",
+      "name": "Done",
+      "order": 0
+    },
+    {
+      "id": "in_progress",
+      "name": "In Progress",
+      "order": 1
+    },
+    {
+      "id": "todo",
+      "name": "To Do",
+      "order": 2
+    }
+  ]
+}
+```
+
+**Ví dụ Frontend (Drag & Drop Reorder):**
+```javascript
+const reorderColumns = async (newOrder) => {
+  const response = await fetch('http://localhost:5000/kanban/columns/reorder', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ columnOrder: newOrder })
+  });
+
+  const data = await response.json();
+  return data;
+};
+
+// Drag & Drop handler (using react-beautiful-dnd or similar)
+const onColumnDragEnd = async (result) => {
+  if (!result.destination) return;
+  
+  const items = Array.from(columns);
+  const [reordered] = items.splice(result.source.index, 1);
+  items.splice(result.destination.index, 0, reordered);
+  
+  const newOrder = items.map(col => col.id);
+  
+  // Update UI immediately
+  setColumns(items);
+  
+  // Sync with backend
+  await reorderColumns(newOrder);
+};
+```
+
+**Ví dụ cURL:**
+```bash
+curl -X POST http://localhost:5000/kanban/columns/reorder \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "columnOrder": ["done", "in_progress", "todo"]
+  }'
+```
+
+---
+
+### 📋 GET `/kanban/columns/:columnId/emails`
+
+**Mô tả:** Lấy emails của một custom column (với label mapping và filtering)
+
+**Authentication:** Required (JWT)
+
+**Path Parameters:**
+- `:columnId` - Column ID
+
+**Query Parameters:**
+- `limit` (optional, default=50)
+- `sortBy` (optional): `date-desc` | `date-asc`
+- `filterUnread` (optional): `true` | `false`
+- `filterAttachment` (optional): `true` | `false`
+
+**Headers:**
+```
+Authorization: Bearer <accessToken>
+```
+
+**Response:**
+```json
+{
+  "status": 200,
+  "data": {
+    "columnId": "todo",
+    "columnName": "To Do",
+    "messages": [
+      {
+        "id": "msg_123",
+        "subject": "Task Assignment",
+        "from": "manager@example.com",
+        "date": "2025-12-17T10:00:00Z",
+        "isUnread": true
+      }
+    ],
+    "total": 5
+  }
+}
+```
+
+**⚠️ How Label Mapping Works:**
+- Nếu column có `gmailLabel`: Fetch emails từ Gmail label đó
+- Nếu column không có `gmailLabel`: Fetch từ database (custom status)
+
+**Ví dụ Frontend:**
+```javascript
+const loadCustomColumnEmails = async (columnId, filters = {}) => {
+  const params = new URLSearchParams({
+    limit: 50,
+    ...filters
+  });
+  
+  const response = await fetch(
+    `http://localhost:5000/kanban/columns/${columnId}/emails?${params}`,
+    {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    }
+  );
+  
+  const data = await response.json();
+  return data.data.messages;
+};
+
+// Usage
+const todoEmails = await loadCustomColumnEmails('todo', {
+  sortBy: 'date-desc',
+  filterUnread: true
+});
+```
+
+**Ví dụ cURL:**
+```bash
+curl "http://localhost:5000/kanban/columns/todo/emails?limit=20&filterUnread=true" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+---
+
+## 4️⃣ Testing Examples (Week 4)
+
+### Complete Semantic Search Flow:
+
+```bash
+# 1. Check indexing stats
+curl http://localhost:5000/search/index/stats \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Shows: 0/150 emails indexed
+
+# 2. Index emails (first time setup)
+curl -X POST http://localhost:5000/search/index \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 100}'
+# → Indexes 100 emails (takes 1-2 minutes)
+
+# 3. Perform semantic search
+curl -X POST http://localhost:5000/search/semantic \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "financial matters and budget",
+    "limit": 10,
+    "threshold": 0.5
+  }'
+# → Returns emails about invoices, payments, costs, etc.
+
+# 4. Try conceptual search
+curl -X POST http://localhost:5000/search/semantic \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "urgent tasks"}'
+# → Returns emails about deadlines, priorities, ASAP, etc.
+```
+
+### Complete Kanban Configuration Flow:
+
+```bash
+# 1. Get current config
+curl http://localhost:5000/kanban/config \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Shows default columns: To Do, In Progress, Done
+
+# 2. Create new column
+curl -X POST http://localhost:5000/kanban/columns \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Review",
+    "gmailLabel": "STARRED",
+    "color": "#9370DB"
+  }'
+# → Creates "Review" column mapped to Gmail STARRED label
+
+# 3. Update column (rename)
+curl -X POST http://localhost:5000/kanban/columns/todo \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Backlog"}'
+# → Renames "To Do" to "Backlog"
+
+# 4. Change label mapping
+curl -X POST http://localhost:5000/kanban/columns/todo \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"gmailLabel": "IMPORTANT"}'
+# → Now "Backlog" shows emails with IMPORTANT label
+
+# 5. Reorder columns
+curl -X POST http://localhost:5000/kanban/columns/reorder \
+  -H "Authorization: Bearer YOUR_JWT" \
+  -H "Content-Type: application/json" \
+  -d '{"columnOrder": ["done", "in_progress", "todo"]}'
+# → Changes display order
+
+# 6. Delete column
+curl -X POST http://localhost:5000/kanban/columns/col_review/delete \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Deletes "Review" column (emails not affected)
+
+# 7. Get emails from custom column
+curl "http://localhost:5000/kanban/columns/todo/emails?limit=20" \
+  -H "Authorization: Bearer YOUR_JWT"
+# → Returns emails in "Backlog" column (from IMPORTANT label)
+```
+
+---
+
+## 5️⃣ Environment Setup (Week 4)
+
+### Required Environment Variables:
+
+```env
+# Existing (Week 1-3)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+MONGODB_URI=...
+GEMINI_API_KEY=...
+
+# No new variables needed for Week 4
+```
+
+### Get Gemini API Key (if not already done):
+
+1. Visit: https://ai.google.dev/
+2. Click "Get API Key"
+3. Create project or select existing
+4. Copy API key
+5. Add to `.env`: `GEMINI_API_KEY=AIzaSy...`
+
+---
+
+## 🎯 Summary Week 4 APIs
+
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| **Semantic Search** | 1 API | Vector-based conceptual search |
+| **Email Indexing** | 2 APIs | Generate embeddings + stats |
+| **Kanban Config** | 6 APIs | CRUD operations for columns + label mapping |
+
+**Total:** 9 new endpoints
+
+**Key Features:**
+- **Semantic Search**: Tìm theo ý nghĩa, không cần từ khóa chính xác
+- **Vector Embeddings**: Powered by Gemini API
+- **Dynamic Columns**: Users tự tạo/sửa/xóa columns
+- **Label Mapping**: Auto-sync với Gmail labels
+- **Flexible Board**: Reorder columns, hide/show, custom colors
+
+---
+
+## 📊 Complete API Summary (All Weeks)
+
+| Week | Features | Endpoints | Total |
+|------|----------|-----------|-------|
+| Week 1-2 | Auth, Mail, Kanban, AI, Snooze | ~15 APIs | 15 |
+| Week 3 | Fuzzy Search, Filtering | 3 APIs | 3 |
+| Week 4 | Semantic Search, Config | 9 APIs | 9 |
+| **TOTAL** | | | **27 APIs** |
+
+---
+
+*Last updated: December 17, 2025 - Week 4 Implementation Complete*

@@ -130,4 +130,36 @@ Action: Review and respond as needed.`;
 
     return summaries;
   }
+
+  /**
+   * Generate embedding vector for text using Gemini API
+   * Used for semantic search (Week 4 Feature I)
+   */
+  async generateEmbedding(text: string): Promise<number[]> {
+    if (!this.genAI) {
+      throw new Error('Gemini AI not initialized. Please set GEMINI_API_KEY in .env file');
+    }
+
+    try {
+      // Use Gemini embedding model
+      const embeddingModel = this.genAI.getGenerativeModel({ model: 'embedding-001' });
+      
+      // Clean and truncate text for embedding (max 2048 tokens)
+      const cleanText = text
+        .replace(/<[^>]*>/g, '') // Remove HTML
+        .replace(/\s+/g, ' ') // Normalize whitespace
+        .trim()
+        .substring(0, 8000); // Rough character limit
+
+      const result = await embeddingModel.embedContent(cleanText);
+      const embedding = result.embedding.values;
+
+      logger.log(`✅ Generated embedding (${embedding.length} dimensions) for text: ${cleanText.substring(0, 50)}...`);
+      
+      return embedding;
+    } catch (error) {
+      logger.error('Failed to generate embedding:', error);
+      throw new Error(`Embedding generation failed: ${error.message}`);
+    }
+  }
 }
