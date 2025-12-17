@@ -12,6 +12,7 @@ import { SendEmailDto } from './dto/send-email.dto';
 import { ReplyEmailDto } from './dto/reply-email.dto';
 import { ModifyEmailDto } from './dto/modify-email.dto';
 import { ToggleLabelDto } from './dto/toggle-label.dto';
+import { SearchEmailDto } from './dto/search-email.dto';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -475,29 +476,47 @@ export class MailController {
   }
 
   // ============================================
-  // WEEK 3: FUZZY SEARCH ENDPOINTS
+  // SEARCH ENDPOINTS (Fuzzy Search)
   // ============================================
 
   @UseGuards(JwtAuthGuard)
-  @Post('search/fuzzy')
-  async fuzzySearch(
+  @Get('search/fuzzy')
+  async searchEmails(
     @Req() req: any,
-    @Body() body: { query: string; limit?: number; includeBody?: boolean }
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('status') status?: string,
   ) {
     try {
-      if (!body.query || body.query.trim().length === 0) {
-        return { status: 400, message: 'Query is required' };
+      // Validate query parameter
+      if (!q || q.trim().length === 0) {
+        return { 
+          status: 400, 
+          message: 'Query parameter "q" is required and cannot be empty' 
+        };
       }
 
-      const result = await this.fuzzySearchService.fuzzySearch(
-        req.user.id,
-        body.query,
-        { limit: body.limit, includeBody: body.includeBody }
-      );
+      // Build search DTO
+      const searchDto: SearchEmailDto = {
+        q: q.trim(),
+        limit: limit ? parseInt(limit, 10) : 20,
+        offset: offset ? parseInt(offset, 10) : 0,
+        status: status,
+      };
 
-      return result;
+      // Perform fuzzy search
+      const result = await this.fuzzySearchService.searchEmails(req.user.id, searchDto);
+
+      return { 
+        status: 200, 
+        data: result 
+      };
     } catch (err) {
-      return { status: 500, message: err?.message || 'Fuzzy search failed' };
+      return { 
+        status: 500, 
+        message: err?.message || 'Failed to search emails' 
+      };
     }
   }
 
@@ -505,16 +524,21 @@ export class MailController {
   @Get('search/suggestions')
   async getSearchSuggestions(
     @Req() req: any,
-    @Query('q') query: string
+    @Query('prefix') prefix: string,
+    @Query('limit') limit?: string,
   ) {
     try {
-      if (!query || query.length < 2) {
-        return { status: 200, data: { suggestions: [] } };
+      if (!prefix || prefix.length < 2) {
+        return { status: 400, message: 'Prefix must be at least 2 characters' };
       }
 
-      const suggestions = await this.fuzzySearchService.getSearchSuggestions(req.user.id, query);
+      const suggestions = await this.fuzzySearchService.getSearchSuggestions(
+        req.user.id,
+        prefix,
+        limit ? parseInt(limit, 10) : 10
+      );
 
-      return { status: 200, data: { suggestions } };
+      return { status: 200, data: suggestions };
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to get suggestions' };
     }
