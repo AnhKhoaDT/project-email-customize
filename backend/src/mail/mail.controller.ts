@@ -5,10 +5,14 @@ import { GmailService } from './gmail.service';
 import { AiService } from '../ai/ai.service';
 import { SnoozeService } from './snooze.service';
 import { EmailMetadataService } from './email-metadata.service';
+import { FuzzySearchService } from './fuzzy-search.service';
+import { SemanticSearchService } from './semantic-search.service';
+import { KanbanConfigService } from './kanban-config.service';
 import { SendEmailDto } from './dto/send-email.dto';
 import { ReplyEmailDto } from './dto/reply-email.dto';
 import { ModifyEmailDto } from './dto/modify-email.dto';
 import { ToggleLabelDto } from './dto/toggle-label.dto';
+import { SearchEmailDto } from './dto/search-email.dto';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -33,11 +37,18 @@ export class MailController {
   private summarizeRateLimit = new Map<string, number[]>();
   private readonly MAX_REQUESTS_PER_MINUTE = 10;
   
+  // Rate limiting: Track search requests per user
+  private searchRateLimit = new Map<string, number[]>();
+  private readonly MAX_SEARCH_REQUESTS_PER_MINUTE = 10;
+  
   constructor(
     private gmailService: GmailService,
     private aiService: AiService,
     private snoozeService: SnoozeService,
     private emailMetadataService: EmailMetadataService,
+    private fuzzySearchService: FuzzySearchService,
+    private semanticSearchService: SemanticSearchService,
+    private kanbanConfigService: KanbanConfigService,
   ) {}
   
   /**
@@ -74,6 +85,42 @@ export class MailController {
     const userRequests = this.summarizeRateLimit.get(userId) || [];
     userRequests.push(now);
     this.summarizeRateLimit.set(userId, userRequests);
+  }
+  
+  /**
+   * Check if user has exceeded rate limit for search requests
+   * @param userId - User ID
+   * @returns true if rate limit exceeded, false otherwise
+   */
+  private checkSearchRateLimit(userId: string): { allowed: boolean; remaining: number } {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    
+    // Get user's request history
+    let userRequests = this.searchRateLimit.get(userId) || [];
+    
+    // Remove requests older than 1 minute
+    userRequests = userRequests.filter(timestamp => timestamp > oneMinuteAgo);
+    
+    // Update map
+    this.searchRateLimit.set(userId, userRequests);
+    
+    // Check if limit exceeded
+    const allowed = userRequests.length < this.MAX_SEARCH_REQUESTS_PER_MINUTE;
+    const remaining = Math.max(0, this.MAX_SEARCH_REQUESTS_PER_MINUTE - userRequests.length);
+    
+    return { allowed, remaining };
+  }
+  
+  /**
+   * Record a search request for rate limiting
+   * @param userId - User ID
+   */
+  private recordSearchRequest(userId: string): void {
+    const now = Date.now();
+    const userRequests = this.searchRateLimit.get(userId) || [];
+    userRequests.push(now);
+    this.searchRateLimit.set(userId, userRequests);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -465,6 +512,314 @@ export class MailController {
       return { status: 200, data: snoozed };
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to get snoozed emails' };
+    }
+  }
+
+  // ============================================
+  // SEARCH ENDPOINTS (Fuzzy Search)
+  // ============================================
+
+  @UseGuards(JwtAuthGuard)
+  @Get('search/fuzzy')
+  async searchEmails(
+    @Req() req: any,
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('status') status?: string,
+  ) {
+    try {
+      // Check rate limit
+      const { allowed, remaining } = this.checkSearchRateLimit(req.user.id);
+      if (!allowed) {
+        return {
+          status: 429,
+          message: `Too many search requests. Please try again later.`,
+          remaining: 0,
+        };
+      }
+      
+      // Record this request
+      this.recordSearchRequest(req.user.id);
+      
+      // Validate query parameter
+      if (!q || q.trim().length === 0) {
+        return { 
+          status: 400, 
+          message: 'Query parameter "q" is required and cannot be empty' 
+        };
+      }
+
+      // Build search DTO
+      const searchDto: SearchEmailDto = {
+        q: q.trim(),
+        limit: limit ? parseInt(limit, 10) : 20,
+        offset: offset ? parseInt(offset, 10) : 0,
+        status: status,
+      };
+
+      // Perform fuzzy search
+      const result = await this.fuzzySearchService.searchEmails(req.user.id, searchDto);
+
+      return { 
+        status: 200, 
+        data: result 
+      };
+    } catch (err) {
+      return { 
+        status: 500, 
+        message: err?.message || 'Failed to search emails' 
+      };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('search/suggestions')
+  async getSearchSuggestions(
+    @Req() req: any,
+    @Query('prefix') prefix: string,
+    @Query('limit') limit?: string,
+  ) {
+    try {
+      if (!prefix || prefix.length < 2) {
+        return { status: 400, message: 'Prefix must be at least 2 characters' };
+      }
+
+      const suggestions = await this.fuzzySearchService.getSearchSuggestions(
+        req.user.id,
+        prefix,
+        limit ? parseInt(limit, 10) : 10
+      );
+
+      return { status: 200, data: suggestions };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get suggestions' };
+    }
+  }
+
+  // ============================================
+  // WEEK 3: FILTERING & SORTING SUPPORT
+  // ============================================
+
+  @UseGuards(JwtAuthGuard)
+  @Get('mailboxes/:id/emails/filtered')
+  async getFilteredEmails(
+    @Req() req: any,
+    @Param('id') labelId: string,
+    @Query('sortBy') sortBy?: string, // 'date-desc', 'date-asc', 'sender'
+    @Query('filterUnread') filterUnread?: string, // 'true' | 'false'
+    @Query('filterAttachment') filterAttachment?: string, // 'true' | 'false'
+    @Query('limit') limit?: string,
+    @Query('pageToken') pageToken?: string
+  ) {
+    try {
+      const pageSize = limit ? parseInt(limit, 10) : 50;
+      
+      // Fetch emails from Gmail
+      const result = await this.gmailService.listMessagesInLabel(
+        req.user.id,
+        labelId,
+        pageSize,
+        pageToken as any
+      );
+
+      let emails = result.messages || [];
+
+      // Apply filters
+      if (filterUnread === 'true') {
+        emails = emails.filter(email => email.isUnread);
+      }
+
+      if (filterAttachment === 'true') {
+        emails = emails.filter(email => email.hasAttachment);
+      }
+
+      // Apply sorting
+      if (sortBy === 'date-desc') {
+        emails.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      } else if (sortBy === 'date-asc') {
+        emails.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      } else if (sortBy === 'sender') {
+        emails.sort((a, b) => (a.from || '').localeCompare(b.from || ''));
+      }
+
+      return {
+        status: 200,
+        data: {
+          messages: emails,
+          nextPageToken: result.nextPageToken,
+          resultSizeEstimate: result.resultSizeEstimate,
+        },
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get filtered emails' };
+    }
+  }
+
+  // ============================================
+  // WEEK 4: SEMANTIC SEARCH ENDPOINTS
+  // ============================================
+
+  @UseGuards(JwtAuthGuard)
+  @Post('search/semantic')
+  async semanticSearch(
+    @Req() req: any,
+    @Body() body: { query: string; limit?: number; threshold?: number }
+  ) {
+    try {
+      if (!body.query || body.query.trim().length === 0) {
+        return { status: 400, message: 'Query is required' };
+      }
+
+      const result = await this.semanticSearchService.semanticSearch(
+        req.user.id,
+        body.query,
+        { limit: body.limit, threshold: body.threshold }
+      );
+
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Semantic search failed' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('search/index')
+  async indexEmails(
+    @Req() req: any,
+    @Body() body: { limit?: number } = {}
+  ) {
+    try {
+      const result = await this.semanticSearchService.indexAllEmails(
+        req.user.id,
+        { limit: body.limit }
+      );
+
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to index emails' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('search/index/stats')
+  async getIndexStats(@Req() req: any) {
+    try {
+      const stats = await this.semanticSearchService.getIndexStats(req.user.id);
+      return stats;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get index stats' };
+    }
+  }
+
+  // ============================================
+  // WEEK 4: KANBAN CONFIGURATION ENDPOINTS
+  // ============================================
+
+  @UseGuards(JwtAuthGuard)
+  @Get('kanban/config')
+  async getKanbanConfig(@Req() req: any) {
+    try {
+      const config = await this.kanbanConfigService.getConfig(req.user.id);
+      return config;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get Kanban config' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/columns')
+  async createColumn(
+    @Req() req: any,
+    @Body() body: { name: string; gmailLabel?: string; color?: string }
+  ) {
+    try {
+      if (!body.name || body.name.trim().length === 0) {
+        return { status: 400, message: 'Column name is required' };
+      }
+
+      const result = await this.kanbanConfigService.createColumn(req.user.id, body);
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to create column' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/columns/:columnId')
+  async updateColumn(
+    @Req() req: any,
+    @Param('columnId') columnId: string,
+    @Body() body: { name?: string; gmailLabel?: string; color?: string; isVisible?: boolean }
+  ) {
+    try {
+      const result = await this.kanbanConfigService.updateColumn(req.user.id, columnId, body);
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to update column' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/columns/:columnId/delete')
+  async deleteColumn(
+    @Req() req: any,
+    @Param('columnId') columnId: string
+  ) {
+    try {
+      const result = await this.kanbanConfigService.deleteColumn(req.user.id, columnId);
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to delete column' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/columns/reorder')
+  async reorderColumns(
+    @Req() req: any,
+    @Body() body: { columnOrder: string[] }
+  ) {
+    try {
+      if (!body.columnOrder || !Array.isArray(body.columnOrder)) {
+        return { status: 400, message: 'columnOrder array is required' };
+      }
+
+      const result = await this.kanbanConfigService.reorderColumns(req.user.id, body.columnOrder);
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to reorder columns' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('kanban/columns/:columnId/emails')
+  async getCustomColumnEmails(
+    @Req() req: any,
+    @Param('columnId') columnId: string,
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('filterUnread') filterUnread?: string,
+    @Query('filterAttachment') filterAttachment?: string
+  ) {
+    try {
+      const options: any = {
+        limit: limit ? parseInt(limit, 10) : 50,
+      };
+
+      if (sortBy) options.sortBy = sortBy;
+      if (filterUnread === 'true') options.filterUnread = true;
+      if (filterAttachment === 'true') options.filterAttachment = true;
+
+      const result = await this.kanbanConfigService.getColumnEmails(
+        req.user.id,
+        columnId,
+        options
+      );
+
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get column emails' };
     }
   }
 }

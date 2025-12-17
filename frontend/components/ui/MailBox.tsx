@@ -7,7 +7,7 @@ import { LuSquareKanban } from "react-icons/lu";
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
 import { EmailData } from "@/types";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, KeyboardEvent } from "react";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
@@ -19,6 +19,12 @@ interface MailBoxProps {
   hasMore?: boolean;
   kanbanMode: boolean;
   kanbanClick: () => void;
+  // Search props
+  searchQuery?: string;
+  onSearch?: (query: string) => void;
+  onClearSearch?: () => void;
+  isSearching?: boolean;
+  error?: string | null;
 }
 
 const MailBox = ({
@@ -31,9 +37,22 @@ const MailBox = ({
   hasMore = true,
   kanbanMode = false,
   kanbanClick,
+  searchQuery,
+  onSearch,
+  onClearSearch,
+  isSearching = false,
+  error = null,
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
+  
+  // Local state for search input (to prevent parent re-renders on every keystroke)
+  const [inputValue, setInputValue] = useState(searchQuery || "");
+  
+  // Update local input when searchQuery prop changes (e.g., from URL)
+  useEffect(() => {
+    setInputValue(searchQuery || "");
+  }, [searchQuery]);
 
   // Scroll focused item into view when focusedIndex changes
   useEffect(() => {
@@ -44,6 +63,21 @@ const MailBox = ({
       });
     }
   }, [focusedIndex]);
+  
+  // Handle search on Enter key
+  const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && inputValue.trim()) {
+      onSearch?.(inputValue.trim());
+    } else if (e.key === "Escape") {
+      handleClearSearch();
+    }
+  };
+  
+  // Handle clear search
+  const handleClearSearch = () => {
+    setInputValue("");
+    onClearSearch?.();
+  };
 
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
@@ -59,7 +93,9 @@ const MailBox = ({
             >
               <TbLayoutSidebarRightExpandFilled size={20} className="" />
             </button>
-            <h1 className="text-base font-semibold">Inbox</h1>
+            <h1 className="text-base font-semibold">
+              {searchQuery ? `Search: "${searchQuery}"` : "Inbox"}
+            </h1>
           </div>
           {/* kanban active/ unactive*/}
           <button
@@ -73,12 +109,25 @@ const MailBox = ({
         </div>
         {/* Search */}
         <div className="flex flex-row items-center mt-4 justify-center gap-3 p-2 rounded-md bg-background/70 border border-secondary focus-within:ring-1 ring-primary transition-all">
-          <FaSearch className="text-gray-400" />
+          <FaSearch className={isSearching ? "text-primary animate-pulse" : "text-gray-400"} />
           <input
             type="text"
-            placeholder="Search"
-            className="w-full focus:outline-none placeholder-secondary bg-transparent"
+            placeholder="Search emails... (Press Enter)"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            disabled={isSearching}
+            className="w-full focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
           />
+          {(inputValue || searchQuery) && (
+            <button
+              onClick={handleClearSearch}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+              title="Clear search (Esc)"
+            >
+              ✕
+            </button>
+          )}
         </div>
       </div>
       <div className="w-full bg-secondary h-px opacity-30"></div>
@@ -117,7 +166,7 @@ const MailBox = ({
                         alt="Avatar"
                         className="w-10 h-10 rounded-full mr-4 shrink-0 object-cover"
                       /> */}
-                      <svg
+                      {/* <svg
                         xmlns="http://www.w3.org/2000/svg"
                         viewBox="0 0 24 24"
                         fill="#CCCCCC"
@@ -126,7 +175,7 @@ const MailBox = ({
                         className="w-10 h-10 rounded-full mr-4 shrink-0 object-cover"
                       >
                         <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-                      </svg>
+                      </svg> */}
                       <div className="flex flex-col w-full min-w-0">
                         <div className="flex flex-row items-center justify-between">
                           <span
@@ -153,8 +202,12 @@ const MailBox = ({
                 );
               })
             ) : (
-              <div className="text-center text-secondary text-sm mt-5">
-                No mails found.
+              <div className="text-center text-sm mt-5">
+                {error ? (
+                  <span className="text-red-600 dark:text-red-400">{error}</span>
+                ) : (
+                  <span className="text-secondary">No mails found.</span>
+                )}
               </div>
             )}
 

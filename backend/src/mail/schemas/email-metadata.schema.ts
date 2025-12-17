@@ -78,6 +78,18 @@ export class EmailMetadata {
   receivedDate?: Date;
 
   // ============================================
+  // SEMANTIC SEARCH - WEEK 4
+  // ============================================
+  @Prop({ type: [Number] })
+  embedding?: number[]; // Vector embedding for semantic search
+
+  @Prop()
+  embeddingText?: string; // Text used to generate the embedding
+
+  @Prop()
+  embeddingGeneratedAt?: Date; // Timestamp when embedding was created
+
+  // ============================================
   // INDEXES
   // ============================================
   // Index for fast queries
@@ -96,6 +108,27 @@ EmailMetadataSchema.index({ userId: 1, summary: 1 });
 
 // Index for Kanban queries by status
 EmailMetadataSchema.index({ userId: 1, status: 1 });
+
+// ============================================
+// TEXT SEARCH INDEX for Fuzzy Search
+// ============================================
+// Compound text index on searchable fields (subject, from, snippet)
+// Weights: subject is most important, then from, then snippet
+EmailMetadataSchema.index(
+  { 
+    subject: 'text', 
+    from: 'text', 
+    snippet: 'text' 
+  },
+  { 
+    weights: {
+      subject: 10,  // Highest priority
+      from: 5,      // Medium priority
+      snippet: 1    // Lowest priority
+    },
+    name: 'email_text_search'
+  }
+);
 
 // Index for finding unsynced emails
 EmailMetadataSchema.index({ isSynced: 1 });
