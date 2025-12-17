@@ -109,5 +109,26 @@ EmailMetadataSchema.index({ userId: 1, summary: 1 });
 // Index for Kanban queries by status
 EmailMetadataSchema.index({ userId: 1, status: 1 });
 
+// ============================================
+// TEXT SEARCH INDEX for Fuzzy Search
+// ============================================
+// Compound text index on searchable fields (subject, from, snippet)
+// Weights: subject is most important, then from, then snippet
+EmailMetadataSchema.index(
+  { 
+    subject: 'text', 
+    from: 'text', 
+    snippet: 'text' 
+  },
+  { 
+    weights: {
+      subject: 10,  // Highest priority
+      from: 5,      // Medium priority
+      snippet: 1    // Lowest priority
+    },
+    name: 'email_text_search'
+  }
+);
+
 // Index for finding unsynced emails
 EmailMetadataSchema.index({ isSynced: 1 });

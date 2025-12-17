@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useUI } from "@/contexts/ui-context"; // Import useUI
 import MailBox from "@/components/ui/MailBox";
@@ -22,6 +22,12 @@ export default function Home() {
   const [selectedMail, setSelectedMail] = useState<EmailData | null>(null);
   const [isMailsLoading, setIsMailsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // Search state
+  const searchParams = useSearchParams();
+  const searchQuery = searchParams.get('q');
+  const [isSearching, setIsSearching] = useState(false);
+  const [lastSearchQuery, setLastSearchQuery] = useState<string | null>(null);
 
   // Pagination state
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
@@ -36,6 +42,72 @@ export default function Home() {
 
   // Counter to trigger reply mode
   const [replyTrigger, setReplyTrigger] = useState(0);
+  
+  // Search handler - just updates URL, useEffect handles actual search
+  const handleSearch = useCallback((query: string) => {
+    if (!query.trim()) return;
+    router.push(`/inbox?q=${encodeURIComponent(query)}`);
+  }, [router]);
+  
+  // Fetch inbox mails function (reusable)
+  const fetchInboxMails = useCallback(async () => {
+    setError(null); // Clear any previous errors
+    try {
+      setIsMailsLoading(true);
+      const id = "INBOX";
+      const limit = 20;
+
+      const token =
+        typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        setIsMailsLoading(false);
+        return;
+      }
+
+      const maiURL =
+        process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+      const response = await fetch(
+        `${maiURL}/mailboxes/${id}/emails?limit=${limit}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) throw new Error("Failed to fetch mails");
+
+      const data = await response.json();
+      const fetched = Array.isArray(data?.messages)
+        ? data.messages
+        : Array.isArray(data)
+        ? data
+        : [];
+
+      setMails(fetched);
+      setNextPageToken(data.nextPageToken || null);
+      setHasMore(!!data.nextPageToken);
+    } catch (err: any) {
+      setError("Unable to load emails. Please try again.");
+    } finally {
+      setIsMailsLoading(false);
+    }
+  }, []);
+  
+  // Clear search handler
+  const handleClearSearch = useCallback(() => {
+    // Reset all search-related states
+    setIsSearching(false);
+    setError(null);
+    // Set lastSearchQuery to current searchQuery to prevent re-search
+    setLastSearchQuery(searchQuery);
+    // Don't clear mails immediately - let fetchInboxMails handle it
+    
+    // Navigate back to inbox (this will trigger inbox fetch via useEffect)
+    router.push('/inbox');
+  }, [router, searchQuery]);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -44,58 +116,77 @@ export default function Home() {
     }
   }, [isAuthenticated, isAuthLoading, router]);
 
-  // 2. Call API lấy danh sách mail
+  // 2. Call API lấy danh sách mail on mount (and after clear search)
   useEffect(() => {
-    if (isAuthenticated) {
-      const fetchMails = async () => {
-        try {
-          setIsMailsLoading(true);
-          setError(null);
-          const id = "INBOX";
-          const limit = 20;
-
-          const token =
-            typeof window !== "undefined" ? window.__accessToken : null;
-          if (!token) {
-            setIsMailsLoading(false);
-            return;
-          }
-
-          const maiURL =
-            process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-          const response = await fetch(
-            `${maiURL}/mailboxes/${id}/emails?limit=${limit}`,
-            {
-              method: "GET",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
-
-          if (!response.ok) throw new Error("Failed to fetch mails");
-
-          const data = await response.json();
-          const fetched = Array.isArray(data?.messages)
-            ? data.messages
-            : Array.isArray(data)
-            ? data
-            : [];
-
-          setMails(fetched);
-          setNextPageToken(data.nextPageToken || null);
-          setHasMore(!!data.nextPageToken);
-        } catch (err: any) {
-          setError(err.message || "Something went wrong");
-        } finally {
-          setIsMailsLoading(false);
-        }
-      };
-
-      fetchMails();
+    if (isAuthenticated && !searchQuery) {
+      // Clear error when returning to inbox
+      setError(null);
+      fetchInboxMails();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, searchQuery, fetchInboxMails]);
+  
+  // 3. Auto-search when URL has query param (only if different from last search)
+  useEffect(() => {
+    if (!isAuthenticated || !searchQuery || searchQuery === lastSearchQuery) {
+      return;
+    }
+
+    // Mark this query as "attempted" immediately to prevent infinite loop
+    setLastSearchQuery(searchQuery);
+
+    const performSearch = async () => {
+      try {
+        setIsSearching(true);
+        setIsMailsLoading(false); // Ensure loading spinner turns off
+        setError(null);
+
+        const token =
+          process.env.NODE_ENV === "development"
+            ? window.__accessToken
+            : window.__accessToken;
+        if (!token) return;
+
+        const apiURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+        const response = await fetch(
+          `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (!response.ok) throw new Error("Search failed");
+
+        const data = await response.json();
+        const results = data?.data?.hits || [];
+
+        // Transform search results to Mail format
+        const transformedResults: Mail[] = results.map((hit: any) => ({
+          id: hit.emailId,
+          threadId: hit.threadId,
+          from: hit.from,
+          subject: hit.subject,
+          snippet: hit.snippet,
+          date: hit.receivedDate,
+          isUnread: false,
+          isStarred: false,
+          labelIds: hit.status ? [hit.status] : [],
+        }));
+
+        setMails(transformedResults);
+        setHasMore(false);
+      } catch (err: any) {
+        setError("Search failed. Please try again.");
+        setMails([]);
+      } finally {
+        setIsSearching(false);
+      }
+    };
+
+    performSearch();
+  }, [isAuthenticated, searchQuery, lastSearchQuery]);
 
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
@@ -209,13 +300,9 @@ export default function Home() {
           md:flex md:w-1/3 w-full
         `}
       >
-        {isMailsLoading ? (
+        {isMailsLoading && mails.length === 0 ? (
           <div className="flex items-center justify-center w-full h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </div>
-        ) : error ? (
-          <div className="text-red-500 flex items-center justify-center w-full">
-            {error}
           </div>
         ) : (
           <MailBox
@@ -228,6 +315,11 @@ export default function Home() {
             hasMore={hasMore}
             kanbanMode={isKanBanMode}
             kanbanClick={toggleKanBanMode}
+            searchQuery={searchQuery || undefined}
+            onSearch={handleSearch}
+            onClearSearch={handleClearSearch}
+            isSearching={isSearching}
+            error={error}
           />
         )}
       </div>

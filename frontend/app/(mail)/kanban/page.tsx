@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   DragDropContext,
   Droppable,
@@ -39,6 +39,15 @@ import {
   IoMdRefresh,
 } from "react-icons/io";
 
+import {
+  TbFilter,
+  TbSortAscending,
+  TbSortDescending,
+  TbPaperclip,
+} from "react-icons/tb";
+
+import { Check } from "lucide-react";
+
 // --- TYPES ---
 type MailItem = {
   id: string;
@@ -54,6 +63,8 @@ type MailItem = {
   date?: string;
   snippet?: string;
   status?: string;
+  isUnread: boolean;
+  hasAttachment: false;
 };
 
 // Detailed type for the Reading View
@@ -68,6 +79,163 @@ interface EmailData {
   snippet?: string;
   labelIds?: string[];
 }
+
+// --- NEW TYPES FOR FILTERING ---
+type SortOrder = "newest" | "oldest";
+type FilterReadStatus = "all" | "unread" | "read";
+
+interface ColumnConfig {
+  sort: SortOrder;
+  filterRead: FilterReadStatus;
+  filterAttachment: boolean;
+}
+
+// Default configuration
+const defaultConfig: ColumnConfig = {
+  sort: "newest",
+  filterRead: "all",
+  filterAttachment: false,
+};
+
+const ColumnHeader = ({
+  title,
+  count,
+  icon,
+  config,
+  onConfigChange,
+}: {
+  title: string;
+  count: number;
+  icon: React.ReactNode;
+  config: ColumnConfig;
+  onConfigChange: (newConfig: ColumnConfig) => void;
+}) => {
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center shrink-0 sticky top-0 bg-white dark:bg-[#121212] z-20">
+      <div className="flex items-center gap-2 font-bold text-gray-700 dark:text-gray-200 text-sm">
+        {icon}
+        <span className="uppercase">{title}</span>
+        <span className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
+          {count}
+        </span>
+      </div>
+
+      <div className="relative" ref={menuRef}>
+        <button
+          onClick={() => setShowMenu(!showMenu)}
+          className={`p-1.5 rounded transition-colors ${
+            showMenu
+              ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
+              : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+          }`}
+        >
+          {/* Show a dot if filters are active */}
+          {(config.filterRead !== "all" || config.filterAttachment) && (
+            <span className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full border border-white dark:border-[#121212]"></span>
+          )}
+          <TbFilter size={18} />
+        </button>
+
+        {showMenu && (
+          <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+            {/* Sorting Section */}
+            <div className="mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
+                SORT BY DATE
+              </p>
+              <button
+                onClick={() => onConfigChange({ ...config, sort: "newest" })}
+                className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${
+                  config.sort === "newest"
+                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <TbSortDescending /> Newest First
+                </div>
+                {config.sort === "newest" && <Check size={14} />}
+              </button>
+              <button
+                onClick={() => onConfigChange({ ...config, sort: "oldest" })}
+                className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${
+                  config.sort === "oldest"
+                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <TbSortAscending /> Oldest First
+                </div>
+                {config.sort === "oldest" && <Check size={14} />}
+              </button>
+            </div>
+
+            {/* Filter Section */}
+            <div>
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
+                FILTER
+              </p>
+
+              {/* Read Status */}
+              <div className="flex bg-gray-100 dark:bg-gray-800 rounded p-1 mb-2">
+                {(["all", "unread", "read"] as const).map((status) => (
+                  <button
+                    key={status}
+                    onClick={() =>
+                      onConfigChange({ ...config, filterRead: status })
+                    }
+                    className={`flex-1 text-xs py-1 rounded capitalize transition-all ${
+                      config.filterRead === status
+                        ? "bg-white dark:bg-[#2c2c2c] shadow text-gray-900 dark:text-white font-medium"
+                        : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+
+              {/* Attachment Toggle */}
+              <button
+                onClick={() =>
+                  onConfigChange({
+                    ...config,
+                    filterAttachment: !config.filterAttachment,
+                  })
+                }
+                className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between transition-colors ${
+                  config.filterAttachment
+                    ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <TbPaperclip /> Has Attachment
+                </div>
+                {config.filterAttachment && <Check size={14} />}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // Note: initialData removed - now using real data from useKanbanData hook
 
@@ -219,12 +387,16 @@ const MailReadingModal = ({
                 </div>
                 <div className="flex flex-col">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-foreground dark:text-white">{senderName}</span>
+                    <span className="font-bold text-foreground dark:text-white">
+                      {senderName}
+                    </span>
                     <span className="text-xs text-secondary dark:text-gray-400">
                       &lt;{senderEmail}&gt;
                     </span>
                   </div>
-                  <span className="text-xs text-secondary dark:text-gray-500">To: {mail.to}</span>
+                  <span className="text-xs text-secondary dark:text-gray-500">
+                    To: {mail.to}
+                  </span>
                 </div>
               </div>
               <div className="flex items-center gap-2 text-secondary dark:text-gray-400 text-sm">
@@ -244,21 +416,24 @@ const MailReadingModal = ({
                   if (iframe) {
                     iframe.onload = () => {
                       try {
-                        const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                        const iframeDoc =
+                          iframe.contentDocument ||
+                          iframe.contentWindow?.document;
                         if (iframeDoc) {
                           const height = iframeDoc.documentElement.scrollHeight;
-                          iframe.style.height = Math.max(height + 20, 200) + 'px';
+                          iframe.style.height =
+                            Math.max(height + 20, 200) + "px";
                         }
                       } catch (e) {
                         // Cross-origin restriction - fallback to min height
-                        iframe.style.height = '500px';
+                        iframe.style.height = "500px";
                       }
                     };
                   }
                 }}
                 sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                 className="w-full border-0"
-                style={{ height: '200px' }}
+                style={{ height: "200px" }}
                 srcDoc={`
                   <!DOCTYPE html>
                   <html>
@@ -288,7 +463,12 @@ const MailReadingModal = ({
                       </style>
                     </head>
                     <body>
-                      ${mail.htmlBody || mail.textBody || mail.snippet || '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'}
+                      ${
+                        mail.htmlBody ||
+                        mail.textBody ||
+                        mail.snippet ||
+                        '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
+                      }
                     </body>
                   </html>
                 `}
@@ -301,7 +481,9 @@ const MailReadingModal = ({
             <div className="px-6 pb-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
               <div className="flex items-center gap-2 text-sm text-secondary dark:text-gray-400 mb-1">
                 <FaReply /> Replying to{" "}
-                <span className="text-foreground dark:text-white font-medium">{senderName}</span>
+                <span className="text-foreground dark:text-white font-medium">
+                  {senderName}
+                </span>
               </div>
               <textarea
                 ref={replyTextareaRef}
@@ -403,9 +585,17 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
 };
 
 // --- COMPONENT: MAIL CARD ---
-const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary }: any) => {
+const MailCard = ({
+  item,
+  index,
+  onSnoozeClick,
+  onOpenClick,
+  onRegenerateSummary,
+}: any) => {
   const [isRegenerating, setIsRegenerating] = React.useState(false);
-  const [rateLimitError, setRateLimitError] = React.useState<string | null>(null);
+  const [rateLimitError, setRateLimitError] = React.useState<string | null>(
+    null
+  );
 
   const handleRegenerate = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -413,7 +603,7 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary
     setRateLimitError(null);
     try {
       const result = await onRegenerateSummary(item.id, true); // forceRegenerate = true
-      
+
       // Check for rate limit error
       if (result === null) {
         setRateLimitError("Rate limit exceeded. Please wait a moment.");
@@ -460,7 +650,9 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary
                 <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">
                   {item.sender}
                 </span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">{item.time}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">
+                  {item.time}
+                </span>
               </div>
             </div>
           </div>
@@ -472,7 +664,8 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary
           <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 mb-3 ml-2 text-xs text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-800">
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-semibold">
-                <HiSparkles className="text-purple-500 dark:text-purple-400" /> <span>AI Summary</span>
+                <HiSparkles className="text-purple-500 dark:text-purple-400" />{" "}
+                <span>AI Summary</span>
               </div>
               <button
                 onClick={handleRegenerate}
@@ -480,11 +673,17 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary
                 className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Regenerate summary (10/min limit)"
               >
-                <IoMdRefresh className={`w-3.5 h-3.5 ${isRegenerating ? 'animate-spin' : ''}`} />
+                <IoMdRefresh
+                  className={`w-3.5 h-3.5 ${
+                    isRegenerating ? "animate-spin" : ""
+                  }`}
+                />
               </button>
             </div>
             {rateLimitError && (
-              <p className="text-red-500 dark:text-red-400 text-xs mb-1">{rateLimitError}</p>
+              <p className="text-red-500 dark:text-red-400 text-xs mb-1">
+                {rateLimitError}
+              </p>
             )}
             <p className="line-clamp-2">{item.summary}</p>
           </div>
@@ -511,8 +710,18 @@ const MailCard = ({ item, index, onSnoozeClick, onOpenClick, onRegenerateSummary
 
 // --- MAIN PAGE ---
 export default function KanbanPage() {
-  // Use custom hook for Kanban data
-  const { columns, setColumns, isLoading, error, moveEmail, generateSummary, snoozeEmail, unsnoozeEmail } = useKanbanData();
+  // 1. ALL HOOKS MUST BE DECLARED FIRST
+  const {
+    columns,
+    setColumns,
+    isLoading,
+    error,
+    moveEmail,
+    generateSummary,
+    snoozeEmail,
+    unsnoozeEmail,
+  } = useKanbanData();
+
   const [enabled, setEnabled] = useState(false);
 
   // State for Snooze Modal
@@ -522,13 +731,69 @@ export default function KanbanPage() {
   // State for Reading Modal
   const [openedMail, setOpenedMail] = useState<EmailData | null>(null);
 
+  // State for Column Configs
+  const [columnConfigs, setColumnConfigs] = useState<{
+    inbox: ColumnConfig;
+    todo: ColumnConfig;
+    done: ColumnConfig;
+  }>({
+    inbox: { ...defaultConfig },
+    todo: { ...defaultConfig },
+    done: { ...defaultConfig },
+  });
+
+  // Effect for animation
   useEffect(() => {
     const animation = requestAnimationFrame(() => setEnabled(true));
     return () => cancelAnimationFrame(animation);
   }, []);
 
-  // Note: Auto-wake logic removed - backend cron job handles snooze expiration automatically
+  // --- MOVED UP: Filtering Logic (useMemo) ---
+  // This must be above any 'return' statements
+  const processEmails = useMemo(() => {
+    const process = (items: any[], config: ColumnConfig) => {
+      // Safety check
+      if (!items) return [];
 
+      // --- FIX: DEDUPLICATE ITEMS BASED ON ID ---
+      // This creates a Map where the ID is the key, ensuring uniqueness.
+      // Then it converts the Map values back to an array.
+      const uniqueItems = Array.from(
+        new Map(items.map((item) => [item.id, item])).values()
+      );
+
+      let result = [...uniqueItems];
+
+      // 1. Filter by Read Status
+      if (config.filterRead === "unread") {
+        result = result.filter((item) => item.isUnread);
+      } else if (config.filterRead === "read") {
+        result = result.filter((item) => !item.isUnread);
+      }
+
+      // 2. Filter by Attachment
+      if (config.filterAttachment) {
+        result = result.filter((item) => item.hasAttachment);
+      }
+
+      // 3. Sort by Date
+      result.sort((a, b) => {
+        const dateA = new Date(a.date).getTime();
+        const dateB = new Date(b.date).getTime();
+        return config.sort === "newest" ? dateB - dateA : dateA - dateB;
+      });
+
+      return result;
+    };
+
+    return {
+      inbox: process(columns.inbox || [], columnConfigs.inbox),
+      todo: process(columns.todo || [], columnConfigs.todo),
+      done: process(columns.done || [], columnConfigs.done),
+    };
+  }, [columns, columnConfigs]);
+
+  // --- HELPER FUNCTIONS (Not Hooks, so placement is flexible, but good practice to keep here) ---
   const handleOpenSnooze = (item: any) => {
     setSelectedItemToSnooze(item);
     setSnoozeModalOpen(true);
@@ -536,16 +801,16 @@ export default function KanbanPage() {
 
   const confirmSnooze = async (durationMs: number) => {
     if (!selectedItemToSnooze) return;
-    
-    const sourceColKey = (Object.keys(columns) as Array<keyof typeof columns>).find((key) =>
+
+    const sourceColKey = (
+      Object.keys(columns) as Array<keyof typeof columns>
+    ).find((key) =>
       columns[key].find((i: any) => i.id === selectedItemToSnooze.id)
     );
     if (!sourceColKey) return;
 
     try {
       const snoozedUntil = new Date(Date.now() + durationMs).toISOString();
-      
-      // Call backend API via hook (handles optimistic update)
       await snoozeEmail(
         selectedItemToSnooze.id,
         selectedItemToSnooze.threadId,
@@ -553,22 +818,17 @@ export default function KanbanPage() {
         sourceColKey
       );
     } catch (err) {
-      console.error('Failed to snooze email:', err);
-      // Error already handled in hook with rollback
+      console.error("Failed to snooze email:", err);
     }
-    
+
     setSnoozeModalOpen(false);
     setSelectedItemToSnooze(null);
   };
 
-  // --- LOGIC TO OPEN MAIL ---
   const handleOpenMail = async (item: MailItem) => {
     try {
-      // Fetch real email data from API
       const response = await api.get(`/emails/${item.id}`);
       const emailData = response.data;
-      
-      // Convert to EmailData format
       const detailedMail: EmailData = {
         id: emailData.id,
         subject: emailData.subject,
@@ -582,12 +842,15 @@ export default function KanbanPage() {
       };
       setOpenedMail(detailedMail);
     } catch (error) {
-      console.error('Failed to fetch email details:', error);
-      // Fallback to summary if API fails
+      console.error("Failed to fetch email details:", error);
       const detailedMail: EmailData = {
         id: item.id,
         subject: item.subject,
-        from: item.from || `${item.sender} <${item.sender.toLowerCase().replace(/\s/g, "")}@example.com>`,
+        from:
+          item.from ||
+          `${item.sender} <${item.sender
+            .toLowerCase()
+            .replace(/\s/g, "")}@example.com>`,
         to: "me@example.com",
         date: item.date || new Date().toISOString(),
         textBody: item.summary,
@@ -608,14 +871,13 @@ export default function KanbanPage() {
 
     const sourceColId = source.droppableId as keyof typeof columns;
     const destColId = destination.droppableId as keyof typeof columns;
-    
-    // Find the email being moved
-    const movedEmail = columns[sourceColId].find((e: any) => e.id === draggableId);
+    const movedEmail = columns[sourceColId].find(
+      (e: any) => e.id === draggableId
+    );
+
     if (!movedEmail) return;
 
     try {
-      // Call API to move email (optimistic update handled by hook)
-      // Pass destination.index to preserve drop position
       await moveEmail(
         movedEmail.id,
         movedEmail.threadId,
@@ -624,9 +886,11 @@ export default function KanbanPage() {
         destination.index
       );
     } catch (err) {
-      console.error('Failed to move email:', err);
+      console.error("Failed to move email:", err);
     }
   };
+
+  // --- CONDITIONAL RENDERING (Must happen AFTER all hooks) ---
 
   if (!enabled) return null;
 
@@ -636,7 +900,9 @@ export default function KanbanPage() {
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-[#0a0a0a]">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-300">Loading Kanban board...</p>
+          <p className="text-gray-600 dark:text-gray-300">
+            Loading Kanban board...
+          </p>
         </div>
       </div>
     );
@@ -648,7 +914,7 @@ export default function KanbanPage() {
       <div className="flex h-screen w-full items-center justify-center bg-gray-50 dark:bg-[#0a0a0a]">
         <div className="text-center max-w-md">
           <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
-          <button 
+          <button
             onClick={() => window.location.reload()}
             className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
           >
@@ -659,9 +925,11 @@ export default function KanbanPage() {
     );
   }
 
+  // --- FINAL RENDER ---
   return (
     <div className="flex flex-col h-full w-full bg-gray-50 dark:bg-[#0a0a0a] text-slate-800 dark:text-gray-100">
       <DragDropContext onDragEnd={onDragEnd}>
+        {/* ... (Rest of your JSX remains exactly the same) ... */}
         {/* Modals */}
         <SnoozeModal
           isOpen={isSnoozeModalOpen}
@@ -669,35 +937,32 @@ export default function KanbanPage() {
           onConfirm={confirmSnooze}
         />
 
-        {/* NEW: Mail Reading Modal */}
         <MailReadingModal
           isOpen={!!openedMail}
           mail={openedMail}
           onClose={() => setOpenedMail(null)}
         />
 
-        <main className="grid grid-cols-3 flex-1 w-full divide-x divide-gray-200 dark:divide-gray-800 min-h-0">
-          {/* --- COLUMN INBOX --- */}
-          <div className="flex flex-col h-full bg-white dark:bg-[#121212] min-h-0">
-            <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2 font-bold text-gray-700 dark:text-gray-200">
-                <FaInbox /> INBOX ({columns.inbox.length})
-              </div>
-              {columns.snoozed.length > 0 && (
-                <div className="text-xs text-orange-500 dark:text-orange-400 flex items-center gap-1 bg-orange-50 dark:bg-orange-900/30 px-2 py-1 rounded-full">
-                  <TbZzz /> {columns.snoozed.length} Snoozed
-                </div>
-              )}
-            </div>
-
+        <main className="grid grid-cols-1 md:grid-cols-3 flex-1 w-full divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-800 min-h-0 overflow-y-auto md:overflow-hidden">
+          {/* INBOX */}
+          <div className="flex flex-col min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0">
+            <ColumnHeader
+              title="Inbox"
+              count={columns.inbox.length}
+              icon={<FaInbox />}
+              config={columnConfigs.inbox}
+              onConfigChange={(newConfig) =>
+                setColumnConfigs((prev) => ({ ...prev, inbox: newConfig }))
+              }
+            />
             <Droppable droppableId="inbox">
               {(provided) => (
                 <div
                   {...provided.droppableProps}
                   ref={provided.innerRef}
-                  className="flex-1 p-3 overflow-y-auto kanban-scrollbar"
+                  className="flex-1 p-3 md:overflow-y-auto kanban-scrollbar"
                 >
-                  {columns.inbox.map((item: any, index: number) => (
+                  {processEmails.inbox.map((item: any, index: number) => (
                     <MailCard
                       key={item.id}
                       item={item}
@@ -707,39 +972,42 @@ export default function KanbanPage() {
                       onRegenerateSummary={generateSummary}
                     />
                   ))}
+                  {processEmails.inbox.length === 0 &&
+                    columns.inbox.length > 0 && (
+                      <div className="text-center py-10 text-gray-400 text-sm italic">
+                        No emails match the selected filters.
+                      </div>
+                    )}
                   {provided.placeholder}
                 </div>
               )}
             </Droppable>
           </div>
 
-          {/* --- COLUMN TODO --- */}
-          <div className="flex flex-col h-full bg-white dark:bg-[#121212] min-h-0">
-            <div className="p-4 flex flex-row items-center justify-between border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#121212] shrink-0">
-              <div className="flex items-center gap-2">
-                <FaRegCircle size={16} className="text-orange-500" />
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
-                  To Do
-                </h2>
-                <span className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
-                  {columns.todo.length}
-                </span>
-              </div>
-              <button className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                <BsThreeDots />
-              </button>
-            </div>
-
+          {/* TODO */}
+          <div className="flex flex-col min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0">
+            {/* ... Render ColumnHeader & Droppable for TODO using processEmails.todo ... */}
+            <ColumnHeader
+              title="To Do"
+              count={columns.todo.length}
+              icon={<FaRegCircle className="text-orange-500" />}
+              config={columnConfigs.todo}
+              onConfigChange={(newConfig) =>
+                setColumnConfigs((prev) => ({ ...prev, todo: newConfig }))
+              }
+            />
             <Droppable droppableId="todo">
               {(provided, snapshot) => (
                 <div
                   {...provided.droppableProps}
                   ref={provided.innerRef}
-                  className={`flex-1 overflow-y-auto kanban-scrollbar p-3 transition-colors ${
-                    snapshot.isDraggingOver ? "bg-orange-50/50 dark:bg-orange-900/20" : ""
+                  className={`flex-1 md:overflow-y-auto kanban-scrollbar p-3 transition-colors ${
+                    snapshot.isDraggingOver
+                      ? "bg-orange-50/50 dark:bg-orange-900/20"
+                      : ""
                   }`}
                 >
-                  {columns.todo.map((item: any, index: number) => (
+                  {processEmails.todo.map((item: any, index: number) => (
                     <MailCard
                       key={item.id}
                       item={item}
@@ -755,33 +1023,30 @@ export default function KanbanPage() {
             </Droppable>
           </div>
 
-          {/* --- COLUMN DONE --- */}
-          <div className="flex flex-col h-full bg-white dark:bg-[#121212] min-h-0">
-            <div className="p-4 flex flex-row items-center justify-between border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-[#121212] shrink-0">
-              <div className="flex items-center gap-2">
-                <FaRegCheckCircle size={16} className="text-green-500" />
-                <h2 className="text-sm font-bold uppercase tracking-wide text-gray-700 dark:text-gray-200">
-                  Done
-                </h2>
-                <span className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
-                  {columns.done.length}
-                </span>
-              </div>
-              <button className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                <BsThreeDots />
-              </button>
-            </div>
-
+          {/* DONE */}
+          <div className="flex flex-col min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0">
+            {/* ... Render ColumnHeader & Droppable for DONE using processEmails.done ... */}
+            <ColumnHeader
+              title="Done"
+              count={columns.done.length}
+              icon={<FaRegCheckCircle className="text-green-500" />}
+              config={columnConfigs.done}
+              onConfigChange={(newConfig) =>
+                setColumnConfigs((prev) => ({ ...prev, done: newConfig }))
+              }
+            />
             <Droppable droppableId="done">
               {(provided, snapshot) => (
                 <div
                   {...provided.droppableProps}
                   ref={provided.innerRef}
-                  className={`flex-1 overflow-y-auto kanban-scrollbar p-3 transition-colors ${
-                    snapshot.isDraggingOver ? "bg-green-50/50 dark:bg-green-900/20" : ""
+                  className={`flex-1 md:overflow-y-auto kanban-scrollbar p-3 transition-colors ${
+                    snapshot.isDraggingOver
+                      ? "bg-green-50/50 dark:bg-green-900/20"
+                      : ""
                   }`}
                 >
-                  {columns.done.map((item: any, index: number) => (
+                  {processEmails.done.map((item: any, index: number) => (
                     <MailCard
                       key={item.id}
                       item={item}
