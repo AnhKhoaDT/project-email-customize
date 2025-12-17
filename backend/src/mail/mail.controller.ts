@@ -37,6 +37,10 @@ export class MailController {
   private summarizeRateLimit = new Map<string, number[]>();
   private readonly MAX_REQUESTS_PER_MINUTE = 10;
   
+  // Rate limiting: Track search requests per user
+  private searchRateLimit = new Map<string, number[]>();
+  private readonly MAX_SEARCH_REQUESTS_PER_MINUTE = 10;
+  
   constructor(
     private gmailService: GmailService,
     private aiService: AiService,
@@ -81,6 +85,42 @@ export class MailController {
     const userRequests = this.summarizeRateLimit.get(userId) || [];
     userRequests.push(now);
     this.summarizeRateLimit.set(userId, userRequests);
+  }
+  
+  /**
+   * Check if user has exceeded rate limit for search requests
+   * @param userId - User ID
+   * @returns true if rate limit exceeded, false otherwise
+   */
+  private checkSearchRateLimit(userId: string): { allowed: boolean; remaining: number } {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    
+    // Get user's request history
+    let userRequests = this.searchRateLimit.get(userId) || [];
+    
+    // Remove requests older than 1 minute
+    userRequests = userRequests.filter(timestamp => timestamp > oneMinuteAgo);
+    
+    // Update map
+    this.searchRateLimit.set(userId, userRequests);
+    
+    // Check if limit exceeded
+    const allowed = userRequests.length < this.MAX_SEARCH_REQUESTS_PER_MINUTE;
+    const remaining = Math.max(0, this.MAX_SEARCH_REQUESTS_PER_MINUTE - userRequests.length);
+    
+    return { allowed, remaining };
+  }
+  
+  /**
+   * Record a search request for rate limiting
+   * @param userId - User ID
+   */
+  private recordSearchRequest(userId: string): void {
+    const now = Date.now();
+    const userRequests = this.searchRateLimit.get(userId) || [];
+    userRequests.push(now);
+    this.searchRateLimit.set(userId, userRequests);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -489,6 +529,19 @@ export class MailController {
     @Query('status') status?: string,
   ) {
     try {
+      // Check rate limit
+      const { allowed, remaining } = this.checkSearchRateLimit(req.user.id);
+      if (!allowed) {
+        return {
+          status: 429,
+          message: `Too many search requests. Please try again later.`,
+          remaining: 0,
+        };
+      }
+      
+      // Record this request
+      this.recordSearchRequest(req.user.id);
+      
       // Validate query parameter
       if (!q || q.trim().length === 0) {
         return { 

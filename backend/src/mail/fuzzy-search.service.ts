@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import Fuse from 'fuse.js';
+const Fuse = require('fuse.js')
 import { EmailMetadata, EmailMetadataDocument } from './schemas/email-metadata.schema';
 import { SearchEmailDto, SearchEmailResult, SearchEmailResponse } from './dto/search-email.dto';
+import { GmailService } from './gmail.service';
 
 /**
  * Fuzzy Search Service - MongoDB + Fuse.js Implementation
@@ -20,6 +21,7 @@ export class FuzzySearchService {
   constructor(
     @InjectModel(EmailMetadata.name)
     private emailMetadataModel: Model<EmailMetadataDocument>,
+    private gmailService: GmailService,
   ) {}
 
   /**
@@ -51,54 +53,15 @@ export class FuzzySearchService {
 
     try {
       // ============================================
-      // STEP 1: Pre-filter with MongoDB
+      // STEP 1: Fetch emails from Gmail API
       // ============================================
-      const query: any = { userId };
-
-      // Optional: Filter by status
-      if (status && ['TODO', 'IN_PROGRESS', 'DONE'].includes(status)) {
-        query.status = status;
-      }
-
-      // MongoDB text search (case-insensitive, partial matching)
-      // This narrows down the dataset before fuzzy search
-      const textSearchQuery = {
-        ...query,
-        $text: { $search: q }
-      };
-
-      // Try text search first, fallback to regex if no results
-      let candidates = await this.emailMetadataModel
-        .find(textSearchQuery)
-        .select('emailId threadId subject from snippet receivedDate status summary')
-        .limit(500) // Limit candidates for performance
-        .lean()
-        .exec();
-
-      // Fallback: If text search returns nothing, use regex (slower but more flexible)
-      if (candidates.length === 0) {
-        const regexPattern = q.split(/\s+/).map(term => `(?=.*${this.escapeRegex(term)})`).join('');
-        const regexQuery = {
-          ...query,
-          $or: [
-            { subject: { $regex: regexPattern, $options: 'i' } },
-            { from: { $regex: regexPattern, $options: 'i' } },
-            { snippet: { $regex: regexPattern, $options: 'i' } }
-          ]
-        };
-
-        candidates = await this.emailMetadataModel
-          .find(regexQuery)
-          .select('emailId threadId subject from snippet receivedDate status summary')
-          .limit(500)
-          .lean()
-          .exec();
-      }
-
-      // ============================================
-      // STEP 2: Fuzzy search with Fuse.js
-      // ============================================
-      if (candidates.length === 0) {
+      console.log(`[FuzzySearch] Searching for: "${q}"`);
+      
+      // Fetch recent emails from inbox (max 200 for performance)
+      const inboxData = await this.gmailService.listMessagesInLabel(userId, 'INBOX', 200);
+      
+      if (!inboxData?.messages || inboxData.messages.length === 0) {
+        console.log('[FuzzySearch] No emails found in inbox');
         return {
           hits: [],
           query: q,
@@ -108,6 +71,13 @@ export class FuzzySearchService {
           processingTimeMs: Date.now() - startTime,
         };
       }
+      
+      console.log(`[FuzzySearch] Found ${inboxData.messages.length} emails in inbox`);
+      
+      // ============================================
+      // STEP 2: Fuzzy search with Fuse.js
+      // ============================================
+      const candidates = inboxData.messages;
 
       // Configure Fuse.js for optimal fuzzy search
       const fuse = new Fuse(candidates, {
@@ -116,10 +86,10 @@ export class FuzzySearchService {
           { name: 'from', weight: 0.3 },         // Medium weight (30%)
           { name: 'snippet', weight: 0.2 }       // Lowest weight (20%)
         ],
-        threshold: 0.4,           // 0 = exact match, 1 = match anything
-                                  // 0.4 = good balance for typo tolerance
-        distance: 100,            // How far from match location to search
-        minMatchCharLength: 2,    // Minimum character length to match
+        threshold: 0.5,           // 0 = exact match, 1 = match anything
+                                  // 0.5 = balanced for typo tolerance
+        distance: 200,            // Increased distance for better matching
+        minMatchCharLength: 1,    // Allow single char matches
         includeScore: true,       // Return relevance scores
         useExtendedSearch: false,
         ignoreLocation: true,     // Don't consider location in scoring
@@ -128,6 +98,8 @@ export class FuzzySearchService {
 
       // Perform fuzzy search
       const fuseResults = fuse.search(q);
+      
+      console.log(`[FuzzySearch] Fuse.js found ${fuseResults.length} matches`);
 
       // ============================================
       // STEP 3: Format & paginate results
@@ -136,16 +108,16 @@ export class FuzzySearchService {
       const paginatedResults = fuseResults.slice(offset, offset + limit);
 
       const hits: SearchEmailResult[] = paginatedResults.map(result => ({
-        id: result.item._id?.toString() || '',
-        emailId: result.item.emailId,
-        threadId: result.item.threadId,
+        id: result.item.id || '',
+        emailId: result.item.id || '',
+        threadId: result.item.threadId || '',
         subject: result.item.subject || '(No subject)',
         from: result.item.from || '(Unknown sender)',
         snippet: result.item.snippet || '',
-        receivedDate: result.item.receivedDate || new Date(),
-        status: result.item.status,
-        summary: result.item.summary,
-        score: result.score ? (1 - result.score) : 0, // Convert Fuse score (lower is better) to relevance (higher is better)
+        receivedDate: result.item.date ? new Date(result.item.date) : new Date(),
+        status: undefined,  // Gmail emails don't have status
+        summary: undefined, // Gmail emails don't have summary
+        score: result.score ? (1 - result.score) : 0,
       }));
 
       const processingTimeMs = Date.now() - startTime;
