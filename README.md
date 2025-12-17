@@ -37,7 +37,9 @@ This project demonstrates a production-ready React application with:
 - ✅ **3-Column Email Dashboard**: Folders | Email List | Email Detail
 - ✅ **Gmail API Integration**: Real Gmail data via OAuth 2.0
 - ✅ **AI Email Summaries**: Google Gemini 1.5 Flash API for automatic summarization
+- ✅ **Fuzzy Search**: Advanced search with typo tolerance and partial matching
 - ✅ **Kanban Board**: Drag-and-drop email workflow management
+- ✅ **Kanban Filters & Sort**: Real-time filtering and sorting on Kanban columns
 - ✅ **Snooze System**: Defer emails with automatic wake-up (backend cron)
 - ✅ **Form Validation**: Client-side validation with Zod schemas
 - ✅ **Responsive Design**: Desktop-first with mobile fallback
@@ -70,7 +72,13 @@ This project demonstrates a production-ready React application with:
 - [x] **Batch AI Processing**: Summarize multiple emails with hybrid concurrency control
 - [x] **Snooze/Deferral System**: Temporarily hide emails with automatic restoration
 - [x] **Backend Cron Job**: Automated snooze expiration checking (every 5 seconds)
+- [x] **Fuzzy Search Engine**: Fuse.js-powered search with typo tolerance and partial matching
+- [x] **Search Rate Limiting**: 20 requests per minute per user
+- [x] **Search UI**: Real-time search with loading, empty, and error states
 - [x] **Kanban Board View**: Drag-and-drop email management (Inbox/To-Do/Done)
+- [x] **Kanban Filters**: Filter by read status (All/Unread/Read) and attachments
+- [x] **Kanban Sorting**: Sort by newest first or oldest first
+- [x] **Real-time Updates**: Client-side processing with useMemo optimization
 - [x] **Visual Feedback**: Real-time drag-over effects and status updates
 - [x] **Dark/Light Theme**: Full theme support across all components
 
@@ -94,8 +102,10 @@ This project demonstrates a production-ready React application with:
 - **Email Integration:** Gmail API (googleapis npm package)
 - **OAuth:** Google OAuth 2.0 client
 - **AI Integration:** Google Gemini 1.5 Flash API
+- **Search Engine:** Fuse.js (fuzzy search with typo tolerance)
 - **Task Scheduling:** node-cron (for snooze automation)
 - **Concurrency Control:** Hybrid batch processing (3 batches × 5 parallel)
+- **Rate Limiting:** In-memory rate limiting for search and AI endpoints
 
 ### Deployment
 - **Frontend Hosting:** Vercel / Netlify

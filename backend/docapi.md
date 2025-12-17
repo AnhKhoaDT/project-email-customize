@@ -12,7 +12,8 @@ Tài liệu này mô tả chi tiết các endpoint backend mà frontend (React S
   - Mail (Gmail proxy): `/mailboxes`, `/mailboxes/:id/emails`, `/emails/:id`
   - AI APIs: `/ai/summarize`, `/ai/batch-summarize`
   - Snooze APIs: `/emails/:id/snooze`, `/emails/:id/unsnooze`, `/snooze/list`
-  - Kanban APIs: `/kanban/columns`, `/emails/:id/move`
+  - Search APIs: `/search/fuzzy`, `/search/suggestions`
+  - Kanban APIs: `/kanban/columns`, `/emails/:id/move`, `/kanban/config`
 - AI và Kanban APIs (Week 2 Features)
 - Ví dụ mã frontend (`fetch`) để login, refresh, gọi API mail
 - Lưu trữ token & hành vi khi đóng/mở app
@@ -628,6 +629,82 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   }
   ```
 
+### Search APIs
+
+#### GET /search/fuzzy
+- **Mục đích**: Tìm kiếm emails với fuzzy logic (typo tolerance + partial match)
+- **Auth**: Required (Bearer token)
+- **Query Parameters**:
+  - `q` (required): Search query string
+  - `limit` (optional): Số lượng kết quả (default: 20, max: 50)
+  - `offset` (optional): Vị trí bắt đầu (default: 0)
+  - `status` (optional): Lọc theo status (INBOX, TODO, DONE)
+- **Rate Limit**: 20 requests/minute per user
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "hits": [
+        {
+          "emailId": "19aba6e5873a9087",
+          "threadId": "19aba6e5873a9087",
+          "subject": "Instagram notification",
+          "from": "Instagram <no-reply@instagram.com>",
+          "snippet": "Your friend liked your photo...",
+          "receivedDate": "2025-12-15T10:30:00.000Z",
+          "status": "INBOX",
+          "score": 0.95
+        }
+      ],
+      "query": "In",
+      "totalHits": 1,
+      "offset": 0,
+      "limit": 20,
+      "processingTimeMs": 156
+    }
+  }
+  ```
+- **Search Features**:
+  - Typo tolerance: "markting" tìm được "marketing"
+  - Partial match: "In" tìm được "Instagram"
+  - Weighted search: Subject (50%), Sender (30%), Snippet (20%)
+  - Vietnamese support: "Nguy" tìm được "Nguyễn"
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/fuzzy?q=${encodeURIComponent(query)}&limit=50`, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  const data = await res.json();
+  ```
+- **Error Responses**:
+  - `400`: Query parameter empty
+  - `429`: Rate limit exceeded (>20 req/min)
+  - `500`: Search failed
+
+#### GET /search/suggestions
+- **Mục đích**: Lấy gợi ý tìm kiếm (autocomplete)
+- **Auth**: Required (Bearer token)
+- **Query Parameters**:
+  - `prefix` (required): Prefix string để suggest
+  - `limit` (optional): Số lượng suggestions (default: 5)
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "suggestions": [
+        "Instagram",
+        "Invoice",
+        "Important meeting"
+      ]
+    }
+  }
+  ```
+
 ### Kanban APIs
 
 #### GET /kanban/columns
@@ -701,6 +778,54 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
       destinationIndex: 2
     })
   });
+  ```
+
+#### GET /kanban/config
+- **Mục đích**: Lấy cấu hình Kanban board của user (custom columns)
+- **Auth**: Required (Bearer token)
+- **Response**:
+  ```json
+  {
+    "columns": [
+      {
+        "id": "col1",
+        "name": "Backlog",
+        "color": "#3B82F6",
+        "order": 0
+      },
+      {
+        "id": "col2",
+        "name": "In Review",
+        "color": "#F59E0B",
+        "order": 1
+      }
+    ]
+  }
+  ```
+
+#### POST /kanban/columns
+- **Mục đích**: Tạo custom column mới trong Kanban
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "name": "Testing",
+    "color": "#10B981",
+    "order": 2
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column created successfully",
+    "data": {
+      "id": "col3",
+      "name": "Testing",
+      "color": "#10B981",
+      "order": 2
+    }
+  }
   ```
 
 ### Background Service (Cron Job)
