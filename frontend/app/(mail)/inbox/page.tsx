@@ -101,12 +101,13 @@ export default function Home() {
     // Reset all search-related states
     setIsSearching(false);
     setError(null);
-    setLastSearchQuery(null);
+    // Set lastSearchQuery to current searchQuery to prevent re-search
+    setLastSearchQuery(searchQuery);
     // Don't clear mails immediately - let fetchInboxMails handle it
     
     // Navigate back to inbox (this will trigger inbox fetch via useEffect)
     router.push('/inbox');
-  }, [router]);
+  }, [router, searchQuery]);
 
   // 1. Client-side authentication check
   useEffect(() => {
