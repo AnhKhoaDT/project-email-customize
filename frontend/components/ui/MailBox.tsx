@@ -45,10 +45,10 @@ const MailBox = ({
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
-  
+
   // Local state for search input (to prevent parent re-renders on every keystroke)
   const [inputValue, setInputValue] = useState(searchQuery || "");
-  
+
   // Update local input when searchQuery prop changes (e.g., from URL)
   useEffect(() => {
     setInputValue(searchQuery || "");
@@ -63,7 +63,7 @@ const MailBox = ({
       });
     }
   }, [focusedIndex]);
-  
+
   // Handle search on Enter key
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && inputValue.trim()) {
@@ -72,7 +72,7 @@ const MailBox = ({
       handleClearSearch();
     }
   };
-  
+
   // Handle clear search
   const handleClearSearch = () => {
     setInputValue("");
@@ -109,7 +109,11 @@ const MailBox = ({
         </div>
         {/* Search */}
         <div className="flex flex-row items-center mt-4 justify-center gap-3 p-2 rounded-md bg-background/70 border border-secondary focus-within:ring-1 ring-primary transition-all">
-          <FaSearch className={isSearching ? "text-primary animate-pulse" : "text-gray-400"} />
+          <FaSearch
+            className={
+              isSearching ? "text-primary animate-pulse" : "text-gray-400"
+            }
+          />
           <input
             type="text"
             placeholder="Search emails... (Press Enter)"
@@ -202,9 +206,11 @@ const MailBox = ({
                 );
               })
             ) : (
-              <div className="text-center text-sm mt-5">
+              <div className="flex items-center justify-center h-full min-w-[370px]">
                 {error ? (
-                  <span className="text-red-600 dark:text-red-400">{error}</span>
+                  <span className="text-red-600 dark:text-red-400">
+                    {error}
+                  </span>
                 ) : (
                   <span className="text-secondary">No mails found.</span>
                 )}
