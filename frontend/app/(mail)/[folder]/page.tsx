@@ -10,6 +10,7 @@ import MailContent from "@/components/ui/MailContent";
 import ForwardModal from "@/components/ui/ForwardModal";
 import Kanban from "@/components/ui/Kanban";
 import { type EmailData, type Mail } from "@/types";
+import { useSearch } from "@/hooks/useSearch";
 
 // Mapping folder slug to Gmail Label ID
 const FOLDER_MAP: Record<string, string> = {
@@ -47,7 +48,31 @@ export default function FolderPage() {
     refreshMails,
   } = useMailFolder({ folderId, searchQuery });
 
-  // State for selected mail and UI
+  // Use search hook for search functionality
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const {
+    searchMode,
+    setSearchMode,
+    isSearching: hookIsSearching,
+    error: hookSearchError,
+    handleSearch,
+    onClearSearch,
+  } = useSearch({
+    folderSlug,
+    isAuthenticated,
+    onMailsChange: () => {}, // We use useMailFolder for mails
+    onErrorChange: setSearchError,
+    onLoadingChange: setIsSearching,
+  });
+
+  // Update local states from hook
+  useEffect(() => {
+    setIsSearching(hookIsSearching);
+  }, [hookIsSearching]);
+
+  // Combine errors
+  const combinedError = error || searchError || hookSearchError;
   const [selectedMail, setSelectedMail] = useState<EmailData | null>(null);
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [isForwardOpen, setIsForwardOpen] = useState(false);
@@ -59,20 +84,6 @@ export default function FolderPage() {
       router.push("/login");
     }
   }, [isAuthenticated, isAuthLoading, router]);
-
-  // Handle search
-  const handleSearch = useCallback(
-    (query: string) => {
-      if (!query.trim()) return;
-      router.push(`/${folderSlug}?q=${encodeURIComponent(query)}`);
-    },
-    [router, folderSlug]
-  );
-
-  // Clear search
-  const handleClearSearch = useCallback(() => {
-    router.push(`/${folderSlug}`);
-  }, [router, folderSlug]);
 
   // Handle mail click
   const handleMailClick = useCallback(async (mail: Mail) => {
@@ -208,9 +219,11 @@ export default function FolderPage() {
             kanbanClick={() => {}}
             searchQuery={searchQuery ?? undefined}
             onSearch={handleSearch}
-            onClearSearch={handleClearSearch}
-            isSearching={false}
-            error={error}
+            onClearSearch={onClearSearch}
+            isSearching={isSearching}
+            error={combinedError}
+            searchMode={searchMode}
+            onSearchModeChange={setSearchMode}
           />
         )}
       </div>

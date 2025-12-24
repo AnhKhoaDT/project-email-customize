@@ -10,6 +10,7 @@ import ForwardModal from "@/components/ui/ForwardModal";
 import Kanban from "@/components/ui/Kanban";
 import { type SearchMode } from "@/components/search/SearchModeDropdown";
 import { type Mail, type EmailData } from "@/types";
+import { useSearch } from "@/hooks/useSearch";
 
 export default function Home() {
   const router = useRouter();
@@ -24,15 +25,38 @@ export default function Home() {
   const [isMailsLoading, setIsMailsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Search state
+  // Search state - now from hook
   const searchParams = useSearchParams();
   const searchQuery = searchParams.get('q');
   const [isSearching, setIsSearching] = useState(false);
-  const [lastSearchQuery, setLastSearchQuery] = useState<string | null>(null);
-  const [lastSearchMode, setLastSearchMode] = useState<SearchMode | null>(null);
-  
-  // Semantic search state
-  const [searchMode, setSearchMode] = useState<SearchMode>("fuzzy");
+
+  // Use search hook
+  const {
+    searchMode,
+    setSearchMode,
+    isSearching: hookIsSearching,
+    error: searchError,
+    handleSearch,
+    onClearSearch,
+  } = useSearch({
+    folderSlug: 'inbox',
+    isAuthenticated,
+    onMailsChange: setMails,
+    onErrorChange: setError,
+    onLoadingChange: setIsSearching,
+  });
+
+  // Update local searching state from hook
+  useEffect(() => {
+    setIsSearching(hookIsSearching);
+  }, [hookIsSearching]);
+
+  // Update error from search
+  useEffect(() => {
+    if (searchError) {
+      setError(searchError);
+    }
+  }, [searchError]);
 
   // Pagination state
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
@@ -47,19 +71,6 @@ export default function Home() {
 
   // Counter to trigger reply mode
   const [replyTrigger, setReplyTrigger] = useState(0);
-  
-  // Search handler - just updates URL, useEffect handles actual search
-  // isSuggestion: true = from suggestion click (force semantic), false = manual input
-  const handleSearch = useCallback((query: string, isSuggestion: boolean = false) => {
-    if (!query.trim()) return;
-    
-    // Force semantic search when triggered from suggestion (per requirement)
-    if (isSuggestion && searchMode !== 'semantic') {
-      setSearchMode('semantic');
-    }
-    
-    router.push(`/inbox?q=${encodeURIComponent(query)}`);
-  }, [router, searchMode]);
   
   // Fetch inbox mails function (reusable)
   const fetchInboxMails = useCallback(async () => {
@@ -113,13 +124,11 @@ export default function Home() {
     // Reset all search-related states
     setIsSearching(false);
     setError(null);
-    // Set lastSearchQuery to current searchQuery to prevent re-search
-    setLastSearchQuery(searchQuery);
     // Don't clear mails immediately - let fetchInboxMails handle it
     
     // Navigate back to inbox (this will trigger inbox fetch via useEffect)
     router.push('/inbox');
-  }, [router, searchQuery]);
+  }, [router]);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -137,105 +146,6 @@ export default function Home() {
     }
   }, [isAuthenticated, searchQuery, fetchInboxMails]);
   
-  // 3. Auto-search when URL has query param (only if different from last search OR mode changed)
-  useEffect(() => {
-    if (!isAuthenticated || !searchQuery) {
-      return;
-    }
-
-    // Skip if same query AND same mode (prevent duplicate search)
-    if (searchQuery === lastSearchQuery && searchMode === lastSearchMode) {
-      return;
-    }
-
-    // Mark this query and mode as "attempted" immediately to prevent infinite loop
-    setLastSearchQuery(searchQuery);
-    setLastSearchMode(searchMode);
-
-    const performSearch = async () => {
-      try {
-        setIsSearching(true);
-        setIsMailsLoading(false); // Ensure loading spinner turns off
-        setError(null);
-
-        const token =
-          process.env.NODE_ENV === "development"
-            ? window.__accessToken
-            : window.__accessToken;
-        if (!token) return;
-
-        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-        
-        let response;
-        
-        // Choose search endpoint based on mode
-        if (searchMode === "semantic") {
-          // Semantic Search
-          response = await fetch(`${apiURL}/search/semantic`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              query: searchQuery,
-              limit: 50,
-              threshold: 0.5,
-            }),
-          });
-        } else {
-          // Fuzzy Search (default)
-          response = await fetch(
-            `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
-            {
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
-        }
-
-        if (!response.ok) throw new Error("Search failed");
-
-        const data = await response.json();
-        
-        // Handle different response formats
-        let results = [];
-        if (searchMode === "semantic") {
-          results = data?.data?.results || [];
-        } else {
-          results = data?.data?.hits || [];
-        }
-
-        // Transform search results to Mail format
-        const transformedResults: Mail[] = results.map((hit: any) => ({
-          id: hit.emailId || hit.id,
-          threadId: hit.threadId,
-          from: hit.from,
-          subject: hit.subject,
-          snippet: hit.snippet,
-          date: hit.receivedDate || hit.date,
-          isUnread: false,
-          isStarred: false,
-          labelIds: hit.status ? [hit.status] : [],
-          // Add similarity score for semantic search
-          similarityScore: hit.similarityScore,
-        }));
-
-        setMails(transformedResults);
-        setHasMore(false);
-      } catch (err: any) {
-        setError("Search failed. Please try again.");
-        setMails([]);
-      } finally {
-        setIsSearching(false);
-      }
-    };
-
-    performSearch();
-  }, [isAuthenticated, searchQuery, lastSearchQuery, searchMode]);
-
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
     if (!hasMore || isLoadingMore || !nextPageToken) return;
@@ -365,15 +275,11 @@ export default function Home() {
             kanbanClick={toggleKanBanMode}
             searchQuery={searchQuery || undefined}
             onSearch={handleSearch}
-            onClearSearch={handleClearSearch}
+            onClearSearch={onClearSearch}
             isSearching={isSearching}
             error={error}
             searchMode={searchMode}
-            onSearchModeChange={(mode) => {
-              setSearchMode(mode);
-              // Re-trigger search with new mode
-              setLastSearchQuery(null);
-            }}
+            onSearchModeChange={setSearchMode}
           />
         )}
       </div>
