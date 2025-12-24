@@ -12,7 +12,7 @@ Tài liệu này mô tả chi tiết các endpoint backend mà frontend (React S
   - Mail (Gmail proxy): `/mailboxes`, `/mailboxes/:id/emails`, `/emails/:id`
   - AI APIs: `/ai/summarize`, `/ai/batch-summarize`
   - Snooze APIs: `/emails/:id/snooze`, `/emails/:id/unsnooze`, `/snooze/list`
-  - Search APIs: `/search/fuzzy`, `/search/suggestions`
+  - Search APIs: `/search/fuzzy`, `/search/semantic`, `/search/suggestions`, `/search/index`
   - Kanban APIs: `/kanban/columns`, `/emails/:id/move`, `/kanban/config`
 - AI và Kanban APIs (Week 2 Features)
 - Ví dụ mã frontend (`fetch`) để login, refresh, gọi API mail
@@ -686,18 +686,190 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   - `500`: Search failed
 
 #### GET /search/suggestions
-- **Mục đích**: Lấy gợi ý tìm kiếm (autocomplete)
+- **Mục đích**: Lấy gợi ý tìm kiếm (autocomplete) từ sender và subject
 - **Auth**: Required (Bearer token)
 - **Query Parameters**:
-  - `prefix` (required): Prefix string để suggest
-  - `limit` (optional): Số lượng suggestions (default: 5)
+  - `prefix` (required): Prefix string để suggest (min 2 chars)
+  - `limit` (optional): Số lượng suggestions (default: 5, max: 10)
+- **Caching**: MongoDB TTL cache (1 hour expiration)
 - **Response**:
   ```json
   {
     "status": 200,
     "data": {
       "suggestions": [
-        "Instagram",
+        {
+          "value": "Looking Ahead to Motion in 2026",
+          "type": "subject"
+        },
+        {
+          "value": "iconscout@mail.iconscout.com",
+          "type": "sender"
+        }
+      ],
+      "prefix": "look",
+      "cached": true
+    }
+  }
+  ```
+- **Suggestion Priority**:
+  1. Subjects (prioritized for semantic search relevance)
+  2. Senders (normalized to email addresses)
+- **Data Processing**:
+  - Extracts from 200 recent INBOX emails
+  - Normalizes senders: "Name <email@domain.com>" → "email@domain.com"
+  - Cleans subjects: Removes "Re:", "Fwd:" prefixes
+  - Minimum subject length: 3 characters
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/suggestions?prefix=${encodeURIComponent(prefix)}&limit=5`, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
+  const data = await res.json();
+  // Display suggestions in dropdown
+  ```
+- **Cache Behavior**:
+  - First request: Fetch from Gmail API → Cache in MongoDB
+  - Subsequent requests: Serve from cache (instant)
+  - TTL: 1 hour (auto-cleanup via MongoDB index)
+
+#### POST /search/semantic
+- **Mục đích**: Tìm kiếm emails theo ý nghĩa (concept-based search) sử dụng AI embeddings
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "query": "meeting about project deadline",
+    "limit": 20,
+    "threshold": 0.5
+  }
+  ```
+- **Query Processing**:
+  1. Generate embedding cho query (768 dimensions)
+  2. Compare với embeddings của emails trong database
+  3. Calculate cosine similarity scores
+  4. Filter results với threshold (default: 0.5)
+  5. Sort by similarity score (highest first)
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "query": "meeting about project deadline",
+      "results": [
+        {
+          "emailId": "19aba6e5873a9087",
+          "threadId": "19aba6e5873a9087",
+          "subject": "Q4 Project Milestone Discussion",
+          "from": "manager@company.com",
+          "snippet": "Let's discuss the upcoming project milestones and deadlines...",
+          "receivedDate": "2025-12-20T14:30:00.000Z",
+          "similarityScore": 0.87,
+          "matchedText": "From: manager@company.com\nSubject: Q4 Project Milestone Discussion\nLet's discuss..."
+        }
+      ],
+      "totalResults": 5,
+      "processingTimeMs": 1240
+    }
+  }
+  ```
+- **Auto-Indexing**: Nếu chưa có embeddings → tự động index 200 emails gần nhất
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "query": "meeting",
+      "results": [],
+      "totalResults": 0,
+      "message": "Indexing emails in background. Please try again in a few seconds."
+    }
+  }
+  ```
+- **Semantic Features**:
+  - Concept matching: "meeting" → finds "discussion", "call", "sync"
+  - Language understanding: "urgent" → finds "ASAP", "critical", "important"
+  - Context awareness: Considers sender, subject, and body together
+  - Embedding text includes: `From: <sender>\nSubject: <subject>\n<body>`
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/semantic`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query: searchQuery,
+      limit: 50,
+      threshold: 0.5
+    })
+  });
+  const data = await res.json();
+  ```
+- **Performance**:
+  - Query embedding: 1 Gemini API call (~200ms)
+  - Similarity calculation: Local computation (O(N) where N = indexed emails)
+  - Gmail API calls: Only for matched emails (typically 5-20)
+  - Total time: ~1-2 seconds for 200 indexed emails
+
+#### POST /search/index
+- **Mục đích**: Manually trigger email indexing cho semantic search
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "limit": 200
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "success": 185,
+      "failed": 15,
+      "failedEmails": [
+        "email_id_1 (Network timeout)",
+        "email_id_2 (Empty content)"
+      ]
+    }
+  }
+  ```
+- **Indexing Process**:
+  1. Fetch N recent emails from INBOX
+  2. For each email: Generate embedding (768D vector)
+  3. Store embedding + text in MongoDB
+  4. Retry failed emails (max 2 retries)
+- **Auto-Indexing on First Login**: Triggered automatically for new users
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/index`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ limit: 200 })
+  });
+  ```
+
+#### GET /search/index/stats
+- **Mục đích**: Lấy thống kê indexing status
+- **Auth**: Required (Bearer token)
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "totalEmails": 250,
+      "indexedEmails": 200,
+      "pendingEmails": 50,
+      "lastIndexedAt": "2025-12-24T18:30:00.000Z"
+    }
+  }
+  ```
         "Invoice",
         "Important meeting"
       ]
@@ -1934,4 +2106,118 @@ curl -X POST http://localhost:5000/emails/msg_123/move \
 
 ---
 
-*Last updated: December 10, 2025 - Week 2 Implementation Complete*
+## 🔍 Week 4: Semantic Search & Auto-Suggestions
+
+### Architecture Overview
+
+**Semantic Search Pipeline:**
+```
+User Query → Gemini Embedding (768D) → Cosine Similarity → Filter (threshold 0.5) → Sort → Results
+     ↓                                         ↑
+  1 API call                          MongoDB Cached Embeddings
+                                      (From: sender, Subject: subject, Body: text)
+```
+
+**Auto-Suggestions Pipeline:**
+```
+User Input (≥2 chars) → Check MongoDB Cache → Return Suggestions
+                              ↓ (cache miss)
+                        Fetch 200 INBOX emails → Extract senders/subjects → Cache (1h TTL)
+```
+
+### Key Features
+
+#### 1. **Semantic Search (Meaning-based)**
+- **Technology**: Gemini text-embedding-004 (768 dimensions)
+- **Algorithm**: Cosine similarity matching
+- **Threshold**: 0.5 (configurable)
+- **Auto-Indexing**: Triggered on first login or first semantic search
+- **Performance**: 
+  - Indexing: 200 emails × 1 API call = ~60 seconds (one-time)
+  - Search: 1 API call + local computation = ~1-2 seconds
+- **Use Cases**:
+  - Concept matching: "meeting" finds "discussion", "call", "sync"
+  - Language understanding: "urgent" finds "ASAP", "critical"
+  - Context-aware: Searches across sender, subject, and body
+
+#### 2. **Auto-Suggestions (Autocomplete)**
+- **Technology**: MongoDB TTL cache (1-hour expiration)
+- **Data Source**: 200 recent INBOX emails
+- **Suggestion Types**:
+  - Subjects (prioritized for semantic relevance)
+  - Senders (normalized to email addresses)
+- **Processing**:
+  - Cleans subjects: Removes "Re:", "Fwd:" prefixes
+  - Normalizes senders: "Name <email@domain.com>" → "email@domain.com"
+  - Minimum length: 3 characters for subjects
+- **Performance**: 
+  - Cache hit: <10ms (instant)
+  - Cache miss: ~500ms (Gmail API fetch + cache store)
+
+#### 3. **Integration Flow**
+
+**Frontend → Backend → AI → Database:**
+```javascript
+// 1. User types "meet" → Show suggestions
+const suggestions = await fetch('/search/suggestions?prefix=meet&limit=5');
+// Returns: ["Meeting Notes 2025", "Team Meeting Schedule", ...]
+
+// 2. User clicks suggestion → Switch to semantic mode
+setSearchMode('semantic');
+router.push(`/inbox?q=${encodeURIComponent(suggestion)}`);
+
+// 3. Semantic search triggered
+const results = await fetch('/search/semantic', {
+  body: JSON.stringify({ query: suggestion, threshold: 0.5 })
+});
+// Returns emails ranked by similarity score (0.5-1.0)
+```
+
+### API Summary
+
+| Endpoint | Method | Purpose | Performance |
+|----------|--------|---------|-------------|
+| `/search/suggestions` | GET | Autocomplete dropdown | <10ms (cached) |
+| `/search/semantic` | POST | AI-powered search | ~1-2s |
+| `/search/fuzzy` | GET | Typo-tolerant search | ~100-200ms |
+| `/search/index` | POST | Manual indexing | ~60s (200 emails) |
+| `/search/index/stats` | GET | Indexing progress | <50ms |
+
+### Cost Analysis
+
+**Gemini API Quota:**
+- **Indexing** (one-time): 200 API calls per user
+- **Search**: 1 API call per query
+- **Total per user per day**: ~1 indexing + ~20 searches = ~220 API calls
+- **Free tier**: 1500 requests/day (supports ~75 users/day)
+
+### Auto-Indexing Behavior
+
+**Trigger Points:**
+1. **First Login**: Auto-index 200 emails in background
+2. **First Semantic Search**: If no embeddings found → auto-index
+3. **Manual Trigger**: User clicks "Index Emails" button
+
+**User Flow:**
+```
+Login → Background indexing starts → Toast notification
+     → Wait 30-60s → Semantic search enabled
+     → Click suggestion → Force semantic mode → Results!
+```
+
+### Error Handling
+
+**Indexing Errors:**
+- Network timeout: Retry (max 2)
+- Empty email: Skip
+- Rate limit: Wait and retry
+- Failed emails: Log and continue
+
+**Search Errors:**
+- No embeddings: Trigger auto-indexing + return message
+- Query too long: Truncate to 8000 chars
+- Gemini API error: Fallback to fuzzy search (optional)
+
+---
+
+*Last updated: December 24, 2025 - Week 4 Implementation Complete*

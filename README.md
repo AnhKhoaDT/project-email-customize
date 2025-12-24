@@ -74,8 +74,8 @@ This project demonstrates a production-ready React application with:
 - [x] **Backend Cron Job**: Automated snooze expiration checking (every 5 seconds)
 - [x] **Fuzzy Search Engine**: Fuse.js-powered search with typo tolerance and partial matching
 - [x] **Semantic Search Engine**: AI-powered meaning-based search using vector embeddings
-- [x] **Auto-Indexing on First Login**: Automatic background indexing for new users
-- [x] **Indexing Progress Notification**: Real-time progress bar with dismissible toast
+- [x] **Search Auto-Suggestions**: MongoDB-cached suggestions from recent emails (sender/subject)
+- [x] **Auto-Indexing on First Login**: Automatic background indexing for new users (200 emails)
 - [x] **Search Rate Limiting**: 20 requests per minute per user
 - [x] **Search UI**: Real-time search with loading, empty, and error states
 - [x] **Kanban Board View**: Drag-and-drop email management (Inbox/To-Do/Done)
@@ -105,9 +105,9 @@ This project demonstrates a production-ready React application with:
 - **Email Integration:** Gmail API (googleapis npm package)
 - **OAuth:** Google OAuth 2.0 client
 - **AI Integration:** Google Gemini 1.5 Flash API
-- **Search Engine:** Fuse.js (fuzzy search) + MongoDB Atlas Vector Search (semantic search)
+- **Search Engine:** Fuse.js (fuzzy search) + Gemini Embeddings (semantic search)
 - **Vector Embeddings:** Google Gemini text-embedding-004 (768 dimensions)
-- **Vector Search Algorithm:** IVF on M0 free tier, HNSW on M10+ (both O(log N) complexity)
+- **Search Suggestions:** MongoDB TTL cache (1-hour expiration)
 - **Task Scheduling:** node-cron (for snooze automation)
 - **Concurrency Control:** Hybrid batch processing (3 batches × 5 parallel)
 - **Rate Limiting:** In-memory rate limiting for search and AI endpoints
