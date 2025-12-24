@@ -7,6 +7,7 @@ import { SnoozeService } from './snooze.service';
 import { EmailMetadataService } from './email-metadata.service';
 import { FuzzySearchService } from './fuzzy-search.service';
 import { SemanticSearchService } from './semantic-search.service';
+import { SearchSuggestionsService } from './search-suggestions.service';
 import { KanbanConfigService } from './kanban-config.service';
 import { SendEmailDto } from './dto/send-email.dto';
 import { ReplyEmailDto } from './dto/reply-email.dto';
@@ -48,6 +49,7 @@ export class MailController {
     private emailMetadataService: EmailMetadataService,
     private fuzzySearchService: FuzzySearchService,
     private semanticSearchService: SemanticSearchService,
+    private searchSuggestionsService: SearchSuggestionsService,
     private kanbanConfigService: KanbanConfigService,
   ) {}
   
@@ -585,7 +587,7 @@ export class MailController {
         return { status: 400, message: 'Prefix must be at least 2 characters' };
       }
 
-      const suggestions = await this.fuzzySearchService.getSearchSuggestions(
+      const suggestions = await this.searchSuggestionsService.getSearchSuggestions(
         req.user.id,
         prefix,
         limit ? parseInt(limit, 10) : 10

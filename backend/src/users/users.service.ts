@@ -67,4 +67,18 @@ export class UsersService {
     const u = await this.userModel.findById(userId).exec();
     return u?.googleRefreshToken || null;
   }
+
+  /**
+   * Mark user as indexed for semantic search
+   */
+  async markAsIndexed(userId: string) {
+    return this.userModel.findByIdAndUpdate(
+      userId, 
+      { 
+        isSemanticSearchIndexed: true,
+        lastIndexedAt: new Date()
+      }, 
+      { new: true }
+    ).exec();
+  }
 }

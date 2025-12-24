@@ -321,4 +321,20 @@ export const unsnoozeEmail = async (emailId: string) => {
   return response.data;
 };
 
+/**
+ * Get search suggestions
+ * @param prefix - Search prefix (minimum 2 characters)
+ * @param limit - Maximum number of suggestions (default: 5)
+ * @returns Array of suggestions with value and type
+ */
+export const getSearchSuggestions = async (
+  prefix: string,
+  limit: number = 5
+): Promise<Array<{ value: string; type: 'sender' | 'subject' }>> => {
+  const response = await api.get(`/search/suggestions`, {
+    params: { prefix, limit }
+  });
+  return response.data.data || [];
+};
+
 export default api;

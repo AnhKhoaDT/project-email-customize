@@ -8,6 +8,7 @@ import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
 import ForwardModal from "@/components/ui/ForwardModal";
 import Kanban from "@/components/ui/Kanban";
+import { type SearchMode } from "@/components/search/SearchModeDropdown";
 import { type Mail, type EmailData } from "@/types";
 
 export default function Home() {
@@ -28,6 +29,10 @@ export default function Home() {
   const searchQuery = searchParams.get('q');
   const [isSearching, setIsSearching] = useState(false);
   const [lastSearchQuery, setLastSearchQuery] = useState<string | null>(null);
+  const [lastSearchMode, setLastSearchMode] = useState<SearchMode | null>(null);
+  
+  // Semantic search state
+  const [searchMode, setSearchMode] = useState<SearchMode>("fuzzy");
 
   // Pagination state
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
@@ -44,10 +49,17 @@ export default function Home() {
   const [replyTrigger, setReplyTrigger] = useState(0);
   
   // Search handler - just updates URL, useEffect handles actual search
-  const handleSearch = useCallback((query: string) => {
+  // isSuggestion: true = from suggestion click (force semantic), false = manual input
+  const handleSearch = useCallback((query: string, isSuggestion: boolean = false) => {
     if (!query.trim()) return;
+    
+    // Force semantic search when triggered from suggestion (per requirement)
+    if (isSuggestion && searchMode !== 'semantic') {
+      setSearchMode('semantic');
+    }
+    
     router.push(`/inbox?q=${encodeURIComponent(query)}`);
-  }, [router]);
+  }, [router, searchMode]);
   
   // Fetch inbox mails function (reusable)
   const fetchInboxMails = useCallback(async () => {
@@ -125,14 +137,20 @@ export default function Home() {
     }
   }, [isAuthenticated, searchQuery, fetchInboxMails]);
   
-  // 3. Auto-search when URL has query param (only if different from last search)
+  // 3. Auto-search when URL has query param (only if different from last search OR mode changed)
   useEffect(() => {
-    if (!isAuthenticated || !searchQuery || searchQuery === lastSearchQuery) {
+    if (!isAuthenticated || !searchQuery) {
       return;
     }
 
-    // Mark this query as "attempted" immediately to prevent infinite loop
+    // Skip if same query AND same mode (prevent duplicate search)
+    if (searchQuery === lastSearchQuery && searchMode === lastSearchMode) {
+      return;
+    }
+
+    // Mark this query and mode as "attempted" immediately to prevent infinite loop
     setLastSearchQuery(searchQuery);
+    setLastSearchMode(searchMode);
 
     const performSearch = async () => {
       try {
@@ -146,33 +164,63 @@ export default function Home() {
             : window.__accessToken;
         if (!token) return;
 
-        const apiURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-        const response = await fetch(
-          `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
-          {
+        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+        
+        let response;
+        
+        // Choose search endpoint based on mode
+        if (searchMode === "semantic") {
+          // Semantic Search
+          response = await fetch(`${apiURL}/search/semantic`, {
+            method: "POST",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
-          }
-        );
+            body: JSON.stringify({
+              query: searchQuery,
+              limit: 50,
+              threshold: 0.5,
+            }),
+          });
+        } else {
+          // Fuzzy Search (default)
+          response = await fetch(
+            `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
+            {
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+        }
 
         if (!response.ok) throw new Error("Search failed");
 
         const data = await response.json();
-        const results = data?.data?.hits || [];
+        
+        // Handle different response formats
+        let results = [];
+        if (searchMode === "semantic") {
+          results = data?.data?.results || [];
+        } else {
+          results = data?.data?.hits || [];
+        }
 
         // Transform search results to Mail format
         const transformedResults: Mail[] = results.map((hit: any) => ({
-          id: hit.emailId,
+          id: hit.emailId || hit.id,
           threadId: hit.threadId,
           from: hit.from,
           subject: hit.subject,
           snippet: hit.snippet,
-          date: hit.receivedDate,
+          date: hit.receivedDate || hit.date,
           isUnread: false,
           isStarred: false,
           labelIds: hit.status ? [hit.status] : [],
+          // Add similarity score for semantic search
+          similarityScore: hit.similarityScore,
         }));
 
         setMails(transformedResults);
@@ -186,7 +234,7 @@ export default function Home() {
     };
 
     performSearch();
-  }, [isAuthenticated, searchQuery, lastSearchQuery]);
+  }, [isAuthenticated, searchQuery, lastSearchQuery, searchMode]);
 
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
@@ -295,7 +343,7 @@ export default function Home() {
       {/* Cột Danh sách Mail */}
       <div
         className={`
-          h-full 
+          h-full flex flex-col
           ${selectedMail ? "hidden" : "flex"} 
           md:flex md:w-1/3 w-full
         `}
@@ -320,6 +368,12 @@ export default function Home() {
             onClearSearch={handleClearSearch}
             isSearching={isSearching}
             error={error}
+            searchMode={searchMode}
+            onSearchModeChange={(mode) => {
+              setSearchMode(mode);
+              // Re-trigger search with new mode
+              setLastSearchQuery(null);
+            }}
           />
         )}
       </div>

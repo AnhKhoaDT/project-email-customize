@@ -27,6 +27,9 @@ export interface Mail {
   isUnread: boolean;
   isStarred: boolean;
   hasAttachment?: boolean;
+  
+  // Semantic search similarity score (0-1, higher = more similar)
+  similarityScore?: number;
 }
 
 export interface Header {

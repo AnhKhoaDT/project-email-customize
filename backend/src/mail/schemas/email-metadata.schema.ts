@@ -28,9 +28,9 @@ export class EmailMetadata {
   @Prop({ 
     type: String, 
     enum: Object.values(EmailStatus),
-    required: true
+    required: false  // Changed to false for semantic search indexing
   })
-  status: EmailStatus; // Main status field (TODO/IN_PROGRESS/DONE only)
+  status?: EmailStatus; // Optional: Only set when email is in Kanban
 
   @Prop()
   statusUpdatedAt?: Date; // Timestamp khi status thay đổi

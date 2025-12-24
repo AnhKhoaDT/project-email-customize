@@ -25,6 +25,13 @@ export class User {
 
   @Prop()
   googleRefreshToken?: string;
+
+  // Semantic Search: Track if user's emails have been indexed
+  @Prop({ default: false })
+  isSemanticSearchIndexed?: boolean;
+
+  @Prop({ type: Date })
+  lastIndexedAt?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

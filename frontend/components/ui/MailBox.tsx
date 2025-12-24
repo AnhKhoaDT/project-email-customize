@@ -1,4 +1,4 @@
-import { TbLayoutSidebarRightExpandFilled } from "react-icons/tb";
+import { TbLayoutSidebarRightExpandFilled, TbSparkles } from "react-icons/tb";
 // ... import khác giữ nguyên ...
 import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
@@ -7,7 +7,10 @@ import { LuSquareKanban } from "react-icons/lu";
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
 import { EmailData } from "@/types";
-import { useEffect, useRef, useState, KeyboardEvent } from "react";
+import { useEffect, useRef, useState, KeyboardEvent, useCallback } from "react";
+import SearchModeDropdown, { type SearchMode } from "@/components/search/SearchModeDropdown";
+import SearchSuggestions from "@/components/search/SearchSuggestions";
+import { getSearchSuggestions } from "@/lib/api";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
@@ -21,10 +24,13 @@ interface MailBoxProps {
   kanbanClick: () => void;
   // Search props
   searchQuery?: string;
-  onSearch?: (query: string) => void;
+  onSearch?: (query: string, isSuggestion?: boolean) => void;
   onClearSearch?: () => void;
   isSearching?: boolean;
   error?: string | null;
+  // Search mode
+  searchMode?: SearchMode;
+  onSearchModeChange?: (mode: SearchMode) => void;
 }
 
 const MailBox = ({
@@ -42,6 +48,8 @@ const MailBox = ({
   onClearSearch,
   isSearching = false,
   error = null,
+  searchMode = "fuzzy",
+  onSearchModeChange,
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
@@ -49,10 +57,124 @@ const MailBox = ({
   // Local state for search input (to prevent parent re-renders on every keystroke)
   const [inputValue, setInputValue] = useState(searchQuery || "");
 
+  // Auto-suggest state
+  const [suggestions, setSuggestions] = useState<Array<{ value: string; type: 'sender' | 'subject' }>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
+  const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Update local input when searchQuery prop changes (e.g., from URL)
   useEffect(() => {
     setInputValue(searchQuery || "");
   }, [searchQuery]);
+
+  // Fetch suggestions with debounce
+  const fetchSuggestions = useCallback(async (value: string, signal?: AbortSignal) => {
+    if (value.length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setIsLoadingSuggestions(false);
+      setSuggestionsError(null);
+      return;
+    }
+
+    // Keep showing previous suggestions while loading
+    setIsLoadingSuggestions(true);
+    setSuggestionsError(null);
+    
+    try {
+      // Use API helper (with auto token refresh)
+      const typedSuggestions = await getSearchSuggestions(value, 5);
+
+      // Check if request was aborted
+      if (signal?.aborted) {
+        console.log('[Suggestions] Request aborted for:', value);
+        return;
+      }
+
+      setSuggestions(typedSuggestions);
+      setSuggestionsError(null);
+      // Always show dropdown if we have suggestions OR still loading
+      setShowSuggestions(true);
+      setSelectedSuggestionIndex(-1);
+      setIsLoadingSuggestions(false);
+    } catch (error) {
+      // Ignore abort errors
+      if (signal?.aborted || (error as any)?.name === 'AbortError') {
+        console.log('[Suggestions] Request cancelled');
+        return;
+      }
+      
+      console.error('[Suggestions] Failed:', error);
+      setSuggestions([]);
+      setSuggestionsError(error instanceof Error ? error.message : 'Failed to load suggestions');
+      // Keep dropdown open to show error message
+      setShowSuggestions(true);
+      setIsLoadingSuggestions(false);
+    }
+  }, []);
+
+  // Debounced input handler
+  const handleInputChange = useCallback((value: string) => {
+    setInputValue(value);
+    
+    // If empty, hide immediately
+    if (value.length === 0) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      setIsLoadingSuggestions(false);
+      setSuggestionsError(null);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      // Cancel pending request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      return;
+    }
+    
+    // Show dropdown and loading state immediately for better UX (when >= 2 chars)
+    if (value.length >= 2 && isFocused) {
+      setShowSuggestions(true);
+      setIsLoadingSuggestions(true);
+      setSuggestionsError(null);
+    }
+    
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Cancel previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Set new timer for debounced fetch
+    debounceTimerRef.current = setTimeout(() => {
+      // Create new AbortController for this request
+      abortControllerRef.current = new AbortController();
+      fetchSuggestions(value, abortControllerRef.current.signal);
+    }, 500); // Increased to 500ms for better debouncing
+  }, [fetchSuggestions, isFocused]);
+
+  // Cleanup debounce timer and abort controller
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Scroll focused item into view when focusedIndex changes
   useEffect(() => {
@@ -64,20 +186,71 @@ const MailBox = ({
     }
   }, [focusedIndex]);
 
-  // Handle search on Enter key
+  // Handle search on Enter key with keyboard navigation
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && inputValue.trim()) {
-      onSearch?.(inputValue.trim());
-    } else if (e.key === "Escape") {
-      handleClearSearch();
+    // Arrow Down: Navigate suggestions
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (showSuggestions && suggestions.length > 0) {
+        setSelectedSuggestionIndex(prev => 
+          prev < suggestions.length - 1 ? prev + 1 : prev
+        );
+      }
+    }
+    // Arrow Up: Navigate suggestions
+    else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (showSuggestions && suggestions.length > 0) {
+        setSelectedSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
+      }
+    }
+    // Enter: Select suggestion or search
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      
+      if (showSuggestions && selectedSuggestionIndex >= 0 && suggestions[selectedSuggestionIndex]) {
+        // Use selected suggestion → trigger semantic search (per requirement)
+        const selectedValue = suggestions[selectedSuggestionIndex].value;
+        setInputValue(selectedValue);
+        onSearch?.(selectedValue, true); // true = from suggestion
+        setShowSuggestions(false);
+        setSuggestions([]);
+      } else if (inputValue.trim()) {
+        // Use typed value → use current search mode
+        onSearch?.(inputValue.trim(), false); // false = manual input
+        setShowSuggestions(false);
+        setSuggestions([]);
+      }
+    }
+    // Escape: Close suggestions or clear search
+    else if (e.key === 'Escape') {
+      if (showSuggestions) {
+        setShowSuggestions(false);
+        setSuggestions([]);
+      } else {
+        handleClearSearch();
+      }
     }
   };
 
   // Handle clear search
   const handleClearSearch = () => {
     setInputValue("");
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setSelectedSuggestionIndex(-1);
     onClearSearch?.();
   };
+
+  // Handle suggestion selection
+  // When suggestion is selected, trigger semantic search (per requirement)
+  const handleSelectSuggestion = useCallback((suggestionValue: string) => {
+    setInputValue(suggestionValue);
+    onSearch?.(suggestionValue, true); // true = from suggestion
+    setShowSuggestions(false);
+    setSuggestions([]);
+    setSelectedSuggestionIndex(-1);
+  }, [onSearch]);
 
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
@@ -108,30 +281,71 @@ const MailBox = ({
           </button>
         </div>
         {/* Search */}
-        <div className="flex flex-row items-center mt-4 justify-center gap-3 p-2 rounded-md bg-background/70 border border-secondary focus-within:ring-1 ring-primary transition-all">
-          <FaSearch
-            className={
-              isSearching ? "text-primary animate-pulse" : "text-gray-400"
-            }
-          />
-          <input
-            type="text"
-            placeholder="Search emails... (Press Enter)"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            disabled={isSearching}
-            className="w-full focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
-          />
-          {(inputValue || searchQuery) && (
-            <button
-              onClick={handleClearSearch}
-              className="text-gray-400 hover:text-gray-600 transition-colors"
-              title="Clear search (Esc)"
-            >
-              ✕
-            </button>
-          )}
+        <div className="flex flex-col gap-2 mt-4">
+          <div className="flex flex-row items-center justify-center gap-2 p-2 rounded-md bg-background/70 border border-secondary focus-within:ring-1 ring-primary transition-all">
+            {/* Search Mode Dropdown */}
+            {onSearchModeChange && (
+              <SearchModeDropdown
+                value={searchMode}
+                onChange={onSearchModeChange}
+                disabled={isSearching}
+              />
+            )}
+            
+            <div className="relative flex items-center gap-2 flex-1">
+              {/* <FaSearch
+                className={
+                  isSearching ? "text-primary animate-pulse" : "text-gray-400"
+                }
+              /> */}
+              <input
+                type="text"
+                placeholder="Search emails... (Press Enter)"
+                value={inputValue}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                onFocus={() => {
+                  setIsFocused(true);
+                  // Show dropdown if we have content (>= 2 chars)
+                  if (inputValue.length >= 2) {
+                    setShowSuggestions(true);
+                    // Trigger fetch if no suggestions yet
+                    if (suggestions.length === 0 && !isLoadingSuggestions) {
+                      fetchSuggestions(inputValue);
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  setIsFocused(false);
+                  // Delay to allow click on suggestion
+                  setTimeout(() => setShowSuggestions(false), 200);
+                }}
+                disabled={isSearching}
+                className="w-full focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
+                autoComplete="off"
+              />
+              {(inputValue || searchQuery) && (
+                <button
+                  onClick={handleClearSearch}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  title="Clear search (Esc)"
+                >
+                  ✕
+                </button>
+              )}
+              
+              {/* Auto-suggest dropdown */}
+              {(showSuggestions || isLoadingSuggestions) && inputValue.length >= 2 && (
+                <SearchSuggestions
+                  suggestions={suggestions}
+                  selectedIndex={selectedSuggestionIndex}
+                  onSelect={handleSelectSuggestion}
+                  isLoading={isLoadingSuggestions}
+                  error={suggestionsError}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
       <div className="w-full bg-secondary h-px opacity-30"></div>
@@ -191,9 +405,30 @@ const MailBox = ({
                           >
                             {mail.from || "someone"}
                           </span>
-                          <span className="text-secondary text-xs shrink-0">
-                            {mail.date}
-                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Similarity Score Badge */}
+                            {mail.similarityScore !== undefined && (
+                              <div
+                                className={`
+                                  flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+                                  ${
+                                    mail.similarityScore >= 0.7
+                                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                                      : mail.similarityScore >= 0.5
+                                      ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
+                                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                                  }
+                                `}
+                                title={`Similarity: ${(mail.similarityScore * 100).toFixed(0)}%`}
+                              >
+                                <TbSparkles size={12} />
+                                <span>{(mail.similarityScore * 100).toFixed(0)}%</span>
+                              </div>
+                            )}
+                            <span className="text-secondary text-xs">
+                              {mail.date}
+                            </span>
+                          </div>
                         </div>
                         <div className="w-full">
                           <p className="text-sm truncate text-secondary">

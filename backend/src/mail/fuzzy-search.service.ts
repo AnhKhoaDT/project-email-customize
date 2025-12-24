@@ -136,41 +136,4 @@ export class FuzzySearchService {
       throw error;
     }
   }
-
-  /**
-   * Escape special regex characters
-   */
-  private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  /**
-   * Get search suggestions (optional enhancement)
-   * Can be used for autocomplete
-   */
-  async getSearchSuggestions(userId: string, prefix: string, limit: number = 10): Promise<string[]> {
-    if (!prefix || prefix.length < 2) {
-      return [];
-    }
-
-    const regex = new RegExp(`^${this.escapeRegex(prefix)}`, 'i');
-    
-    // Find subjects and senders that match the prefix
-    const subjects = await this.emailMetadataModel
-      .find({ userId, subject: regex })
-      .distinct('subject')
-      .limit(limit)
-      .exec();
-
-    const senders = await this.emailMetadataModel
-      .find({ userId, from: regex })
-      .distinct('from')
-      .limit(limit)
-      .exec();
-
-    // Combine and deduplicate
-    const suggestions = [...new Set([...subjects, ...senders])];
-    
-    return suggestions.slice(0, limit);
-  }
 }
