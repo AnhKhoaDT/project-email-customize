@@ -877,125 +877,532 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   }
   ```
 
-### Kanban APIs
+### Kanban APIs (Dynamic Columns with Gmail Label Sync)
 
-#### GET /kanban/columns
-- **Mục đích**: Lấy tất cả emails trong Kanban board (TODO/DONE columns)
-- **Auth**: Required (Bearer token)
-- **Response**:
-  ```json
-  {
-    "todo": [
-      {
-        "id": "email1",
-        "threadId": "thread1",
-        "subject": "Task 1",
-        "from": "sender@example.com",
-        "snippet": "...",
-        "summary": "AI-generated summary",
-        "status": "TODO",
-        "order": 0
-      }
-    ],
-    "done": [
-      {
-        "id": "email2",
-        "threadId": "thread2",
-        "subject": "Task 2",
-        "status": "DONE",
-        "order": 0
-      }
-    ]
-  }
-  ```
+> **🎯 Kiến trúc:** Mỗi cột Kanban ánh xạ tới một Gmail Label. Moving emails = thay đổi labels trong Gmail. Inbox luôn hiện diện (không lưu DB), các cột khác là custom columns với Gmail label mapping.
 
-#### POST /emails/:id/move
-- **Mục đích**: Di chuyển email giữa các columns trong Kanban
+---
+
+#### GET /kanban/config
+- **Mục đích**: Lấy cấu hình Kanban board của user (danh sách columns)
 - **Auth**: Required (Bearer token)
-- **Params**: `:id` - Message ID
-- **Body**:
-  ```json
-  {
-    "threadId": "19aba6e5873a9087",
-    "fromStatus": "INBOX",
-    "toStatus": "TODO",
-    "destinationIndex": 2
-  }
-  ```
-- **Response**:
+- **Response 200**:
   ```json
   {
     "status": 200,
-    "message": "Email moved successfully",
     "data": {
-      "emailId": "19aba6e5873a9087",
-      "newStatus": "TODO",
-      "order": 2
+      "_id": "507f1f77bcf86cd799439011",
+      "userId": "user-123",
+      "columns": [
+        {
+          "id": "todo",
+          "name": "To Do",
+          "order": 0,
+          "gmailLabel": "STARRED",
+          "gmailLabelName": "Starred",
+          "mappingType": "label",
+          "color": "#FFA500",
+          "isVisible": true,
+          "emailCount": 15,
+          "hasLabelError": false
+        },
+        {
+          "id": "done_1735901234567",
+          "name": "Done",
+          "order": 1,
+          "gmailLabel": "Label_123",
+          "gmailLabelName": "Done",
+          "mappingType": "label",
+          "color": "#32CD32",
+          "isVisible": true,
+          "emailCount": 8,
+          "hasLabelError": false
+        }
+      ],
+      "showInbox": true,
+      "defaultSort": "date",
+      "lastModified": "2026-01-03T10:30:00.000Z"
     }
   }
   ```
-- **Supported statuses**: `INBOX`, `TODO`, `DONE`, `SNOOZED`
+- **Lưu ý**:
+  - `gmailLabel`: Gmail API label ID (ví dụ: `STARRED`, `Label_123`)
+  - `gmailLabelName`: Tên hiển thị thân thiện (lưu trong MongoDB)
+  - `hasLabelError: true`: Gmail label đã bị xóa (cần recovery)
+  - Cột Inbox KHÔNG được trả về trong config (được xử lý riêng ở frontend)
+
+---
+
+#### POST /kanban/columns
+- **Mục đích**: Tạo cột Kanban mới với Gmail label mapping
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "name": "Urgent",
+    "color": "#FF0000",
+    "gmailLabel": "Urgent",
+    "createNewLabel": true
+  }
+  ```
+- **Parameters**:
+  - `name` (string, bắt buộc): Tên cột hiển thị (tối đa 100 ký tự)
+  - `color` (string, tùy chọn): Mã hex màu, mặc định: `#64748b`
+  - `gmailLabel` (string, bắt buộc): Gmail label để ánh xạ
+  - `createNewLabel` (boolean, bắt buộc): 
+    - `true`: Tạo Gmail label mới
+    - `false`: Ánh xạ tới label hiện có
+- **Response 201**:
+  ```json
+  {
+    "status": 201,
+    "message": "Column created successfully",
+    "data": {
+      "id": "urgent_1735901234567",
+      "name": "Urgent",
+      "order": 2,
+      "gmailLabel": "Label_456",
+      "gmailLabelName": "Urgent",
+      "newLabelId": "Label_456",
+      "mappingType": "label",
+      "color": "#FF0000",
+      "isVisible": true,
+      "emailCount": 0
+    }
+  }
+  ```
+- **Response 400 - Validation Errors**:
+  ```json
+  {
+    "status": 400,
+    "message": "Cannot create new label with reserved Gmail label name \"inbox\". Reserved labels: inbox, sent, drafts, spam, trash, starred, important, unread, chat, scheduled, snoozed. Tip: Use \"Map to existing label\" option to map with system labels like IMPORTANT, STARRED, etc."
+  }
+  ```
+  ```json
+  {
+    "status": 400,
+    "message": "Gmail label \"STARRED\" is already mapped to column \"To Do\""
+  }
+  ```
+- **Lưu ý**:
+  - **Reserved Labels**: KHÔNG thể TẠO label mới tên `inbox`, `sent`, `drafts`, `spam`, `trash`, `starred`, `important`, `unread`, `chat`, `scheduled`, `snoozed`
+  - **System Label Mapping**: CÓ THỂ ánh xạ tới system labels hiện có (ví dụ: `STARRED`, `IMPORTANT`) bằng cách set `createNewLabel: false`
+  - **Duplicate Prevention**: Backend validate không có hai cột ánh xạ cùng một Gmail label
 - **Example**:
   ```js
-  const res = await fetch(BACKEND + `/emails/${emailId}/move`, {
+  const res = await fetch(BACKEND + '/kanban/columns', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      threadId: email.threadId,
-      fromStatus: 'INBOX',
-      toStatus: 'TODO',
-      destinationIndex: 2
+      name: 'High Priority',
+      color: '#FF4500',
+      gmailLabel: 'IMPORTANT',
+      createNewLabel: false // Map to existing system label
     })
   });
   ```
 
-#### GET /kanban/config
-- **Mục đích**: Lấy cấu hình Kanban board của user (custom columns)
+---
+
+#### PUT /kanban/columns/:columnId
+- **Mục đích**: Cập nhật thuộc tính cột (tên, màu, hiển thị)
 - **Auth**: Required (Bearer token)
-- **Response**:
+- **Params**: `:columnId` - ID cột
+- **Body**:
   ```json
   {
-    "columns": [
-      {
-        "id": "col1",
-        "name": "Backlog",
-        "color": "#3B82F6",
-        "order": 0
-      },
-      {
-        "id": "col2",
-        "name": "In Review",
-        "color": "#F59E0B",
-        "order": 1
-      }
-    ]
+    "name": "High Priority",
+    "color": "#FF4500",
+    "isVisible": true
   }
   ```
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column updated successfully",
+    "data": {
+      "id": "urgent_1735901234567",
+      "name": "High Priority",
+      "color": "#FF4500",
+      "isVisible": true
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Không thể cập nhật `gmailLabel` trực tiếp (dùng endpoint `remap-label` thay thế)
+  - Frontend sử dụng optimistic update với rollback khi lỗi
 
-#### POST /kanban/columns
-- **Mục đích**: Tạo custom column mới trong Kanban
+---
+
+#### POST /kanban/columns/reorder
+- **Mục đích**: Sắp xếp lại thứ tự các cột (thay đổi thứ tự hiển thị)
 - **Auth**: Required (Bearer token)
 - **Body**:
   ```json
   {
-    "name": "Testing",
-    "color": "#10B981",
-    "order": 2
+    "columnOrder": [
+      "urgent_1735901234567",
+      "todo",
+      "done_1735901234567"
+    ]
   }
   ```
-- **Response**:
+- **Response 200**:
   ```json
   {
     "status": 200,
-    "message": "Column created successfully",
+    "message": "Columns reordered successfully",
     "data": {
-      "id": "col3",
-      "name": "Testing",
-      "color": "#10B981",
-      "order": 2
+      "columns": [
+        {
+          "id": "urgent_1735901234567",
+          "name": "Urgent",
+          "order": 0
+        },
+        {
+          "id": "todo",
+          "name": "To Do",
+          "order": 1
+        },
+        {
+          "id": "done_1735901234567",
+          "name": "Done",
+          "order": 2
+        }
+      ]
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Frontend sử dụng optimistic update và hiển thị success toast
+  - Rollback và error toast nếu API call thất bại
+
+---
+
+#### POST /kanban/columns/:columnId/remap-label
+- **Mục đích**: Ánh xạ lại cột tới Gmail label khác (dùng cho recovery sau khi label bị xóa)
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột cần remap
+- **Body**:
+  ```json
+  {
+    "gmailLabel": "Label_789",
+    "gmailLabelName": "Urgent Tasks",
+    "createNewLabel": false
+  }
+  ```
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column remapped to label \"Urgent Tasks\" successfully",
+    "data": {
+      "id": "urgent_1735901234567",
+      "name": "Urgent",
+      "gmailLabel": "Label_789",
+      "gmailLabelName": "Urgent Tasks",
+      "hasLabelError": false,
+      "labelErrorMessage": null
+    }
+  }
+  ```
+- **Use Cases**:
+  - **Gmail label bị xóa**: User có thể remap cột tới label mới/hiện có
+  - **Thay đổi label mapping**: Chuyển cột sang label khác mà không cần tạo lại cột
+- **Lưu ý**:
+  - Xóa flag `hasLabelError` khi remap thành công
+  - Sử dụng bởi component `RecoverLabelModal` với optimistic update
+
+---
+
+#### POST /kanban/columns/:columnId/delete
+- **Mục đích**: Xóa cột Kanban (tùy chọn xóa Gmail label)
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột cần xóa
+- **Body**:
+  ```json
+  {
+    "deleteGmailLabel": false
+  }
+  ```
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column deleted successfully",
+    "data": {
+      "deletedColumnId": "urgent_1735901234567",
+      "gmailLabelDeleted": false
+    }
+  }
+  ```
+- **Lưu ý**:
+  - **Optimistic deletion**: Frontend xóa cột ngay lập tức, rollback khi lỗi
+  - Không thể xóa system columns (`isSystem: true`)
+  - Nếu `deleteGmailLabel: true`, cũng xóa Gmail label (cẩn thận!)
+
+---
+
+#### POST /kanban/columns/:columnId/clear-error
+- **Mục đích**: Xóa flag lỗi label (sau khi user tự tạo lại Gmail label)
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Label error cleared",
+    "data": {
+      "id": "urgent_1735901234567",
+      "hasLabelError": false,
+      "labelErrorMessage": null
+    }
+  }
+  ```
+
+---
+
+#### GET /kanban/columns/:columnId/emails
+- **Mục đích**: Lấy danh sách emails cho một cột Kanban cụ thể
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột
+- **Query**: 
+  - `limit` (tùy chọn): Số email tối đa trả về (mặc định: 50)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "messages": [
+        {
+          "id": "msg_123abc",
+          "threadId": "thread_456def",
+          "subject": "Project Update",
+          "from": "Alice <alice@example.com>",
+          "to": "me@gmail.com",
+          "snippet": "Here's the latest update on the project...",
+          "summary": "Alice provides a project status update with three key milestones.",
+          "date": "2026-01-03T09:15:00.000Z",
+          "isUnread": true,
+          "hasAttachment": false,
+          "labelIds": ["STARRED", "INBOX"],
+          "htmlBody": "<div>...</div>",
+          "textBody": "Here's the latest update..."
+        }
+      ],
+      "total": 15
+    }
+  }
+  ```
+- **Response 404 - Label Error**:
+  ```json
+  {
+    "status": 404,
+    "message": "Gmail label not found. It may have been deleted.",
+    "data": {
+      "hasLabelError": true,
+      "labelErrorMessage": "Gmail label not found",
+      "labelErrorDetectedAt": "2026-01-03T10:00:00.000Z"
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Trả về emails có `gmailLabel` của cột từ Gmail API
+  - Bao gồm AI summary nếu đã được tạo trước đó
+  - `hasLabelError: true` kích hoạt recovery UI ở frontend
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/kanban/columns/todo/emails?limit=50`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const data = await res.json();
+  console.log('Emails in To Do:', data.data.messages);
+  ```
+
+---
+
+#### GET /mail/inbox
+- **Mục đích**: Lấy emails từ Gmail INBOX label (endpoint đặc biệt cho cột inbox)
+- **Auth**: Required (Bearer token)
+- **Query**: 
+  - `limit` (tùy chọn): Số email tối đa (mặc định: 50)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "messages": [
+      {
+        "id": "msg_789xyz",
+        "threadId": "thread_012abc",
+        "subject": "Meeting Tomorrow",
+        "from": "Bob <bob@example.com>",
+        "snippet": "Don't forget our meeting tomorrow at 2pm",
+        "date": "2026-01-03T08:00:00.000Z",
+        "isUnread": true,
+        "hasAttachment": false,
+        "labelIds": ["INBOX"],
+        "htmlBody": "<div>...</div>"
+      }
+    ]
+  }
+  ```
+- **Lưu ý**:
+  - Frontend áp dụng **client-side deduplication** (xóa emails đã có trong cột khác)
+  - Được fetch **SAU CÙNG** sau tất cả cột khác để đảm bảo filtering chính xác
+- **Example**:
+  ```js
+  // Frontend fetching strategy
+  // 1. Fetch non-inbox columns first
+  await Promise.all(
+    nonInboxColumns.map(col => fetchColumnEmails(col.id))
+  );
+  
+  // 2. Fetch inbox LAST for accurate deduplication
+  const inboxRes = await fetch(BACKEND + '/mail/inbox?limit=50', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  
+  // 3. Filter out emails already in other columns
+  const inboxEmails = inboxRes.messages.filter(email =>
+    !otherColumnEmailIds.has(email.id)
+  );
+  ```
+
+---
+
+#### POST /kanban/move
+- **Mục đích**: Di chuyển email giữa các cột Kanban (thay đổi Gmail labels)
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "emailId": "msg_123abc",
+    "threadId": "thread_456def",
+    "fromColumnId": "inbox",
+    "toColumnId": "todo",
+    "destinationIndex": 0
+  }
+  ```
+- **Parameters**:
+  - `emailId` (string, bắt buộc): Gmail message ID
+  - `threadId` (string, bắt buộc): Gmail thread ID
+  - `fromColumnId` (string, bắt buộc): ID cột nguồn
+  - `toColumnId` (string, bắt buộc): ID cột đích
+  - `destinationIndex` (number, tùy chọn): Vị trí trong cột đích (chỉ UI, không persist)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email moved successfully",
+    "data": {
+      "emailId": "msg_123abc",
+      "fromColumnId": "inbox",
+      "toColumnId": "todo",
+      "addedLabels": ["STARRED"],
+      "removedLabels": ["INBOX"],
+      "newMetadata": {
+        "cachedColumnId": "todo",
+        "labelIds": ["STARRED", "IMPORTANT"],
+        "kanbanUpdatedAt": "2026-01-03T10:30:00.000Z"
+      }
+    }
+  }
+  ```
+- **Special Cases**:
+  1. **Từ Inbox → Cột khác**:
+     - Xóa label `INBOX` (archives email trong Gmail)
+     - Thêm label của cột đích
+  2. **Từ Cột khác → Inbox**:
+     - Thêm label `INBOX` (un-archives email)
+     - Xóa label của cột nguồn
+  3. **Auto-Summary Generation**:
+     - Nếu di chuyển TỪ inbox VÀ email chưa có summary
+     - Backend tự động queue AI summarization task
+- **Lưu ý**:
+  - **Optimistic UI**: Frontend di chuyển email ngay lập tức, revert khi lỗi
+  - **EventEmitter**: Backend emit event `email.moved` để xử lý async
+  - **MongoDB Cache**: Cập nhật `EmailMetadata.cachedColumnId` và `labelIds`
+- **Example**:
+  ```js
+  // Optimistic move with rollback
+  const backup = [...columns];
+  setColumns(optimisticUpdate);
+  
+  try {
+    await fetch(BACKEND + '/kanban/move', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        emailId: email.id,
+        threadId: email.threadId,
+        fromColumnId: 'inbox',
+        toColumnId: 'todo'
+      })
+    });
+    showToast('Moved to To Do', 'success');
+  } catch (error) {
+    setColumns(backup); // Rollback
+    showToast('Failed to move email', 'error');
+  }
+  ```
+
+---
+
+#### GET /kanban/validate-labels
+- **Mục đích**: Validate tất cả Gmail labels của các cột vẫn tồn tại (check label bị xóa)
+- **Auth**: Required (Bearer token)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "isValid": false,
+      "duplicates": [
+        {
+          "label": "STARRED",
+          "columns": ["todo", "urgent_1735901234567"]
+        }
+      ],
+      "missing": [
+        {
+          "columnId": "done_1735901234567",
+          "columnName": "Done",
+          "gmailLabel": "Label_123"
+        }
+      ]
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Dùng cho health checks và diagnostics
+  - Missing labels kích hoạt recovery UI
+
+---
+
+#### POST /kanban/fix-duplicate-labels
+- **Mục đích**: Tự động fix các label mapping bị duplicate (admin/repair endpoint)
+- **Auth**: Required (Bearer token)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Fixed 1 duplicate label mapping(s)",
+    "data": {
+      "fixed": [
+        {
+          "columnId": "urgent_1735901234567",
+          "oldLabel": "STARRED",
+          "newLabel": "Label_999",
+          "newLabelName": "Urgent (fixed)"
+        }
+      ]
     }
   }
   ```

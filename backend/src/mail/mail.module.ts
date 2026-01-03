@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { MailController } from './mail.controller';
 import { GmailService } from './gmail.service';
 import { SnoozeService } from './snooze.service';
@@ -8,6 +9,7 @@ import { FuzzySearchService } from './fuzzy-search.service';
 import { SemanticSearchService } from './semantic-search.service';
 import { SearchSuggestionsService } from './search-suggestions.service';
 import { KanbanConfigService } from './kanban-config.service';
+import { GmailSyncListener } from './gmail-sync.listener';
 import { EmailMetadata, EmailMetadataSchema } from './schemas/email-metadata.schema';
 import { KanbanConfig, KanbanConfigSchema } from './schemas/kanban-config.schema';
 import { SearchSuggestionCache, SearchSuggestionCacheSchema } from './schemas/search-suggestion-cache.schema';
@@ -18,6 +20,7 @@ import { AiModule } from '../ai/ai.module';
   imports: [
     forwardRef(() => AuthModule), // Use forwardRef to avoid circular dependency
     AiModule,
+    EventEmitterModule.forRoot(), // Enable EventEmitter2 for async events
     MongooseModule.forFeature([
       { name: EmailMetadata.name, schema: EmailMetadataSchema },
       { name: KanbanConfig.name, schema: KanbanConfigSchema },
@@ -33,6 +36,7 @@ import { AiModule } from '../ai/ai.module';
     SemanticSearchService,
     SearchSuggestionsService,
     KanbanConfigService,
+    GmailSyncListener, // 🔥 NEW: Event listener for Gmail sync
   ],
   exports: [
     GmailService, 

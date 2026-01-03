@@ -46,6 +46,7 @@ export function useMailFolder({
         const token =
           typeof window !== "undefined" ? window.__accessToken : null;
         if (!token) {
+          setError("Authentication token is missing. Please log in again.");
           setIsLoading(false);
           return;
         }
@@ -67,6 +68,12 @@ export function useMailFolder({
             Authorization: `Bearer ${token}`,
           },
         });
+
+        if (response.status === 401) {
+          setError("Session expired. Please log in again.");
+          setIsLoading(false);
+          return;
+        }
 
         if (!response.ok) throw new Error("Failed to fetch mails");
 

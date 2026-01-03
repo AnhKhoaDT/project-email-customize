@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, Req, UseGuards, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GmailService } from './gmail.service';
@@ -14,6 +14,8 @@ import { ReplyEmailDto } from './dto/reply-email.dto';
 import { ModifyEmailDto } from './dto/modify-email.dto';
 import { ToggleLabelDto } from './dto/toggle-label.dto';
 import { SearchEmailDto } from './dto/search-email.dto';
+import { MoveEmailDto } from './dto/move-email.dto';
+import { UpdateColumnDto } from './dto/update-column.dto';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -257,128 +259,75 @@ export class MailController {
 
 
 
-  @UseGuards(JwtAuthGuard)
-  @Get('kanban/columns/:status/emails')
-  async getColumnEmails(
-    @Req() req: any,
-    @Param('status') status: string,
-    @Query('limit') limit?: string,
-  ) {
-    try {
-      // Validate status (chỉ cho phép TODO, IN_PROGRESS, DONE)
-      const validStatuses = ['TODO', 'IN_PROGRESS', 'DONE'];
-      if (!validStatuses.includes(status)) {
-        return { status: 400, message: 'Invalid status. Use TODO, IN_PROGRESS, or DONE' };
-      }
+  // ============================================
+  // DEPRECATED ENDPOINT - DO NOT USE
+  // Use getCustomColumnEmails instead (line ~780)
+  // ============================================
+  // @UseGuards(JwtAuthGuard)
+  // @Get('kanban/columns/:status/emails')
+  // async getColumnEmails(
+  //   @Req() req: any,
+  //   @Param('status') status: string,
+  //   @Query('limit') limit?: string,
+  // ) {
+  //   try {
+  //     // Validate status (chỉ cho phép TODO, IN_PROGRESS, DONE)
+  //     const validStatuses = ['TODO', 'IN_PROGRESS', 'DONE'];
+  //     if (!validStatuses.includes(status)) {
+  //       return { status: 400, message: 'Invalid status. Use TODO, IN_PROGRESS, or DONE' };
+  //     }
+  //
+  //     // BƯỚC 1: Lấy emails từ MongoDB theo status (chỉ emails đã trong Kanban)
+  //     const dbEmails = await this.emailMetadataService.getEmailsByStatus(req.user.id, status);
+  //     
+  //     const pageSize = limit ? parseInt(limit, 10) : 50;
+  //     const limitedEmails = dbEmails.slice(0, pageSize);
+  //     
+  //     // BƯỚC 2: Fetch full data từ Gmail cho mỗi email
+  //     const emailsWithFullData = await Promise.all(
+  //       limitedEmails.map(async (dbEmail) => {
+  //         try {
+  //           const gmailData = await this.gmailService.getMessage(req.user.id, dbEmail.emailId);
+  //           return {
+  //             ...gmailData,
+  //             cachedColumnId: dbEmail.cachedColumnId,           // Từ DB
+  //             cachedColumnName: dbEmail.cachedColumnName,       // Từ DB
+  //             labelIds: dbEmail.labelIds,                       // Từ DB
+  //             kanbanUpdatedAt: dbEmail.kanbanUpdatedAt,        // Từ DB
+  //             summary: dbEmail.summary,                        // Từ DB (nếu có)
+  //           };
+  //         } catch (error) {
+  //           // Fallback: use cached data from DB
+  //           return {
+  //             id: dbEmail.emailId,
+  //             threadId: dbEmail.threadId,
+  //             subject: dbEmail.subject || '(Error loading)',
+  //             from: dbEmail.from || '',
+  //             snippet: dbEmail.snippet || '',
+  //             cachedColumnId: dbEmail.cachedColumnId,
+  //             cachedColumnName: dbEmail.cachedColumnName,
+  //             labelIds: dbEmail.labelIds,
+  //             summary: dbEmail.summary,
+  //           };
+  //         }
+  //       })
+  //     );
+  //
+  //     return { 
+  //       status: 200, 
+  //       data: {
+  //         messages: emailsWithFullData,
+  //         total: dbEmails.length
+  //       }
+  //     };
+  //   } catch (err) {
+  //     return { status: 500, message: err?.message || 'Failed to get column emails' };
+  //   }
+  // }
 
-      // BƯỚC 1: Lấy emails từ MongoDB theo status (chỉ emails đã trong Kanban)
-      const dbEmails = await this.emailMetadataService.getEmailsByStatus(req.user.id, status);
-      
-      const pageSize = limit ? parseInt(limit, 10) : 50;
-      const limitedEmails = dbEmails.slice(0, pageSize);
-      
-      // BƯỚC 2: Fetch full data từ Gmail cho mỗi email
-      const emailsWithFullData = await Promise.all(
-        limitedEmails.map(async (dbEmail) => {
-          try {
-            const gmailData = await this.gmailService.getMessage(req.user.id, dbEmail.emailId);
-            return {
-              ...gmailData,
-              status: dbEmail.status,           // Từ DB
-              statusUpdatedAt: dbEmail.statusUpdatedAt, // Từ DB
-              summary: dbEmail.summary,         // Từ DB (nếu có)
-            };
-          } catch (error) {
-            // Fallback: use cached data from DB
-            return {
-              id: dbEmail.emailId,
-              threadId: dbEmail.threadId,
-              subject: dbEmail.subject || '(Error loading)',
-              from: dbEmail.from || '',
-              snippet: dbEmail.snippet || '',
-              status: dbEmail.status,
-              summary: dbEmail.summary,
-            };
-          }
-        })
-      );
-
-      return { 
-        status: 200, 
-        data: {
-          messages: emailsWithFullData,
-          total: dbEmails.length
-        }
-      };
-    } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to get column emails' };
-    }
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Post('emails/:id/move')
-  async moveEmail(
-    @Req() req: any,
-    @Param('id') emailId: string,
-    @Body() body: { threadId: string; toStatus: string }
-  ) {
-    try {
-      const validStatuses = ['INBOX', 'TODO', 'IN_PROGRESS', 'DONE'];
-      if (!validStatuses.includes(body.toStatus)) {
-        return { status: 400, message: 'Invalid status' };
-      }
-
-      let created = false;
-      let message = '';
-
-      if (body.toStatus === 'INBOX') {
-        // Case: Kanban → INBOX (DELETE from database)
-        await this.emailMetadataService.deleteEmail(req.user.id, emailId);
-        message = 'Email removed from Kanban';
-        created = false;
-      } else {
-        // Case: INBOX → Kanban (INSERT) hoặc Kanban → Kanban (UPDATE)
-        const existing = await this.emailMetadataService.findEmail(req.user.id, emailId);
-        
-        if (existing) {
-          // Update existing record
-          await this.emailMetadataService.updateEmailStatus(
-            req.user.id,
-            emailId,
-            body.threadId,
-            body.toStatus
-          );
-          message = `Email moved to ${body.toStatus}`;
-          created = false;
-        } else {
-          // Create new record (INBOX → Kanban)
-          // Fetch email data để cache
-          const emailData = await this.gmailService.getMessage(req.user.id, emailId);
-          
-          await this.emailMetadataService.createEmailMetadata({
-            userId: req.user.id,
-            emailId,
-            threadId: body.threadId,
-            status: body.toStatus,
-            subject: emailData.subject,
-            from: emailData.from,
-            snippet: emailData.snippet,
-            receivedDate: new Date(emailData.date || Date.now()),
-          });
-          message = `Email added to Kanban (${body.toStatus})`;
-          created = true;
-        }
-      }
-
-      return { 
-        status: 200, 
-        message,
-        data: { emailId, newStatus: body.toStatus, created }
-      };
-    } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to move email' };
-    }
-  }
+  // ⚠️ DEPRECATED: Old moveEmail endpoint removed
+  // Use POST /api/kanban/move instead (Dynamic Kanban - Week 4)
+  // See line ~858 for new implementation
 
 
 
@@ -733,7 +682,7 @@ export class MailController {
   @Post('kanban/columns')
   async createColumn(
     @Req() req: any,
-    @Body() body: { name: string; gmailLabel?: string; color?: string }
+    @Body() body: { name: string; gmailLabel?: string; color?: string; createNewLabel?: boolean }
   ) {
     try {
       if (!body.name || body.name.trim().length === 0) {
@@ -743,22 +692,37 @@ export class MailController {
       const result = await this.kanbanConfigService.createColumn(req.user.id, body);
       return result;
     } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to create column' };
+      // Validation errors (duplicate label/name) should return 400
+      const isValidationError = err?.message?.includes('already mapped') || 
+                                err?.message?.includes('already exists');
+      
+      return { 
+        status: isValidationError ? 400 : 500, 
+        message: err?.message || 'Failed to create column' 
+      };
     }
   }
 
   @UseGuards(JwtAuthGuard)
-  @Post('kanban/columns/:columnId')
+  @Put('kanban/columns/:columnId')
   async updateColumn(
     @Req() req: any,
     @Param('columnId') columnId: string,
-    @Body() body: { name?: string; gmailLabel?: string; color?: string; isVisible?: boolean }
+    @Body() body: UpdateColumnDto
   ) {
     try {
       const result = await this.kanbanConfigService.updateColumn(req.user.id, columnId, body);
       return result;
     } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to update column' };
+      // Validation errors (duplicate label/name) should return 400
+      const isValidationError = err?.message?.includes('already mapped') || 
+                                err?.message?.includes('already exists') ||
+                                err?.message?.includes('not found');
+      
+      return { 
+        status: isValidationError ? 400 : 500, 
+        message: err?.message || 'Failed to update column' 
+      };
     }
   }
 
@@ -776,6 +740,11 @@ export class MailController {
     }
   }
 
+  /**
+   * Reorder Kanban columns
+   * POST /api/kanban/columns/reorder
+   * Body: { columnOrder: string[] }
+   */
   @UseGuards(JwtAuthGuard)
   @Post('kanban/columns/reorder')
   async reorderColumns(
@@ -783,16 +752,52 @@ export class MailController {
     @Body() body: { columnOrder: string[] }
   ) {
     try {
-      if (!body.columnOrder || !Array.isArray(body.columnOrder)) {
-        return { status: 400, message: 'columnOrder array is required' };
-      }
-
-      const result = await this.kanbanConfigService.reorderColumns(req.user.id, body.columnOrder);
+      const result = await this.kanbanConfigService.reorderColumns(req.user.id, body.columnOrder || []);
       return result;
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to reorder columns' };
     }
   }
+
+  // ============================================
+  // ADMIN/DEBUG ENDPOINTS - Duplicate Label Management
+  // ============================================
+
+  @UseGuards(JwtAuthGuard)
+  @Get('kanban/validate-labels')
+  async validateLabels(@Req() req: any) {
+    try {
+      const result = await this.kanbanConfigService.validateNoDuplicateLabels(req.user.id);
+      return {
+        status: 200,
+        data: result,
+        message: result.isValid ? 'No duplicate labels found' : 'Duplicate labels detected'
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to validate labels' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/fix-duplicate-labels')
+  async fixDuplicateLabels(@Req() req: any) {
+    try {
+      const result = await this.kanbanConfigService.fixDuplicateLabels(req.user.id);
+      return {
+        status: 200,
+        data: result,
+        message: result.fixed > 0 
+          ? `Fixed ${result.fixed} duplicate label(s)` 
+          : 'No duplicates found'
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to fix duplicate labels' };
+    }
+  }
+
+  // ============================================
+  // KANBAN EMAIL RETRIEVAL
+  // ============================================
 
   @UseGuards(JwtAuthGuard)
   @Get('kanban/columns/:columnId/emails')
@@ -822,6 +827,88 @@ export class MailController {
       return result;
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to get column emails' };
+    }
+  }
+
+  // ============================================
+  // 🔥 REFINEMENT: MOVE EMAIL ENDPOINT
+  // ============================================
+  /**
+   * Move email between Kanban columns with Gmail label sync
+   * 
+   * WEEK 4 - Dynamic Kanban Configuration
+   * 
+   * Flow:
+   * 1. Update EmailMetadata (labelIds + cachedColumnId)
+   * 2. Emit event for async Gmail API sync
+   * 3. Return immediately (Optimistic UI)
+   * 
+   * POST /api/kanban/move
+   * Body: { emailId, fromColumnId, toColumnId, optimistic? }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/move')
+  async moveEmail(
+    @Req() req: any,
+    @Body() dto: MoveEmailDto
+  ) {
+    try {
+      const result = await this.kanbanConfigService.moveEmail(req.user.id, dto);
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to move email' };
+    }
+  }
+
+  // ============================================
+  // LABEL ERROR RECOVERY ENDPOINTS
+  // ============================================
+
+  /**
+   * Remap column to a different Gmail label
+   * Used when original label is deleted
+   * 
+   * PUT /api/kanban/columns/:columnId/remap-label
+   * Body: { newGmailLabel, createNewLabel? }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/columns/:columnId/remap-label')
+  async remapColumnLabel(
+    @Req() req: any,
+    @Param('columnId') columnId: string,
+    @Body() body: { newGmailLabel?: string; createNewLabel?: boolean; labelName?: string; color?: string }
+  ) {
+    try {
+      const result = await this.kanbanConfigService.remapColumnLabel(
+        req.user.id,
+        columnId,
+        body.newGmailLabel,
+        body.createNewLabel,
+        body.labelName,
+        body.color
+      );
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to remap label' };
+    }
+  }
+
+  /**
+   * Clear label error state (for manual recovery)
+   * 
+   * POST /api/kanban/columns/:columnId/clear-error
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('kanban/columns/:columnId/clear-error')
+  async clearColumnError(
+    @Req() req: any,
+    @Param('columnId') columnId: string
+  ) {
+    try {
+      const result = await this.kanbanConfigService.clearColumnError(req.user.id, columnId);
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to clear error' };
     }
   }
 }

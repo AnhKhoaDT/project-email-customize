@@ -5,6 +5,7 @@ import ThemeProviders from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
 import { AuthInitializer } from "@/components/auth-initializer"; // Vẫn giữ để check user session
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { ToastProvider } from "@/contexts/toast-context";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,10 +37,12 @@ export default function RootLayout({
         <GoogleOAuthProvider clientId={googleClientId}>
           <ThemeProviders attribute="class" defaultTheme="system" enableSystem>
             <AuthProvider>
-              <AuthInitializer>
-                {/* Chỉ render children thuần túy, layout con sẽ lo phần Sidebar */}
-                {children}
-              </AuthInitializer>
+              <ToastProvider>
+                <AuthInitializer>
+                  {/* Chỉ render children thuần túy, layout con sẽ lo phần Sidebar */}
+                  {children}
+                </AuthInitializer>
+              </ToastProvider>
             </AuthProvider>
           </ThemeProviders>
         </GoogleOAuthProvider>

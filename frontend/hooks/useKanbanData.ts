@@ -1,15 +1,19 @@
-import { useState, useEffect, useCallback } from "react";
-import {
-  fetchKanbanColumnEmails,
+import { useState, useEffect, useCallback, useRef } from "react";
+import api, {
+  fetchKanbanConfig,
+  fetchColumnEmails,
   fetchInboxEmails,
   fetchSnoozedEmails,
-  moveEmailToColumn,
+  moveEmail,
   generateEmailSummary,
   snoozeEmail as snoozeEmailAPI,
   unsnoozeEmail as unsnoozeEmailAPI,
+  deleteKanbanColumn,
+  updateKanbanColumn,
 } from "@/lib/api";
 
-interface KanbanEmail {
+// --- TYPES ---
+export interface KanbanEmail {
   id: string;
   threadId: string;
   sender: string;
@@ -17,6 +21,7 @@ interface KanbanEmail {
   snippet: string;
   summary?: string;
   from: string;
+  to?: string; // Add to field
   date: string;
   time: string;
   avatar: string;
@@ -24,29 +29,49 @@ interface KanbanEmail {
   status?: string;
   isSnoozed?: boolean;
   snoozedUntil?: string;
-
   isUnread: boolean;
   hasAttachment: boolean;
+  labelIds?: string[]; // Add labelIds for checking SENT
+  htmlBody?: string; // Add htmlBody for mail content
+  textBody?: string; // Add textBody for mail content
 }
 
-interface KanbanColumns {
-  inbox: KanbanEmail[];
-  todo: KanbanEmail[];
-  done: KanbanEmail[];
-  snoozed: KanbanEmail[];
+// Thay đổi quan trọng: Column là một object trong mảng
+export interface Column {
+  id: string;
+  title: string;
+  isSystem: boolean;
+  items: KanbanEmail[];
+  color?: string;
+  gmailLabel?: string;
+  gmailLabelName?: string;
+  hasLabelError?: boolean;
+  labelErrorMessage?: string;
+  labelErrorDetectedAt?: string;
 }
 
 export const useKanbanData = () => {
-  const [columns, setColumns] = useState<KanbanColumns>({
-    inbox: [],
-    todo: [],
-    done: [],
-    snoozed: [],
-  });
+  // Initial State: Mảng các cột mặc định
+  const [columns, setColumns] = useState<Column[]>([
+    { id: "inbox", title: "Inbox", isSystem: true, items: [], color: "#3b82f6" },
+    { id: "todo", title: "To Do", isSystem: false, items: [], color: "#f97316" },
+    { id: "done", title: "Done", isSystem: true, items: [], color: "#22c55e" },
+    // Cột snoozed có thể ẩn hoặc hiện tùy logic, ở đây tôi tạm ẩn khỏi mảng chính
+    // và xử lý logic riêng nếu cần, hoặc bạn có thể push vào đây nếu muốn hiện cột Snoozed
+  ]);
+
+  // Per-column loading states
+  const [columnLoadingStates, setColumnLoadingStates] = useState<Record<string, boolean>>({});
+  // Ref mirror to avoid stale closures when checking loading states inside callbacks
+  const columnLoadingRef = useRef<Record<string, boolean>>({});
+
+  // Chúng ta vẫn giữ state snoozed riêng để tính toán logic "đánh thức" email
+  const [snoozedItems, setSnoozedItems] = useState<KanbanEmail[]>([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Transform backend email to frontend format
+  // --- HELPER: Transform Data ---
   const transformEmail = (email: any): KanbanEmail => {
     const getSenderName = (fromStr: string) => {
       if (!fromStr) return "Unknown";
@@ -60,13 +85,7 @@ export const useKanbanData = () => {
     };
 
     const getColor = () => {
-      const colors = [
-        "bg-blue-500",
-        "bg-purple-500",
-        "bg-green-500",
-        "bg-orange-500",
-        "bg-red-500",
-      ];
+      const colors = ["bg-blue-500", "bg-purple-500", "bg-green-500", "bg-orange-500", "bg-red-500"];
       return colors[Math.floor(Math.random() * colors.length)];
     };
 
@@ -74,7 +93,6 @@ export const useKanbanData = () => {
       const date = new Date(dateStr);
       const now = new Date();
       const diffHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-
       if (diffHours < 1) return "Just now";
       if (diffHours < 24) return `${Math.floor(diffHours)}h ago`;
       if (diffHours < 48) return "Yesterday";
@@ -101,276 +119,543 @@ export const useKanbanData = () => {
     };
   };
 
-  // Fetch Kanban data from multiple endpoints
+  // --- FETCH DATA ---
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      // Fetch all columns in parallel
-      const [inboxRes, todoRes, doneRes, snoozedRes] = await Promise.allSettled(
-        [
-          fetchInboxEmails(50),
-          fetchKanbanColumnEmails("TODO"),
-          fetchKanbanColumnEmails("DONE"),
-          fetchSnoozedEmails(),
-        ]
-      );
-
-      // Extract data from responses
-      const inboxRaw =
-        inboxRes.status === "fulfilled"
-          ? inboxRes.value?.messages || inboxRes.value?.data?.messages || []
-          : [];
-      const todo =
-        todoRes.status === "fulfilled"
-          ? todoRes.value?.data?.messages || []
-          : [];
-      const done =
-        doneRes.status === "fulfilled"
-          ? doneRes.value?.data?.messages || []
-          : [];
-      const snoozed =
-        snoozedRes.status === "fulfilled" ? snoozedRes.value?.data || [] : [];
-
-      // Get email IDs already in Kanban to filter out from inbox
-      const kanbanEmailIds = new Set([
-        ...todo.map((e: any) => e.id),
-        ...done.map((e: any) => e.id),
-        ...snoozed.map((e: any) => e.id),
-      ]);
-
-      // Filter inbox: exclude emails already in TODO/DONE/Snoozed
-      const inbox = inboxRaw.filter((e: any) => !kanbanEmailIds.has(e.id));
-
-      setColumns({
-        inbox: inbox.map(transformEmail),
-        todo: todo.map(transformEmail),
-        done: done.map(transformEmail),
-        snoozed: snoozed.map(transformEmail),
+      // 1. Fetch Kanban Config first (to get column list)
+      const configRes = await fetchKanbanConfig();
+      const backendColumns = configRes?.data?.columns || [];
+      
+      console.log('🔍 Backend columns received:', backendColumns);
+      console.log('📊 Total columns:', backendColumns.length);
+      backendColumns.forEach((col: any) => {
+        console.log(`  - Column: "${col.name}" (id: ${col.id}, gmailLabel: ${col.gmailLabel})`);
       });
+
+      // 2. Fetch snoozed emails
+      const snoozedRes = await fetchSnoozedEmails().catch(() => ({ data: [] }));
+      const snoozedRaw = snoozedRes?.data || [];
+      setSnoozedItems(snoozedRaw.map(transformEmail));
+
+      // 3. Build initial columns structure (empty items, will be loaded separately)
+      const fixedInboxColumn: Column = {
+        id: "inbox",
+        title: "Inbox",
+        isSystem: true,
+        color: "#3b82f6",
+        gmailLabel: "INBOX",
+        items: [] // Will be fetched separately
+      };
+
+      const mappedBackendColumns: Column[] = backendColumns.map((col: any) => ({
+        id: col.id,
+        title: col.name,
+        isSystem: col.isSystem || false,
+        color: col.color || "#64748b",
+        gmailLabel: col.gmailLabel,
+        hasLabelError: col.hasLabelError,
+        labelErrorMessage: col.labelErrorMessage,
+        items: [] // Will be fetched separately
+      }));
+
+      // If backend has no columns, default to Inbox / To Do / Done
+      let finalColumns: Column[];
+      if (!backendColumns || backendColumns.length === 0) {
+        console.log('🏗️ No backend columns found - creating defaults...');
+        
+        // Create default columns in backend
+        try {
+          // To Do → STARRED (system label, widely used)
+          const todoRes = await api.post('/kanban/columns', {
+            name: 'To Do',
+            color: '#f97316',
+            gmailLabel: 'STARRED',
+            createNewLabel: false // STARRED already exists
+          });
+          
+          // Done → custom "Done" label
+          const doneRes = await api.post('/kanban/columns', {
+            name: 'Done',
+            color: '#22c55e',
+            gmailLabel: 'Done',
+            createNewLabel: true // Create new custom label
+          });
+          
+          const todoData = todoRes?.data?.data || todoRes?.data;
+          const doneData = doneRes?.data?.data || doneRes?.data;
+          
+          const defaultTodo: Column = {
+            id: todoData?.id || 'todo',
+            title: 'To Do',
+            isSystem: false, // User can edit/delete
+            color: '#f97316',
+            gmailLabel: 'STARRED',
+            items: []
+          };
+          
+          const defaultDone: Column = {
+            id: doneData?.id || 'done',
+            title: 'Done',
+            isSystem: false, // User can edit/delete
+            color: '#22c55e',
+            gmailLabel: doneData?.newLabelId || 'Done',
+            gmailLabelName: 'Done',
+            items: []
+          };
+          
+          finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
+          console.log('✅ Default columns created in backend');
+        } catch (err: any) {
+          console.error('❌ Failed to create default columns:', err);
+          // Fallback to client-side only defaults
+          const defaultTodo: Column = { id: "todo", title: "To Do", isSystem: false, color: "#f97316", gmailLabel: "STARRED", items: [] };
+          const defaultDone: Column = { id: "done", title: "Done", isSystem: false, color: "#22c55e", gmailLabel: "Done", items: [] };
+          finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
+        }
+      } else {
+        finalColumns = [fixedInboxColumn, ...mappedBackendColumns];
+      }
+      setColumns(finalColumns);
+
+      console.log('✅ Final columns structure:');
+      finalColumns.forEach(col => {
+        console.log(`  - ${col.title} (id: ${col.id}, gmailLabel: ${col.gmailLabel}, items: ${col.items.length})`);
+      });
+
+      setIsLoading(false);
+
+      // 4. Fetch emails for each column separately (in background)
+      // IMPORTANT: Fetch non-inbox columns FIRST, then inbox LAST
+      // This ensures inbox filtering works correctly
+      
+      // 4a. Separate inbox from other columns
+      const inboxColumn = finalColumns.find(c => c.id === "inbox");
+      const nonInboxColumns = finalColumns.filter(c => c.id !== "inbox");
+      
+      console.log(`📋 Will fetch ${nonInboxColumns.length} non-inbox columns:`, nonInboxColumns.map(c => c.title));
+      
+      // 4b. Fetch all non-inbox columns in parallel FIRST
+      await Promise.all(
+        nonInboxColumns.map(async (col) => {
+          console.log(`📧 Fetching emails for column: ${col.title} (id: ${col.id})`);
+
+          // Skip if this column is already being fetched by another flow
+          if (columnLoadingRef.current[col.id]) {
+            console.log(`  ⏭️ Skipping ${col.id} - already loading (bulk)`);
+            return Promise.resolve();
+          }
+
+          // Mark loading immediately to avoid race conditions
+          columnLoadingRef.current = { ...columnLoadingRef.current, [col.id]: true };
+          setColumnLoadingStates(prev => ({ ...prev, [col.id]: true }));
+
+          try {
+            // Fetch emails for specific column
+            console.log(`  🌐 API call: fetchColumnEmails(${col.id}, limit: 50)`);
+            const res = await fetchColumnEmails(col.id, { limit: 50 });
+
+            console.log(`  📦 API Response:`, res);
+            console.log(`  📦 Response.data:`, res?.data);
+
+            const emails = res?.data?.messages || [];
+
+            console.log(`  ✅ Fetched ${emails.length} emails for column: ${col.title}`);
+
+            // Update column with fetched emails
+            setColumns(prev => prev.map(column => 
+              column.id === col.id 
+                ? { ...column, items: emails.map(transformEmail) }
+                : column
+            ));
+          } catch (err: any) {
+            console.error(`  ❌ Failed to fetch emails for column ${col.title}:`, err);
+            console.error(`     Error details:`, err.response?.data || err.message);
+            // Set error on the column
+            setColumns(prev => prev.map(column => 
+              column.id === col.id 
+                ? { ...column, hasLabelError: true, labelErrorMessage: err?.message || "Failed to load emails" }
+                : column
+            ));
+          } finally {
+            columnLoadingRef.current = { ...columnLoadingRef.current, [col.id]: false };
+            setColumnLoadingStates(prev => ({ ...prev, [col.id]: false }));
+          }
+        })
+      );
+      
+      // 4c. Now fetch inbox LAST, using updated state to filter correctly
+      if (inboxColumn) {
+        setColumnLoadingStates(prev => ({ ...prev, [inboxColumn.id]: true }));
+        
+        try {
+          const inboxRes = await fetchInboxEmails(50);
+          const inboxRaw = inboxRes?.messages || inboxRes?.data?.messages || [];
+          
+          // Filter out emails that are already in other columns
+          // Use functional update to get latest state
+          setColumns(prev => {
+            const otherColumnEmailIds = new Set<string>();
+            prev.forEach(c => {
+              if (c.id !== "inbox" && c.items) {
+                c.items.forEach(email => otherColumnEmailIds.add(email.id));
+              }
+            });
+            
+            const inboxFiltered = inboxRaw.filter((e: any) => !otherColumnEmailIds.has(e.id));
+            
+            return prev.map(column => 
+              column.id === inboxColumn.id 
+                ? { ...column, items: inboxFiltered.map(transformEmail) }
+                : column
+            );
+          });
+        } catch (err: any) {
+          console.error(`Failed to fetch emails for inbox:`, err);
+          setColumns(prev => prev.map(column => 
+            column.id === inboxColumn.id 
+              ? { ...column, hasLabelError: true, labelErrorMessage: err?.message || "Failed to load emails" }
+              : column
+          ));
+        } finally {
+          setColumnLoadingStates(prev => ({ ...prev, [inboxColumn.id]: false }));
+        }
+      }
+
     } catch (err: any) {
       console.error("Failed to fetch Kanban data:", err);
       setError(err?.response?.data?.message || "Failed to load emails");
-    } finally {
       setIsLoading(false);
     }
   }, []);
 
-  // Move email between columns
-  const moveEmail = useCallback(
-    async (
-      emailId: string,
-      threadId: string,
-      fromColumn: string,
-      toColumn: string,
-      destinationIndex?: number
-    ) => {
-      // Map column names to backend status values
-      const columnToStatus: Record<string, string> = {
-        inbox: "INBOX",
-        todo: "TODO",
-        inProgress: "IN_PROGRESS",
-        done: "DONE",
-      };
+  // --- FETCH COLUMN DATA (Individual Column) ---
+  const fetchColumnData = useCallback(async (columnId: string, limit: number = 50) => {
+    // Prevent duplicate fetches for the same column
+    if (columnLoadingRef.current[columnId]) {
+      console.log(`Skipping fetch for ${columnId} because it's already loading`);
+      return;
+    }
 
-      const toStatus = columnToStatus[toColumn] || toColumn.toUpperCase();
+    // Mark as loading immediately to avoid race conditions
+    columnLoadingRef.current = { ...columnLoadingRef.current, [columnId]: true };
+    setColumnLoadingStates(prev => ({ ...prev, [columnId]: true }));
 
-      // Check email BEFORE optimistic update
-      const sourceList = columns[fromColumn as keyof KanbanColumns];
-      const emailToMove = sourceList.find((e) => e.id === emailId);
-      const shouldGenerateSummary =
-        fromColumn === "inbox" &&
-        emailToMove &&
-        (!emailToMove.summary ||
-          emailToMove.summary === emailToMove.snippet ||
-          emailToMove.summary === "No summary available");
-
-      // Optimistic update
-      setColumns((prev) => {
-        const sourceList = prev[fromColumn as keyof KanbanColumns];
-        const emailToMove = sourceList.find((e) => e.id === emailId);
-
-        if (!emailToMove) return prev;
-
-        // Remove from source
-        const newSourceList = sourceList.filter((e) => e.id !== emailId);
-
-        // Add to destination at specific index
-        const destList = [...prev[toColumn as keyof KanbanColumns]];
-        if (destinationIndex !== undefined) {
-          destList.splice(destinationIndex, 0, emailToMove);
-        } else {
-          destList.push(emailToMove);
-        }
-
-        return {
-          ...prev,
-          [fromColumn]: newSourceList,
-          [toColumn]: destList,
-        };
-      });
-
-      try {
-        await moveEmailToColumn(emailId, threadId, toStatus);
-
-        // Auto-generate summary if moving from inbox and no summary exists
-        if (shouldGenerateSummary) {
-          generateSummary(emailId, false);
-        }
-      } catch (err: any) {
-        console.error("Failed to move email:", err);
-        // Rollback on error
-        await fetchData();
-        throw err;
-      }
-    },
-    [columns, fetchData]
-  );
-
-  // Generate AI summary for an email
-  const generateSummary = useCallback(
-    async (emailId: string, forceRegenerate = false) => {
-      try {
-        const result = await generateEmailSummary(
-          emailId,
-          forceRegenerate,
-          false
-        );
-
-        // Check for rate limit error
-        if (result.status === 429) {
-          console.warn("Rate limit exceeded:", result.message);
-          return null;
-        }
-
-        // Update summary in state
-        setColumns((prev) => {
-          const updateColumn = (emails: KanbanEmail[]) =>
-            emails.map((email) =>
-              email.id === emailId
-                ? { ...email, summary: result.data?.summary || email.summary }
-                : email
-            );
-
-          return {
-            inbox: updateColumn(prev.inbox),
-            todo: updateColumn(prev.todo),
-            done: updateColumn(prev.done),
-            snoozed: updateColumn(prev.snoozed),
-          };
+    try {
+      // Special handling for inbox
+      if (columnId === "inbox") {
+        const inboxRes = await fetchInboxEmails(limit);
+        const inboxRaw = inboxRes?.messages || inboxRes?.data?.messages || [];
+        
+        // Filter out emails that are already in other columns
+        // Use functional update to get LATEST state (avoid stale closure)
+        setColumns(prev => {
+          const otherColumnEmailIds = new Set<string>();
+          prev.forEach(col => {
+            if (col.id !== "inbox") {
+              col.items.forEach(email => otherColumnEmailIds.add(email.id));
+            }
+          });
+          
+          const inboxFiltered = inboxRaw.filter((e: any) => !otherColumnEmailIds.has(e.id));
+          
+          return prev.map(col => 
+            col.id === columnId 
+              ? { ...col, items: inboxFiltered.map(transformEmail) }
+              : col
+          );
         });
-
-        return result.data?.summary;
-      } catch (err: any) {
-        console.error("Failed to generate summary:", err);
-
-        // Handle rate limit error
-        if (err?.response?.status === 429) {
-          console.warn("Rate limit exceeded");
-        }
-
-        return null;
+      } else {
+        // Fetch emails for specific column
+        const res = await fetchColumnEmails(columnId, { limit });
+        const emails = res?.data?.messages || [];
+        
+        // Update column with fetched emails
+        setColumns(prev => prev.map(col => 
+          col.id === columnId 
+            ? { ...col, items: emails.map(transformEmail) }
+            : col
+        ));
       }
-    },
-    []
-  );
+    } catch (err: any) {
+      console.error(`Failed to fetch emails for column ${columnId}:`, err);
+      // Optionally set error on the column
+      setColumns(prev => prev.map(col => 
+        col.id === columnId 
+          ? { ...col, hasLabelError: true, labelErrorMessage: err?.message || "Failed to load emails" }
+          : col
+      ));
+    } finally {
+      columnLoadingRef.current = { ...columnLoadingRef.current, [columnId]: false };
+      setColumnLoadingStates(prev => ({ ...prev, [columnId]: false }));
+    }
+  }, []);
 
-  // Snooze an email
-  const snoozeEmail = useCallback(
-    async (
-      emailId: string,
-      threadId: string,
-      snoozedUntil: string,
-      sourceColumn: string
-    ) => {
-      // Optimistic update - move to snoozed column
-      setColumns((prev) => {
-        const sourceList = prev[sourceColumn as keyof KanbanColumns];
-        const emailToSnooze = sourceList.find((e) => e.id === emailId);
+  // --- ACTION: ADD COLUMN ---
+  const addColumn = useCallback(async (
+    title: string, 
+    color: string, 
+    gmailLabel?: string, 
+    createNewLabel?: boolean
+  ) => {
+    const tempId = `temp-${Date.now()}`;
+    const newColumn: Column = {
+      id: tempId,
+      title,
+      isSystem: false,
+      items: [],
+      color: color
+    };
 
-        if (!emailToSnooze) return prev;
+    // Optimistic Update
+    setColumns(prev => [...prev, newColumn]);
 
-        const newSourceList = sourceList.filter((e) => e.id !== emailId);
-
-        return {
-          ...prev,
-          [sourceColumn]: newSourceList,
-          snoozed: [
-            ...prev.snoozed,
-            { ...emailToSnooze, isSnoozed: true, snoozedUntil },
-          ],
-        };
+    try {
+      // Gọi API tạo cột với gmailLabel và createNewLabel
+      const res = await api.post('/kanban/columns', { 
+        name: title, 
+        color,
+        gmailLabel,
+        createNewLabel
       });
 
-      try {
-        await snoozeEmailAPI(emailId, threadId, snoozedUntil);
-      } catch (err: any) {
-        console.error("Failed to snooze email:", err);
-        // Rollback on error
-        await fetchData();
-        throw err;
-      }
-    },
-    [fetchData]
-  );
+      // Cập nhật ID thật và emails từ phản hồi API
+      const responseData = res?.data?.data || res?.data;
+      const newId = responseData?.id || tempId;
+      const emails = responseData?.emails || []; // Emails từ backend
+      
+      // Transform emails using the same logic
+      const transformedEmails = emails.map(transformEmail);
+      
+      setColumns(prev => prev.map(c => 
+        c.id === tempId 
+          ? { ...c, id: newId, items: transformedEmails } // Cập nhật với emails
+          : c
+      ));
+    } catch (err) {
+      console.error("Failed to add column", err);
+      // Rollback nếu API thất bại
+      setColumns(prev => prev.filter(c => c.id !== tempId));
+      throw err;
+    }
+  }, []);
 
-  // Unsnooze an email manually
-  const unsnoozeEmail = useCallback(
-    async (emailId: string) => {
-      try {
-        await unsnoozeEmailAPI(emailId);
-        // Refresh data to get updated state from backend
-        await fetchData();
-      } catch (err: any) {
-        console.error("Failed to unsnooze email:", err);
-        throw err;
-      }
-    },
-    [fetchData]
-  );
+  // --- ACTION: DELETE COLUMN ---
+  const deleteColumn = useCallback(async (columnId: string) => {
+    // Backup for rollback
+    const backupColumns = [...columns];
 
-  // Initial load
+    // Optimistic Update: Remove column immediately
+    setColumns(prev => prev.filter(c => c.id !== columnId));
+
+    try {
+      // Gọi API xóa cột
+      await deleteKanbanColumn(columnId);
+    } catch (err) {
+      console.error("Failed to delete column", err);
+      // Rollback nếu API thất bại
+      setColumns(backupColumns);
+      throw err;
+    }
+  }, [columns]);
+
+  // --- ACTION: UPDATE COLUMN TITLE ---
+  const updateColumnTitle = useCallback(async (columnId: string, newTitle: string) => {
+    // Backup for rollback
+    const backupColumns = [...columns];
+
+    // Optimistic Update: Update column title immediately
+    setColumns(prev => prev.map(c => 
+      c.id === columnId ? { ...c, title: newTitle } : c
+    ));
+
+    try {
+      // Gọi API cập nhật cột
+      await updateKanbanColumn(columnId, { name: newTitle });
+    } catch (err) {
+      console.error("Failed to update column title", err);
+      // Rollback nếu API thất bại
+      setColumns(backupColumns);
+      throw err;
+    }
+  }, [columns]);
+
+  // --- ACTION: MOVE EMAIL ---
+  const moveEmailAction = useCallback(async (
+    emailId: string,
+    threadId: string,
+    fromColumnId: string,
+    toColumnId: string,
+    destinationIndex?: number
+  ) => {
+    // Tìm email để check logic summary
+    const sourceCol = columns.find(c => c.id === fromColumnId);
+    const emailToMove = sourceCol?.items.find(e => e.id === emailId);
+
+    const shouldGenerateSummary =
+      fromColumnId === "inbox" &&
+      emailToMove &&
+      (!emailToMove.summary || emailToMove.summary === "No summary available");
+
+    // Optimistic Update
+    setColumns((prev) => {
+      // Clone mảng cột
+      const newColumns = prev.map(col => ({ ...col, items: [...col.items] }));
+
+      const sourceColumn = newColumns.find(c => c.id === fromColumnId);
+      const destColumn = newColumns.find(c => c.id === toColumnId);
+
+      if (!sourceColumn || !destColumn) return prev;
+
+      const emailIndex = sourceColumn.items.findIndex(e => e.id === emailId);
+      if (emailIndex === -1) return prev;
+
+      // Cắt khỏi nguồn
+      const [movedItem] = sourceColumn.items.splice(emailIndex, 1);
+
+      // Chèn vào đích
+      if (destinationIndex !== undefined) {
+        destColumn.items.splice(destinationIndex, 0, movedItem);
+      } else {
+        destColumn.items.push(movedItem);
+      }
+
+      return newColumns;
+    });
+
+    try {
+      // 🔥 WEEK 4: Use new dynamic moveEmail API
+      await moveEmail(emailId, fromColumnId, toColumnId);
+      
+      if (shouldGenerateSummary) {
+        generateSummary(emailId, false);
+      }
+    } catch (err: any) {
+      console.error("Failed to move email:", err);
+      await fetchData(); // Rollback bằng cách fetch lại
+      throw err;
+    }
+  }, [columns, fetchData]);
+
+  // --- ACTION: GENERATE SUMMARY ---
+  const generateSummary = useCallback(async (emailId: string, forceRegenerate = false) => {
+    try {
+      const result = await generateEmailSummary(emailId, forceRegenerate, false);
+      if (result.status === 429) return null;
+
+      // Update state sâu trong mảng columns
+      setColumns((prev) =>
+        prev.map(col => ({
+          ...col,
+          items: col.items.map(email =>
+            email.id === emailId
+              ? { ...email, summary: result.data?.summary || email.summary }
+              : email
+          )
+        }))
+      );
+      return result.data?.summary;
+    } catch (err) {
+      console.error("Failed to generate summary:", err);
+      return null;
+    }
+  }, []);
+
+  // --- ACTION: SNOOZE ---
+  const snoozeEmail = useCallback(async (
+    emailId: string,
+    threadId: string,
+    snoozedUntil: string,
+    sourceColumnId: string,
+    onSuccess?: () => void,
+    onError?: (error: any) => void
+  ) => {
+    // Optimistic: Xóa khỏi cột hiện tại (và thêm vào list snoozed ảo nếu cần hiển thị)
+    setColumns((prev) => {
+      const newColumns = prev.map(col => {
+        if (col.id === sourceColumnId) {
+          return { ...col, items: col.items.filter(e => e.id !== emailId) };
+        }
+        return col;
+      });
+      return newColumns;
+    });
+
+    // Cập nhật state snoozedItems riêng để trigger logic timeout
+    // (Logic thực tế phức tạp hơn chút vì cần lấy object email đầy đủ)
+
+    try {
+      await snoozeEmailAPI(emailId, threadId, snoozedUntil);
+      // Sau khi API thành công, fetch lại data để đồng bộ list snoozedItems chính xác
+      fetchData();
+      onSuccess?.();
+    } catch (err) {
+      console.error("Failed to snooze:", err);
+      fetchData(); // Rollback
+      onError?.(err);
+    }
+  }, [fetchData]);
+
+  // --- ACTION: UNSNOOZE ---
+  const unsnoozeEmail = useCallback(async (emailId: string, onSuccess?: () => void, onError?: (error: any) => void) => {
+    try {
+      await unsnoozeEmailAPI(emailId);
+      await fetchData();
+      onSuccess?.();
+    } catch (err) {
+      console.error("Failed to unsnooze:", err);
+      onError?.(err);
+    }
+  }, [fetchData]);
+
+  const initialFetchRef = useRef(false);
   useEffect(() => {
+    // React Strict Mode in development may mount effects twice.
+    // Ensure the initial data fetch runs only once.
+    if (initialFetchRef.current) return;
+    initialFetchRef.current = true;
     fetchData();
   }, [fetchData]);
 
-  // Smart snooze wake-up: Schedule refresh at exact snooze expiry time
+  // Keep columnLoadingRef in sync with state
   useEffect(() => {
-    if (columns.snoozed.length === 0) return;
+    columnLoadingRef.current = columnLoadingStates;
+  }, [columnLoadingStates]);
 
-    // Find the earliest snooze time
+  // Smart Snooze Logic (Giữ nguyên)
+  useEffect(() => {
+    if (snoozedItems.length === 0) return;
     const now = Date.now();
-    const nextWakeUp = columns.snoozed
-      .map((email) =>
-        email.snoozedUntil ? new Date(email.snoozedUntil).getTime() : Infinity
-      )
-      .filter((time) => time > now)
+    const nextWakeUp = snoozedItems
+      .map((e) => e.snoozedUntil ? new Date(e.snoozedUntil).getTime() : Infinity)
+      .filter((t) => t > now)
       .sort((a, b) => a - b)[0];
 
     if (!nextWakeUp || nextWakeUp === Infinity) return;
-
-    // Calculate delay with buffer (add 2 seconds for backend processing)
     const delay = Math.max(0, nextWakeUp - now + 2000);
-
-    // Schedule single refresh at wake-up time
     const timeoutId = setTimeout(() => {
-      console.log("🔔 Snooze expired - refreshing data...");
+      console.log("🔔 Snooze expired - refreshing...");
       fetchData();
     }, delay);
-
     return () => clearTimeout(timeoutId);
-  }, [columns.snoozed, fetchData]);
+  }, [snoozedItems, fetchData]);
 
   return {
-    columns,
+    columns,      // Trả về Array<Column>
     setColumns,
     isLoading,
     error,
-    refreshData: fetchData,
-    moveEmail,
+    moveEmail: moveEmailAction,  // Renamed to avoid conflict with imported API function
     generateSummary,
     snoozeEmail,
     unsnoozeEmail,
+    addColumn,    // Hàm mới
+    deleteColumn, // Hàm xóa cột
+    updateColumnTitle, // Hàm cập nhật tên cột
+    fetchColumnData, // Hàm fetch emails cho một cột cụ thể
+    columnLoadingStates, // Loading states cho từng cột
+    refreshData: fetchData,
   };
 };

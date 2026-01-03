@@ -78,10 +78,17 @@ This project demonstrates a production-ready React application with:
 - [x] **Auto-Indexing on First Login**: Automatic background indexing for new users (200 emails)
 - [x] **Search Rate Limiting**: 20 requests per minute per user
 - [x] **Search UI**: Real-time search with loading, empty, and error states
-- [x] **Kanban Board View**: Drag-and-drop email management (Inbox/To-Do/Done)
+- [x] **Kanban Board View**: Drag-and-drop email workflow management with Gmail label sync
+- [x] **Dynamic Kanban Columns**: Create unlimited custom columns mapped to Gmail labels
+- [x] **Column Reordering**: Drag columns horizontally to reorganize board layout
+- [x] **Gmail Label Sync**: Two-way synchronization between Kanban and Gmail labels
+- [x] **Label Error Recovery**: Detect deleted Gmail labels with recovery modal UI
 - [x] **Kanban Filters**: Filter by read status (All/Unread/Read) and attachments
 - [x] **Kanban Sorting**: Sort by newest first or oldest first
+- [x] **Inbox Deduplication**: Client-side filtering to prevent email duplicates
+- [x] **Optimistic UI Updates**: Instant feedback with rollback on error
 - [x] **Real-time Updates**: Client-side processing with useMemo optimization
+- [x] **Per-Column Loading**: Granular loading states for better UX
 - [x] **Visual Feedback**: Real-time drag-over effects and status updates
 - [x] **Dark/Light Theme**: Full theme support across all components
 
@@ -124,16 +131,41 @@ This project demonstrates a production-ready React application with:
 │   React App     │  HTTP  │   NestJS API     │  API   │   Gmail API     │
 │   (Next.js)     │◄──────►│   (Backend)      │◄──────►│   (Google)      │
 │                 │        │                  │        │                 │
-│ - Login UI      │        │ - Auth Service   │        │ - Get Emails    │
+│ - Auth UI       │        │ - Auth Service   │        │ - Get Emails    │
 │ - Dashboard     │        │ - JWT Tokens     │        │ - Send/Reply    │
-│ - Token Mgmt    │        │ - Gmail Service  │        │ - Attachments   │
+│ - Kanban Board  │        │ - Gmail Service  │        │ - Labels Sync   │
+│ - Token Mgmt    │        │ - Kanban Service │        │ - Attachments   │
 └─────────────────┘        └──────────────────┘        └─────────────────┘
          │                          │
          │                          │
          ▼                          ▼
-  localStorage             MongoDB Atlas
-  (Refresh Token)          (Users + Sessions)
+  In-Memory State           MongoDB Atlas
+  (Access Token)          (Users + Metadata + Config)
 ```
+
+### Kanban Board Architecture
+
+The application implements a **dynamic Kanban system** with Gmail label synchronization:
+
+**Key Components:**
+- **Gmail Labels** = Source of truth for email categorization
+- **MongoDB** = Cache for fast queries + metadata (summaries, column config)
+- **Frontend** = Optimistic UI updates with rollback on error
+- **Backend** = Two-way sync between Kanban columns and Gmail labels
+
+**Data Flow:**
+1. Each Kanban column maps to a Gmail label (system or custom)
+2. Moving emails between columns modifies Gmail labels in real-time
+3. Inbox uses client-side deduplication (filters emails already in other columns)
+4. Per-column sequential fetching (non-inbox first, inbox last for accurate filtering)
+
+**Technical Highlights:**
+- Optimistic updates for all mutations (create/delete/move/reorder columns)
+- Horizontal scroll layout with `@hello-pangea/dnd` for drag & drop
+- Label error detection with recovery UI (remap/create/delete options)
+- Real-time filtering & sorting with `useMemo` optimization
+
+**See [ARCHITECTURE_ANALYSIS.md](./ARCHITECTURE_ANALYSIS.md) for detailed analysis.**
 
 ## 📦 Setup & Installation
 

@@ -119,6 +119,17 @@ export class GmailService {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
     
+    // CRITICAL: Verify label exists first to detect deleted labels
+    // Gmail API messages.list doesn't throw error for non-existent labels, just returns []
+    try {
+      await gmail.users.labels.get({ userId: 'me', id: labelId });
+      logger.log(`✅ Label ${labelId} exists and is accessible`);
+    } catch (err) {
+      // Label doesn't exist or is inaccessible
+      logger.error(`❌ Label ${labelId} not found or inaccessible:`, err.message);
+      throw new Error(`Gmail label '${labelId}' not found. It may have been deleted.`);
+    }
+    
     // Lấy danh sách message IDs
     const res = await gmail.users.messages.list({ userId: 'me', labelIds: [labelId], maxResults: pageSize, pageToken });
     
