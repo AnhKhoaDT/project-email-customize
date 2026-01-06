@@ -94,7 +94,7 @@ export default function FolderPage() {
 
       const apiURL =
         process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-      const response = await fetch(`${apiURL}/mails/${mailId}`, {
+      const response = await fetch(`${apiURL}/emails/${mailId}`, {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -128,7 +128,7 @@ export default function FolderPage() {
         const apiURL =
           process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
 
-        const response = await fetch(`${apiURL}/mails/send`, {
+        const response = await fetch(`${apiURL}/emails/send`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -158,6 +158,28 @@ export default function FolderPage() {
   const handleReply = useCallback(() => {
     setReplyTrigger((prev) => prev + 1);
   }, []);
+
+  // Handle delete email
+  const handleDeleteEmail = useCallback(
+    (mailId: string) => {
+      // Close detail view
+      setSelectedMail(null);
+      // Refresh mail list to reflect deletion
+      refreshMails();
+    },
+    [refreshMails]
+  );
+
+  // Handle archive email
+  const handleArchiveEmail = useCallback(
+    (mailId: string) => {
+      // Close detail view
+      setSelectedMail(null);
+      // Refresh mail list to reflect archive
+      refreshMails();
+    },
+    [refreshMails]
+  );
 
   // Keyboard navigation
   useEffect(() => {
@@ -241,6 +263,8 @@ export default function FolderPage() {
           onBack={() => setSelectedMail(null)}
           onForwardClick={handleForward}
           onReplyClick={handleReply}
+          onDelete={handleDeleteEmail}
+          onArchive={handleArchiveEmail}
           triggerReply={replyTrigger}
         />
       </div>

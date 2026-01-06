@@ -112,7 +112,7 @@ export interface Mail {
   isUnread: boolean;
   isStarred: boolean;
   hasAttachment?: boolean;
-  
+
   // Semantic search similarity score (0-1, higher = more similar)
   similarityScore?: number;
   
@@ -121,6 +121,13 @@ export interface Mail {
   cachedColumnName?: string;
   summary?: string;
   isPendingSync?: boolean;
+}
+
+export interface Attachment {
+  filename: string;
+  mimeType: string;
+  attachmentId: string;
+  size: number;
 }
 
 export interface Header {
@@ -164,7 +171,7 @@ export interface EmailData {
   messageId: string;
   htmlBody: string;
   textBody: string;
-  attachments: any[]; // Mảng rỗng trong data mẫu, thường sẽ là object chứa attachmentId
+  attachments: Attachment[];
   sizeEstimate: number;
   historyId: string;
   internalDate: string; // Lưu ý: Trong JSON là chuỗi (string), dù giá trị giống số

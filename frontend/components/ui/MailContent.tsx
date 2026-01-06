@@ -8,7 +8,7 @@ import {
   IoMdSend,
 } from "react-icons/io";
 import { BsArchive, BsTrash3 } from "react-icons/bs";
-import { FaReply, FaShare } from "react-icons/fa";
+import { FaReply, FaShare, FaPaperclip, FaDownload } from "react-icons/fa";
 import { type EmailData } from "@/types/index";
 
 // --- CẤU HÌNH API ---
@@ -20,6 +20,8 @@ interface MailContentProps {
   onBack?: () => void;
   onForwardClick?: () => void;
   onReplyClick?: () => void;
+  onDelete?: (mailId: string) => void;
+  onArchive?: (mailId: string) => void;
   triggerReply?: number;
 }
 
@@ -50,16 +52,28 @@ const formatDate = (dateStr: string) => {
   }
 };
 
+const formatFileSize = (bytes: number) => {
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+};
+
 const MailContent = ({
   mail,
   onBack,
   onForwardClick,
   onReplyClick,
+  onDelete,
+  onArchive,
   triggerReply,
 }: MailContentProps) => {
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Trigger reply mode from parent (keyboard shortcut)
@@ -104,6 +118,153 @@ const MailContent = ({
   const handleCancelReply = () => {
     setIsReplying(false);
     setReplyBody("");
+  };
+
+  // --- DOWNLOAD ATTACHMENT FUNCTION ---
+  const handleDownloadAttachment = async (
+    attachmentId: string,
+    filename: string
+  ) => {
+    try {
+      // Get Token
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        return;
+      }
+
+      // Call API
+      const response = await fetch(
+        `${API_BASE_URL}/attachments/${mail.id}/${attachmentId}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to download attachment");
+      }
+
+      // Download file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error: any) {
+      console.error("Error downloading attachment:", error);
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  // --- ARCHIVE EMAIL FUNCTION ---
+  const handleArchive = async () => {
+    if (!mail?.id) return;
+
+    setIsArchiving(true);
+
+    try {
+      // Get Token
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        setIsArchiving(false);
+        return;
+      }
+
+      // Call API
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "archive",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to archive email");
+      }
+
+      // Success - call parent callback
+      if (onArchive) {
+        onArchive(mail.id);
+      }
+
+      // Go back to list
+      if (onBack) {
+        onBack();
+      }
+    } catch (error: any) {
+      console.error("Error archiving email:", error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  // --- DELETE EMAIL FUNCTION ---
+  const handleDelete = async () => {
+    if (!mail?.id) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this email? It will be moved to Trash."
+    );
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+
+    try {
+      // Get Token
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        setIsDeleting(false);
+        return;
+      }
+
+      // Call API
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "delete",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to delete email");
+      }
+
+      // Success - call parent callback
+      if (onDelete) {
+        onDelete(mail.id);
+      }
+
+      // Go back to list
+      if (onBack) {
+        onBack();
+      }
+    } catch (error: any) {
+      console.error("Error deleting email:", error);
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // --- HÀM GỌI API REPLY ---
@@ -188,10 +349,20 @@ const MailContent = ({
         </div>
 
         <div className="flex items-center gap-2 text-secondary">
-          <button className="p-2 hover:bg-muted rounded-md transition-colors cursor-pointer">
+          <button
+            onClick={handleArchive}
+            disabled={isArchiving}
+            className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Archive email"
+          >
             <BsArchive size={18} />
           </button>
-          <button className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-400 cursor-pointer">
+          <button
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Delete email"
+          >
             <BsTrash3 size={18} />
           </button>
         </div>
@@ -225,7 +396,9 @@ const MailContent = ({
               </div>
               <div className="flex flex-col">
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-foreground">{senderName}</span>
+                  <span className="font-bold text-foreground">
+                    {senderName}
+                  </span>
                   <span className="text-xs text-secondary">
                     &lt;{senderEmail}&gt;
                   </span>
@@ -250,21 +423,23 @@ const MailContent = ({
                 if (iframe) {
                   iframe.onload = () => {
                     try {
-                      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                      const iframeDoc =
+                        iframe.contentDocument ||
+                        iframe.contentWindow?.document;
                       if (iframeDoc) {
                         const height = iframeDoc.documentElement.scrollHeight;
-                        iframe.style.height = Math.max(height + 20, 200) + 'px';
+                        iframe.style.height = Math.max(height + 20, 200) + "px";
                       }
                     } catch (e) {
                       // Cross-origin restriction - fallback to min height
-                      iframe.style.height = '500px';
+                      iframe.style.height = "500px";
                     }
                   };
                 }
               }}
               sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
               className="w-full border-0"
-              style={{ height: '200px' }}
+              style={{ height: "200px" }}
               srcDoc={`
                 <!DOCTYPE html>
                 <html>
@@ -294,13 +469,74 @@ const MailContent = ({
                     </style>
                   </head>
                   <body>
-                    ${mail.htmlBody || mail.textBody || mail.snippet || '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'}
+                    ${
+                      mail.htmlBody ||
+                      mail.textBody ||
+                      mail.snippet ||
+                      '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
+                    }
                   </body>
                 </html>
               `}
             />
           </div>
         </div>
+
+        {/* --- ATTACHMENTS SECTION --- */}
+        {mail.attachments && mail.attachments.length > 0 && (
+          <div className="px-6 pb-6">
+            <div className="border border-divider dark:border-gray-800 rounded-lg overflow-hidden bg-muted/30">
+              <div className="px-4 py-3 border-b border-divider dark:border-gray-800 bg-muted/50">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <FaPaperclip className="text-secondary" />
+                  <span>
+                    {mail.attachments.length} Attachment
+                    {mail.attachments.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+              </div>
+              <div className="p-4 space-y-2">
+                {mail.attachments.map((attachment, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 bg-background border border-divider dark:border-gray-800 rounded-md hover:border-primary/50 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className="w-10 h-10 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                        <FaPaperclip
+                          className="text-blue-600 dark:text-blue-400"
+                          size={16}
+                        />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-sm font-medium text-foreground truncate">
+                          {attachment.filename}
+                        </span>
+                        <span className="text-xs text-secondary">
+                          {formatFileSize(attachment.size)} •{" "}
+                          {attachment.mimeType}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        handleDownloadAttachment(
+                          attachment.attachmentId,
+                          attachment.filename
+                        )
+                      }
+                      className="flex items-center gap-2 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md transition-colors text-sm font-medium shrink-0"
+                      title={`Download ${attachment.filename}`}
+                    >
+                      <FaDownload size={14} />
+                      <span className="hidden sm:inline">Download</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* --- REPLY EDITOR AREA --- */}
         {isReplying && (
