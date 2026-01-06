@@ -71,11 +71,20 @@ export function useMailFolder({
         if (!response.ok) throw new Error("Failed to fetch mails");
 
         const data = await response.json();
-        const fetched = Array.isArray(data?.messages)
+        const rawMessages = Array.isArray(data?.messages)
           ? data.messages
           : Array.isArray(data)
           ? data
           : [];
+
+        // Transform messages to ensure isUnread is properly set from labelIds
+        const fetched = rawMessages.map((msg: any) => ({
+          ...msg,
+          isUnread:
+            Array.isArray(msg.labelIds) && msg.labelIds.includes("UNREAD"),
+          isStarred:
+            Array.isArray(msg.labelIds) && msg.labelIds.includes("STARRED"),
+        }));
 
         if (pageToken) {
           // Append to existing mails
@@ -136,9 +145,17 @@ export function useMailFolder({
           subject: hit.subject,
           snippet: hit.snippet,
           date: hit.receivedDate,
-          isUnread: false,
-          isStarred: false,
-          labelIds: hit.status ? [hit.status] : [],
+          isUnread: Array.isArray(hit.labelIds)
+            ? hit.labelIds.includes("UNREAD")
+            : false,
+          isStarred: Array.isArray(hit.labelIds)
+            ? hit.labelIds.includes("STARRED")
+            : false,
+          labelIds: Array.isArray(hit.labelIds)
+            ? hit.labelIds
+            : hit.status
+            ? [hit.status]
+            : [],
         }));
 
         setMails(transformedResults);

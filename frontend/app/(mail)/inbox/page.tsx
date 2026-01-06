@@ -24,10 +24,10 @@ export default function Home() {
   const [selectedMail, setSelectedMail] = useState<EmailData | null>(null);
   const [isMailsLoading, setIsMailsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Search state - now from hook
   const searchParams = useSearchParams();
-  const searchQuery = searchParams.get('q');
+  const searchQuery = searchParams.get("q");
   const [isSearching, setIsSearching] = useState(false);
 
   // Use search hook
@@ -39,7 +39,7 @@ export default function Home() {
     handleSearch,
     onClearSearch,
   } = useSearch({
-    folderSlug: 'inbox',
+    folderSlug: "inbox",
     isAuthenticated,
     onMailsChange: setMails,
     onErrorChange: setError,
@@ -71,7 +71,7 @@ export default function Home() {
 
   // Counter to trigger reply mode
   const [replyTrigger, setReplyTrigger] = useState(0);
-  
+
   // Fetch inbox mails function (reusable)
   const fetchInboxMails = useCallback(async () => {
     setError(null); // Clear any previous errors
@@ -80,8 +80,7 @@ export default function Home() {
       const id = "INBOX";
       const limit = 20;
 
-      const token =
-        typeof window !== "undefined" ? window.__accessToken : null;
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
       if (!token) {
         setIsMailsLoading(false);
         return;
@@ -118,16 +117,16 @@ export default function Home() {
       setIsMailsLoading(false);
     }
   }, []);
-  
+
   // Clear search handler
   const handleClearSearch = useCallback(() => {
     // Reset all search-related states
     setIsSearching(false);
     setError(null);
     // Don't clear mails immediately - let fetchInboxMails handle it
-    
+
     // Navigate back to inbox (this will trigger inbox fetch via useEffect)
-    router.push('/inbox');
+    router.push("/inbox");
   }, [router]);
 
   // 1. Client-side authentication check
@@ -145,7 +144,7 @@ export default function Home() {
       fetchInboxMails();
     }
   }, [isAuthenticated, searchQuery, fetchInboxMails]);
-  
+
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
     if (!hasMore || isLoadingMore || !nextPageToken) return;
@@ -240,6 +239,22 @@ export default function Home() {
     return await response.json();
   };
 
+  // Handle delete email
+  const handleDeleteEmail = (mailId: string) => {
+    // Remove email from list
+    setMails((prevMails) => prevMails.filter((mail) => mail.id !== mailId));
+    // Close detail view
+    setSelectedMail(null);
+  };
+
+  // Handle archive email
+  const handleArchiveEmail = (mailId: string) => {
+    // Remove email from list
+    setMails((prevMails) => prevMails.filter((mail) => mail.id !== mailId));
+    // Close detail view
+    setSelectedMail(null);
+  };
+
   if (isAuthLoading) return null; // Hoặc loading spinner
   if (!isAuthenticated) return null;
 
@@ -297,6 +312,8 @@ export default function Home() {
           onBack={() => setSelectedMail(null)}
           onForwardClick={() => selectedMail && setIsForwardOpen(true)}
           onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
+          onDelete={handleDeleteEmail}
+          onArchive={handleArchiveEmail}
           triggerReply={replyTrigger}
         />
       </div>

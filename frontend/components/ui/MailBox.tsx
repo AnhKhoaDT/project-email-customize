@@ -8,7 +8,9 @@ import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
 import { EmailData } from "@/types";
 import { useEffect, useRef, useState, KeyboardEvent, useCallback } from "react";
-import SearchModeDropdown, { type SearchMode } from "@/components/search/SearchModeDropdown";
+import SearchModeDropdown, {
+  type SearchMode,
+} from "@/components/search/SearchModeDropdown";
 import SearchSuggestions from "@/components/search/SearchSuggestions";
 import { getSearchSuggestions } from "@/lib/api";
 
@@ -58,7 +60,9 @@ const MailBox = ({
   const [inputValue, setInputValue] = useState(searchQuery || "");
 
   // Auto-suggest state
-  const [suggestions, setSuggestions] = useState<Array<{ value: string; type: 'sender' | 'subject' }>>([]);
+  const [suggestions, setSuggestions] = useState<
+    Array<{ value: string; type: "sender" | "subject" }>
+  >([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [isLoadingSuggestions, setIsLoadingSuggestions] = useState(false);
@@ -73,96 +77,104 @@ const MailBox = ({
   }, [searchQuery]);
 
   // Fetch suggestions with debounce
-  const fetchSuggestions = useCallback(async (value: string, signal?: AbortSignal) => {
-    if (value.length < 2) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      setIsLoadingSuggestions(false);
-      setSuggestionsError(null);
-      return;
-    }
-
-    // Keep showing previous suggestions while loading
-    setIsLoadingSuggestions(true);
-    setSuggestionsError(null);
-    
-    try {
-      // Use API helper (with auto token refresh)
-      const typedSuggestions = await getSearchSuggestions(value, 5);
-
-      // Check if request was aborted
-      if (signal?.aborted) {
-        console.log('[Suggestions] Request aborted for:', value);
+  const fetchSuggestions = useCallback(
+    async (value: string, signal?: AbortSignal) => {
+      if (value.length < 2) {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        setIsLoadingSuggestions(false);
+        setSuggestionsError(null);
         return;
       }
 
-      setSuggestions(typedSuggestions);
+      // Keep showing previous suggestions while loading
+      setIsLoadingSuggestions(true);
       setSuggestionsError(null);
-      // Always show dropdown if we have suggestions OR still loading
-      setShowSuggestions(true);
-      setSelectedSuggestionIndex(-1);
-      setIsLoadingSuggestions(false);
-    } catch (error) {
-      // Ignore abort errors
-      if (signal?.aborted || (error as any)?.name === 'AbortError') {
-        console.log('[Suggestions] Request cancelled');
-        return;
+
+      try {
+        // Use API helper (with auto token refresh)
+        const typedSuggestions = await getSearchSuggestions(value, 5);
+
+        // Check if request was aborted
+        if (signal?.aborted) {
+          console.log("[Suggestions] Request aborted for:", value);
+          return;
+        }
+
+        setSuggestions(typedSuggestions);
+        setSuggestionsError(null);
+        // Always show dropdown if we have suggestions OR still loading
+        setShowSuggestions(true);
+        setSelectedSuggestionIndex(-1);
+        setIsLoadingSuggestions(false);
+      } catch (error) {
+        // Ignore abort errors
+        if (signal?.aborted || (error as any)?.name === "AbortError") {
+          console.log("[Suggestions] Request cancelled");
+          return;
+        }
+
+        console.error("[Suggestions] Failed:", error);
+        setSuggestions([]);
+        setSuggestionsError(
+          error instanceof Error ? error.message : "Failed to load suggestions"
+        );
+        // Keep dropdown open to show error message
+        setShowSuggestions(true);
+        setIsLoadingSuggestions(false);
       }
-      
-      console.error('[Suggestions] Failed:', error);
-      setSuggestions([]);
-      setSuggestionsError(error instanceof Error ? error.message : 'Failed to load suggestions');
-      // Keep dropdown open to show error message
-      setShowSuggestions(true);
-      setIsLoadingSuggestions(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   // Debounced input handler
-  const handleInputChange = useCallback((value: string) => {
-    setInputValue(value);
-    
-    // If empty, hide immediately
-    if (value.length === 0) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      setIsLoadingSuggestions(false);
-      setSuggestionsError(null);
+  const handleInputChange = useCallback(
+    (value: string) => {
+      setInputValue(value);
+
+      // If empty, hide immediately
+      if (value.length === 0) {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        setIsLoadingSuggestions(false);
+        setSuggestionsError(null);
+        if (debounceTimerRef.current) {
+          clearTimeout(debounceTimerRef.current);
+        }
+        // Cancel pending request
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+          abortControllerRef.current = null;
+        }
+        return;
+      }
+
+      // Show dropdown and loading state immediately for better UX (when >= 2 chars)
+      if (value.length >= 2 && isFocused) {
+        setShowSuggestions(true);
+        setIsLoadingSuggestions(true);
+        setSuggestionsError(null);
+      }
+
+      // Clear existing timer
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
-      // Cancel pending request
+
+      // Cancel previous request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
-        abortControllerRef.current = null;
       }
-      return;
-    }
-    
-    // Show dropdown and loading state immediately for better UX (when >= 2 chars)
-    if (value.length >= 2 && isFocused) {
-      setShowSuggestions(true);
-      setIsLoadingSuggestions(true);
-      setSuggestionsError(null);
-    }
-    
-    // Clear existing timer
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
 
-    // Cancel previous request
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    // Set new timer for debounced fetch
-    debounceTimerRef.current = setTimeout(() => {
-      // Create new AbortController for this request
-      abortControllerRef.current = new AbortController();
-      fetchSuggestions(value, abortControllerRef.current.signal);
-    }, 500); // Increased to 500ms for better debouncing
-  }, [fetchSuggestions, isFocused]);
+      // Set new timer for debounced fetch
+      debounceTimerRef.current = setTimeout(() => {
+        // Create new AbortController for this request
+        abortControllerRef.current = new AbortController();
+        fetchSuggestions(value, abortControllerRef.current.signal);
+      }, 500); // Increased to 500ms for better debouncing
+    },
+    [fetchSuggestions, isFocused]
+  );
 
   // Cleanup debounce timer and abort controller
   useEffect(() => {
@@ -189,26 +201,30 @@ const MailBox = ({
   // Handle search on Enter key with keyboard navigation
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     // Arrow Down: Navigate suggestions
-    if (e.key === 'ArrowDown') {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       if (showSuggestions && suggestions.length > 0) {
-        setSelectedSuggestionIndex(prev => 
+        setSelectedSuggestionIndex((prev) =>
           prev < suggestions.length - 1 ? prev + 1 : prev
         );
       }
     }
     // Arrow Up: Navigate suggestions
-    else if (e.key === 'ArrowUp') {
+    else if (e.key === "ArrowUp") {
       e.preventDefault();
       if (showSuggestions && suggestions.length > 0) {
-        setSelectedSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
+        setSelectedSuggestionIndex((prev) => (prev > 0 ? prev - 1 : -1));
       }
     }
     // Enter: Select suggestion or search
-    else if (e.key === 'Enter') {
+    else if (e.key === "Enter") {
       e.preventDefault();
-      
-      if (showSuggestions && selectedSuggestionIndex >= 0 && suggestions[selectedSuggestionIndex]) {
+
+      if (
+        showSuggestions &&
+        selectedSuggestionIndex >= 0 &&
+        suggestions[selectedSuggestionIndex]
+      ) {
         // Use selected suggestion → trigger semantic search (per requirement)
         const selectedValue = suggestions[selectedSuggestionIndex].value;
         setInputValue(selectedValue);
@@ -223,7 +239,7 @@ const MailBox = ({
       }
     }
     // Escape: Close suggestions or clear search
-    else if (e.key === 'Escape') {
+    else if (e.key === "Escape") {
       if (showSuggestions) {
         setShowSuggestions(false);
         setSuggestions([]);
@@ -244,13 +260,16 @@ const MailBox = ({
 
   // Handle suggestion selection
   // When suggestion is selected, trigger semantic search (per requirement)
-  const handleSelectSuggestion = useCallback((suggestionValue: string) => {
-    setInputValue(suggestionValue);
-    onSearch?.(suggestionValue, true); // true = from suggestion
-    setShowSuggestions(false);
-    setSuggestions([]);
-    setSelectedSuggestionIndex(-1);
-  }, [onSearch]);
+  const handleSelectSuggestion = useCallback(
+    (suggestionValue: string) => {
+      setInputValue(suggestionValue);
+      onSearch?.(suggestionValue, true); // true = from suggestion
+      setShowSuggestions(false);
+      setSuggestions([]);
+      setSelectedSuggestionIndex(-1);
+    },
+    [onSearch]
+  );
 
   // UPDATE 1: Đổi w-1/3 thành w-full.
   // Parent (Home) sẽ bọc component này trong một thẻ div có width responsive.
@@ -291,7 +310,7 @@ const MailBox = ({
                 disabled={isSearching}
               />
             )}
-            
+
             <div className="relative flex items-center gap-2 flex-1">
               {/* <FaSearch
                 className={
@@ -333,17 +352,18 @@ const MailBox = ({
                   ✕
                 </button>
               )}
-              
+
               {/* Auto-suggest dropdown */}
-              {(showSuggestions || isLoadingSuggestions) && inputValue.length >= 2 && (
-                <SearchSuggestions
-                  suggestions={suggestions}
-                  selectedIndex={selectedSuggestionIndex}
-                  onSelect={handleSelectSuggestion}
-                  isLoading={isLoadingSuggestions}
-                  error={suggestionsError}
-                />
-              )}
+              {(showSuggestions || isLoadingSuggestions) &&
+                inputValue.length >= 2 && (
+                  <SearchSuggestions
+                    suggestions={suggestions}
+                    selectedIndex={selectedSuggestionIndex}
+                    onSelect={handleSelectSuggestion}
+                    isLoading={isLoadingSuggestions}
+                    error={suggestionsError}
+                  />
+                )}
             </div>
           </div>
         </div>
@@ -419,10 +439,14 @@ const MailBox = ({
                                       : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
                                   }
                                 `}
-                                title={`Similarity: ${(mail.similarityScore * 100).toFixed(0)}%`}
+                                title={`Similarity: ${(
+                                  mail.similarityScore * 100
+                                ).toFixed(0)}%`}
                               >
                                 <TbSparkles size={12} />
-                                <span>{(mail.similarityScore * 100).toFixed(0)}%</span>
+                                <span>
+                                  {(mail.similarityScore * 100).toFixed(0)}%
+                                </span>
                               </div>
                             )}
                             <span className="text-secondary text-xs">
