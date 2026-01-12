@@ -10,7 +10,7 @@ export class EmailMetadataService {
   constructor(
     @InjectModel(EmailMetadata.name)
     private emailMetadataModel: Model<EmailMetadataDocument>,
-  ) {}
+  ) { }
 
   // ============================================
   // STATUS METHODS 
@@ -66,6 +66,23 @@ export class EmailMetadataService {
   async getAllKanbanEmails(userId: string) {
     return this.emailMetadataModel.find({ userId }).sort({ kanbanUpdatedAt: -1 });
   }
+
+  /**
+   * Get emails by Gmail label ID (for fallback to seed data)
+   * @param userId - User ID
+   * @param labelId - Gmail label ID (e.g., 'INBOX', 'SENT', 'STARRED')
+   * @param limit - Maximum number of emails to return
+   */
+  async getEmailsByLabel(userId: string, labelId: string, limit: number = 50) {
+    return this.emailMetadataModel
+      .find({
+        userId,
+        labelIds: labelId  // MongoDB array field query
+      })
+      .sort({ receivedDate: -1 })  // Sort by date, newest first
+      .limit(limit);
+  }
+
 
 
 

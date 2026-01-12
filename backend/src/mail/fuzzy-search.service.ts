@@ -22,7 +22,7 @@ export class FuzzySearchService {
     @InjectModel(EmailMetadata.name)
     private emailMetadataModel: Model<EmailMetadataDocument>,
     private gmailService: GmailService,
-  ) {}
+  ) { }
 
   /**
    * Fuzzy search emails using MongoDB + Fuse.js
@@ -56,10 +56,10 @@ export class FuzzySearchService {
       // STEP 1: Fetch emails from Gmail API
       // ============================================
       console.log(`[FuzzySearch] Searching for: "${q}"`);
-      
+
       // Fetch recent emails from inbox (max 200 for performance)
       const inboxData = await this.gmailService.listMessagesInLabel(userId, 'INBOX', 200);
-      
+
       if (!inboxData?.messages || inboxData.messages.length === 0) {
         console.log('[FuzzySearch] No emails found in inbox');
         return {
@@ -71,9 +71,9 @@ export class FuzzySearchService {
           processingTimeMs: Date.now() - startTime,
         };
       }
-      
+
       console.log(`[FuzzySearch] Found ${inboxData.messages.length} emails in inbox`);
-      
+
       // ============================================
       // STEP 2: Fuzzy search with Fuse.js
       // ============================================
@@ -87,7 +87,7 @@ export class FuzzySearchService {
           { name: 'snippet', weight: 0.2 }       // Lowest weight (20%)
         ],
         threshold: 0.5,           // 0 = exact match, 1 = match anything
-                                  // 0.5 = balanced for typo tolerance
+        // 0.5 = balanced for typo tolerance
         distance: 200,            // Increased distance for better matching
         minMatchCharLength: 1,    // Allow single char matches
         includeScore: true,       // Return relevance scores
@@ -98,7 +98,7 @@ export class FuzzySearchService {
 
       // Perform fuzzy search
       const fuseResults = fuse.search(q);
-      
+
       console.log(`[FuzzySearch] Fuse.js found ${fuseResults.length} matches`);
 
       // ============================================

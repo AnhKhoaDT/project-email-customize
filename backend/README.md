@@ -44,7 +44,29 @@ npm start
 npm run start:debug
 ```
 
-The server listens on `http://localhost:5000` by default when the app starts.
+## 🌱 Database Seeding (NEW!)
+
+To populate the database with sample data for testing:
+
+```bash
+# Make sure MongoDB is running first
+npm run seed
+```
+
+This will create:
+- **3 sample users** (demo@example.com, alice@example.com, bob@example.com)
+- **45 sample emails** (15 per user, distributed across Inbox, Sent, Drafts, Spam, etc.)
+- **Kanban configurations** (default 4-column board for each user)
+
+**Sample login credentials:**
+- Email: `demo@example.com`
+- Password: `Demo123!`
+
+**Troubleshooting:** If you get MongoDB connection errors, see `SEED_SETUP.md` for detailed setup instructions.
+
+**Full documentation:** See `src/seed/README.md` for customization options and advanced usage.
+
+
 
 Environment variables
 

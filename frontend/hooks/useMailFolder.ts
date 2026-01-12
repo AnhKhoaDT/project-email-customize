@@ -81,8 +81,8 @@ export function useMailFolder({
         const rawMessages = Array.isArray(data?.messages)
           ? data.messages
           : Array.isArray(data)
-          ? data
-          : [];
+            ? data
+            : [];
 
         // Transform messages to ensure isUnread is properly set from labelIds
         const fetched = rawMessages.map((msg: any) => ({
@@ -161,8 +161,8 @@ export function useMailFolder({
           labelIds: Array.isArray(hit.labelIds)
             ? hit.labelIds
             : hit.status
-            ? [hit.status]
-            : [],
+              ? [hit.status]
+              : [],
         }));
 
         setMails(transformedResults);
