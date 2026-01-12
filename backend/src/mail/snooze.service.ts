@@ -40,21 +40,21 @@ export class SnoozeService implements OnModuleInit {
     snoozedUntil: Date,
   ) {
     try {
-      // BƯỚC 1: Lấy current status từ DB (email phải đã trong Kanban)
+      // BƯỚC 1: Lấy current column từ DB (email phải đã trong Kanban)
       const metadata = await this.emailMetadataModel.findOne({ userId, emailId });
       
       if (!metadata) {
         throw new Error('Email not in Kanban. Only Kanban emails can be snoozed.');
       }
 
-      const originalStatus = metadata.status; // TODO, IN_PROGRESS, hoặc DONE
+      const originalColumnId = metadata.cachedColumnId; // Lưu column hiện tại
 
       // BƯỚC 2: Lưu snooze data vào MongoDB
       await this.emailMetadataModel.findOneAndUpdate(
         { userId, emailId },
         {
           snoozedUntil,
-          originalStatus,
+          previousColumnId: originalColumnId, // Sử dụng previousColumnId thay vì originalStatus
           isSnoozed: true,
         },
         { new: true },
@@ -85,7 +85,7 @@ export class SnoozeService implements OnModuleInit {
         throw new Error('Email is not snoozed');
       }
 
-      await this.restoreEmail(userId, emailId, metadata.originalStatus);
+      await this.restoreEmail(userId, emailId, metadata.previousColumnId);
 
       logger.log(`✅ Manually unsnoozed email ${emailId}`);
       
@@ -130,7 +130,7 @@ export class SnoozeService implements OnModuleInit {
           await this.restoreEmail(
             snooze.userId,
             snooze.emailId,
-            snooze.originalStatus || 'TODO'
+            snooze.previousColumnId || null
           );
           logger.log(`✅ Restored snoozed email ${snooze.emailId}`);
         } catch (error) {
@@ -144,18 +144,17 @@ export class SnoozeService implements OnModuleInit {
   }
 
   /**
-   * Restore email về Kanban status ban đầu
+   * Restore email về Kanban column ban đầu
    */
-  private async restoreEmail(userId: string, emailId: string, originalStatus: string) {
-    // Update MongoDB: restore status và clear snooze data
+  private async restoreEmail(userId: string, emailId: string, originalColumnId: string) {
+    // Update MongoDB: restore column và clear snooze data
     await this.emailMetadataModel.findOneAndUpdate(
       { userId, emailId },
       {
-        status: originalStatus, // Restore về TODO/IN_PROGRESS/DONE
+        cachedColumnId: originalColumnId, // Restore về column ban đầu
         isSnoozed: false,
         snoozedUntil: null,
-        originalStatus: null,
-        statusUpdatedAt: new Date(),
+        kanbanUpdatedAt: new Date(),
       }
     );
   }

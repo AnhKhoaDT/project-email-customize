@@ -222,7 +222,37 @@ export const getGlobalAccessToken = (): string | null => {
 // ========================================
 
 /**
- * Fetch emails by column/status
+ * WEEK 4: Fetch Kanban configuration (dynamic columns)
+ */
+export const fetchKanbanConfig = async () => {
+  const response = await api.get('/kanban/config');
+  return response.data;
+};
+
+/**
+ * WEEK 4: Fetch all Gmail labels for user
+ * Used in "Add Column" modal to let user select which label to map
+ */
+export const fetchGmailLabels = async () => {
+  const response = await api.get('/mailboxes');
+  // Backend returns labels array directly or in { data: labels }
+  return Array.isArray(response.data) ? response.data : (response.data?.labels || []);
+};
+
+/**
+ * WEEK 4: Fetch emails in a specific custom column
+ * @param columnId - Column ID (e.g., "col_123", "todo", "done")
+ */
+export const fetchColumnEmails = async (columnId: string, options?: { limit?: number }) => {
+  const response = await api.get(`/kanban/columns/${columnId}/emails`, {
+    params: { limit: options?.limit || 50 }
+  });
+  return response.data;
+};
+
+/**
+ * DEPRECATED: Fetch emails by old hardcoded status
+ * Use fetchColumnEmails instead
  * @param status - Column status: TODO, IN_PROGRESS, DONE
  */
 export const fetchKanbanColumnEmails = async (
@@ -259,20 +289,89 @@ export const fetchSnoozedEmails = async () => {
 };
 
 /**
- * Move email between Kanban columns
+ * WEEK 4: Move email between Kanban columns (Dynamic)
  * @param emailId - Gmail message ID
- * @param threadId - Gmail thread ID
- * @param toStatus - Destination status (INBOX, TODO, IN_PROGRESS, DONE)
+ * @param fromColumnId - Source column ID (or "inbox")
+ * @param toColumnId - Destination column ID
+ */
+export const moveEmail = async (
+  emailId: string,
+  fromColumnId: string,
+  toColumnId: string
+) => {
+  const response = await api.post('/kanban/move', {
+    emailId,
+    fromColumnId,
+    toColumnId,
+    optimistic: true
+  });
+  return response.data;
+};
+
+/**
+ * DEPRECATED: Old moveEmailToColumn - kept for backward compatibility
+ * Use moveEmail instead
  */
 export const moveEmailToColumn = async (
   emailId: string,
   threadId: string,
+  fromColumnId: string | null,
+  toColumnId: string | null,
   toStatus: string
 ) => {
   const response = await api.post(`/emails/${emailId}/move`, {
     threadId,
+    fromColumnId,
+    toColumnId,
     toStatus,
   });
+  return response.data;
+};
+
+/**
+ * WEEK 4: Create new Kanban column
+ */
+export const createKanbanColumn = async (data: {
+  name: string;
+  gmailLabel?: string;
+  color?: string;
+  createNewLabel?: boolean; // Flag to create new label on Gmail
+}) => {
+  const response = await api.post('/kanban/columns', data);
+  return response.data;
+};
+
+/**
+ * WEEK 4: Update Kanban column
+ */
+export const updateKanbanColumn = async (
+  columnId: string,
+  data: { name?: string; gmailLabel?: string; color?: string; isVisible?: boolean }
+) => {
+  const response = await api.put(`/kanban/columns/${columnId}`, data);
+  return response.data;
+};
+
+/**
+ * WEEK 4: Delete Kanban column
+ */
+export const deleteKanbanColumn = async (columnId: string) => {
+  const response = await api.post(`/kanban/columns/${columnId}/delete`);
+  // Backend sometimes returns an object with { status: 500, message } but HTTP 200.
+  // Treat non-200 `response.data.status` as an error so callers can rollback.
+  if (response?.data && typeof response.data.status !== 'undefined' && response.data.status !== 200) {
+    const msg = response.data.message || 'Failed to delete column';
+    throw new Error(msg);
+  }
+
+  return response.data;
+};
+
+/**
+ * WEEK 4: Reorder Kanban columns
+ */
+export const reorderKanbanColumns = async (columnOrder: string[]) => {
+  const response = await api.post('/kanban/columns/reorder', { columnOrder });
   return response.data;
 };
 
@@ -318,6 +417,46 @@ export const snoozeEmail = async (
  */
 export const unsnoozeEmail = async (emailId: string) => {
   const response = await api.post(`/emails/${emailId}/unsnooze`);
+  return response.data;
+};
+
+/**
+ * Get search suggestions
+ * @param prefix - Search prefix (minimum 2 characters)
+ * @param limit - Maximum number of suggestions (default: 5)
+ * @returns Array of suggestions with value and type
+ */
+export const getSearchSuggestions = async (
+  prefix: string,
+  limit: number = 5
+): Promise<Array<{ value: string; type: 'sender' | 'subject' }>> => {
+  const response = await api.get(`/search/suggestions`, {
+    params: { prefix, limit }
+  });
+  return response.data.data || [];
+};
+
+/**
+ * WEEK 4: Remap column to different Gmail label (Recovery)
+ */
+export const remapColumnLabel = async (
+  columnId: string,
+  data: {
+    newGmailLabel?: string;
+    createNewLabel?: boolean;
+    labelName?: string;
+    color?: string;
+  }
+) => {
+  const response = await api.post(`/kanban/columns/${columnId}/remap-label`, data);
+  return response.data;
+};
+
+/**
+ * WEEK 4: Clear column error state
+ */
+export const clearColumnError = async (columnId: string) => {
+  const response = await api.post(`/kanban/columns/${columnId}/clear-error`);
   return response.data;
 };
 

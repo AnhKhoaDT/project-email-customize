@@ -1,9 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, Inject, forwardRef } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { UsersService } from '../users/users.service';
 import { SessionsService } from '../sessions/sessions.service';
 import * as bcrypt from 'bcrypt';
 import { google } from 'googleapis';
+import { SemanticSearchService } from '../mail/semantic-search.service';
 
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'access-secret-example';
@@ -13,7 +14,12 @@ const REFRESH_EXPIRES_IN = '7d';
 
 @Injectable()
 export class AuthService {
-  constructor(private usersService: UsersService, private sessionsService: SessionsService) {}
+  constructor(
+    private usersService: UsersService, 
+    private sessionsService: SessionsService,
+    @Inject(forwardRef(() => SemanticSearchService))
+    private semanticSearchService: SemanticSearchService,
+  ) {}
 
   async validateUser(email: string, password: string) {
     const user = await this.usersService.findByEmail(email);
@@ -37,6 +43,12 @@ export class AuthService {
     const accessToken = this.signAccessToken({ sub: user.id, email: user.email });
     const refreshToken = this.signRefreshToken({ sub: user.id });
     await this.sessionsService.createOrReplace(refreshToken, user.id);
+    
+    // Trigger auto-indexing for first-time users
+    this.triggerAutoIndexing(user.id).catch(err => {
+      console.error(`[Auth] Auto-indexing failed for user ${user.id}:`, err.message);
+    });
+    
     return { accessToken, refreshToken, user };
   }
 
@@ -79,6 +91,11 @@ export class AuthService {
       const refreshToken = this.signRefreshToken({ sub: user._id.toString() });
       await this.sessionsService.createOrReplace(refreshToken, user._id.toString());
 
+      // Trigger auto-indexing for first-time users
+      this.triggerAutoIndexing(user._id.toString()).catch(err => {
+        console.error(`[Auth] Auto-indexing failed for user ${user._id}:`, err.message);
+      });
+
       return { accessToken, refreshToken, user };
     }
 
@@ -92,6 +109,12 @@ export class AuthService {
       const accessToken = this.signAccessToken({ sub: userId, email: user.email });
       const refreshToken = this.signRefreshToken({ sub: userId });
       await this.sessionsService.createOrReplace(refreshToken, userId);
+      
+      // Trigger auto-indexing for first-time users
+      this.triggerAutoIndexing(userId).catch(err => {
+        console.error(`[Auth] Auto-indexing failed for user ${userId}:`, err.message);
+      });
+      
       return { accessToken, refreshToken, user };
     }
 
@@ -124,6 +147,39 @@ export class AuthService {
   async logout(refreshToken: string) {
     // Delete session from database
     await this.sessionsService.deleteByToken(refreshToken).catch(() => {});
+  }
+
+  /**
+   * Trigger auto-indexing for first-time users
+   * Indexes 200 recent emails in background for semantic search
+   */
+  private async triggerAutoIndexing(userId: string): Promise<void> {
+    try {
+      const user = await this.usersService.findById(userId);
+      
+      // Skip if already indexed
+      if (user?.isSemanticSearchIndexed) {
+        console.log(`[Auth] User ${userId} already indexed, skipping auto-indexing`);
+        return;
+      }
+
+      console.log(`[Auth] 🚀 Starting auto-indexing for new user ${userId}...`);
+      
+      // Trigger indexing in background (don't wait)
+      this.semanticSearchService.indexAllEmails(userId, { limit: 200 })
+        .then(async (result) => {
+          console.log(`[Auth] ✅ Auto-indexing complete for user ${userId}: ${result.data?.success} emails indexed`);
+          
+          // Mark user as indexed
+          await this.usersService.markAsIndexed(userId);
+        })
+        .catch(err => {
+          console.error(`[Auth] ❌ Auto-indexing failed for user ${userId}:`, err.message);
+        });
+      
+    } catch (err) {
+      console.error(`[Auth] Failed to trigger auto-indexing:`, err.message);
+    }
   }
 
   /**

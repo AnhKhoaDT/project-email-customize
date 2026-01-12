@@ -31,13 +31,13 @@ export interface SideBarProps {
   kanbanClick: () => void;
 }
 
-// Bỏ thuộc tính isActive cứng, chúng ta sẽ tính toán nó
+// Navigation config - sử dụng folder slug để khớp với dynamic route
 const nav = {
   core: [
     { title: "Inbox", path: "/inbox", icon: FaInbox },
-    { title: "Favorites", path: "/favorites", icon: FaRegStar },
+    { title: "Starred", path: "/starred", icon: FaRegStar },
     { title: "Drafts", path: "/drafts", icon: FaPenToSquare },
-    { title: "Send", path: "/send", icon: IoSend },
+    { title: "Sent", path: "/sent", icon: IoSend },
   ],
   management: [
     { title: "Archive", path: "/archive", icon: FaBoxArchive },
@@ -74,8 +74,8 @@ const SideBar = ({
   // Hàm render item để tái sử dụng
   const renderNavItem = (item: any) => {
     const Icon = item.icon;
-    // Kiểm tra xem path hiện tại có trùng với item.path không
-    // Hoặc item.path là '/' và pathname cũng là '/'
+    // Kiểm tra active: pathname trùng với item.path
+    // Hoặc pathname là "/" thì active tại "/inbox"
     const isActive =
       pathname === item.path || (item.path === "/inbox" && pathname === "/");
 
@@ -105,7 +105,7 @@ const SideBar = ({
           />
           {isExpanded && <span>{item.title}</span>}
         </div>
-        {/* Badge count example - có thể thêm logic hiển thị số lượng mail chưa đọc ở đây */}
+        {/* Badge count - có thể thêm logic hiển thị unread count */}
         {/* {isExpanded && isActive && <span className="text-xs">3</span>} */}
       </Link>
     );

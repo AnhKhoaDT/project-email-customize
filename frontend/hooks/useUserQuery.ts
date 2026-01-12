@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getCurrentUser } from '@/lib/auth';
 import { setGlobalAccessToken } from '@/lib/api';
 import { clearTokens } from '@/lib/token';
+import { AutoIndexService } from '@/lib/auto-index';
 
 /**
  * Hook để initialize và maintain user session
@@ -41,6 +42,12 @@ export const useUserQuery = () => {
           setUser(userProfile);
           setIsAuthenticated(true);
           console.log('[useUserQuery] ✅ User authenticated:', userProfile.email);
+          
+          // Auto-index emails for semantic search (background, non-blocking)
+          AutoIndexService.autoIndex(userProfile.id, accessToken, 200).catch(err => {
+            console.warn('[useUserQuery] Auto-index failed (non-critical):', err);
+          });
+          
           setIsLoading(false);
           return;
         } catch (fetchError: any) {
@@ -78,6 +85,11 @@ export const useUserQuery = () => {
             setUser(userProfile);
             setIsAuthenticated(true);
             console.log('[useUserQuery] ✅ User authenticated:', userProfile.email);
+            
+            // Auto-index emails for semantic search (background, non-blocking)
+            AutoIndexService.autoIndex(userProfile.id, newAccessToken, 200).catch(err => {
+              console.warn('[useUserQuery] Auto-index failed (non-critical):', err);
+            });
           } else {
             console.log('[useUserQuery] ❌ No valid refresh token in HttpOnly cookie');
             clearTokens();

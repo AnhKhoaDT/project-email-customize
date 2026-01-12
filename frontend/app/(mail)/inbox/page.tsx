@@ -8,7 +8,9 @@ import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
 import ForwardModal from "@/components/ui/ForwardModal";
 import Kanban from "@/components/ui/Kanban";
+import { type SearchMode } from "@/components/search/SearchModeDropdown";
 import { type Mail, type EmailData } from "@/types";
+import { useSearch } from "@/hooks/useSearch";
 
 export default function Home() {
   const router = useRouter();
@@ -22,12 +24,39 @@ export default function Home() {
   const [selectedMail, setSelectedMail] = useState<EmailData | null>(null);
   const [isMailsLoading, setIsMailsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
-  // Search state
+
+  // Search state - now from hook
   const searchParams = useSearchParams();
-  const searchQuery = searchParams.get('q');
+  const searchQuery = searchParams.get("q");
   const [isSearching, setIsSearching] = useState(false);
-  const [lastSearchQuery, setLastSearchQuery] = useState<string | null>(null);
+
+  // Use search hook
+  const {
+    searchMode,
+    setSearchMode,
+    isSearching: hookIsSearching,
+    error: searchError,
+    handleSearch,
+    onClearSearch,
+  } = useSearch({
+    folderSlug: "inbox",
+    isAuthenticated,
+    onMailsChange: setMails,
+    onErrorChange: setError,
+    onLoadingChange: setIsSearching,
+  });
+
+  // Update local searching state from hook
+  useEffect(() => {
+    setIsSearching(hookIsSearching);
+  }, [hookIsSearching]);
+
+  // Update error from search
+  useEffect(() => {
+    if (searchError) {
+      setError(searchError);
+    }
+  }, [searchError]);
 
   // Pagination state
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
@@ -42,13 +71,7 @@ export default function Home() {
 
   // Counter to trigger reply mode
   const [replyTrigger, setReplyTrigger] = useState(0);
-  
-  // Search handler - just updates URL, useEffect handles actual search
-  const handleSearch = useCallback((query: string) => {
-    if (!query.trim()) return;
-    router.push(`/inbox?q=${encodeURIComponent(query)}`);
-  }, [router]);
-  
+
   // Fetch inbox mails function (reusable)
   const fetchInboxMails = useCallback(async () => {
     setError(null); // Clear any previous errors
@@ -57,8 +80,7 @@ export default function Home() {
       const id = "INBOX";
       const limit = 20;
 
-      const token =
-        typeof window !== "undefined" ? window.__accessToken : null;
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
       if (!token) {
         setIsMailsLoading(false);
         return;
@@ -95,19 +117,17 @@ export default function Home() {
       setIsMailsLoading(false);
     }
   }, []);
-  
+
   // Clear search handler
   const handleClearSearch = useCallback(() => {
     // Reset all search-related states
     setIsSearching(false);
     setError(null);
-    // Set lastSearchQuery to current searchQuery to prevent re-search
-    setLastSearchQuery(searchQuery);
     // Don't clear mails immediately - let fetchInboxMails handle it
-    
+
     // Navigate back to inbox (this will trigger inbox fetch via useEffect)
-    router.push('/inbox');
-  }, [router, searchQuery]);
+    router.push("/inbox");
+  }, [router]);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -124,69 +144,6 @@ export default function Home() {
       fetchInboxMails();
     }
   }, [isAuthenticated, searchQuery, fetchInboxMails]);
-  
-  // 3. Auto-search when URL has query param (only if different from last search)
-  useEffect(() => {
-    if (!isAuthenticated || !searchQuery || searchQuery === lastSearchQuery) {
-      return;
-    }
-
-    // Mark this query as "attempted" immediately to prevent infinite loop
-    setLastSearchQuery(searchQuery);
-
-    const performSearch = async () => {
-      try {
-        setIsSearching(true);
-        setIsMailsLoading(false); // Ensure loading spinner turns off
-        setError(null);
-
-        const token =
-          process.env.NODE_ENV === "development"
-            ? window.__accessToken
-            : window.__accessToken;
-        if (!token) return;
-
-        const apiURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
-        const response = await fetch(
-          `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        if (!response.ok) throw new Error("Search failed");
-
-        const data = await response.json();
-        const results = data?.data?.hits || [];
-
-        // Transform search results to Mail format
-        const transformedResults: Mail[] = results.map((hit: any) => ({
-          id: hit.emailId,
-          threadId: hit.threadId,
-          from: hit.from,
-          subject: hit.subject,
-          snippet: hit.snippet,
-          date: hit.receivedDate,
-          isUnread: false,
-          isStarred: false,
-          labelIds: hit.status ? [hit.status] : [],
-        }));
-
-        setMails(transformedResults);
-        setHasMore(false);
-      } catch (err: any) {
-        setError("Search failed. Please try again.");
-        setMails([]);
-      } finally {
-        setIsSearching(false);
-      }
-    };
-
-    performSearch();
-  }, [isAuthenticated, searchQuery, lastSearchQuery]);
 
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
@@ -282,6 +239,22 @@ export default function Home() {
     return await response.json();
   };
 
+  // Handle delete email
+  const handleDeleteEmail = (mailId: string) => {
+    // Remove email from list
+    setMails((prevMails) => prevMails.filter((mail) => mail.id !== mailId));
+    // Close detail view
+    setSelectedMail(null);
+  };
+
+  // Handle archive email
+  const handleArchiveEmail = (mailId: string) => {
+    // Remove email from list
+    setMails((prevMails) => prevMails.filter((mail) => mail.id !== mailId));
+    // Close detail view
+    setSelectedMail(null);
+  };
+
   if (isAuthLoading) return null; // Hoặc loading spinner
   if (!isAuthenticated) return null;
 
@@ -295,7 +268,7 @@ export default function Home() {
       {/* Cột Danh sách Mail */}
       <div
         className={`
-          h-full 
+          h-full flex flex-col
           ${selectedMail ? "hidden" : "flex"} 
           md:flex md:w-1/3 w-full
         `}
@@ -317,9 +290,11 @@ export default function Home() {
             kanbanClick={toggleKanBanMode}
             searchQuery={searchQuery || undefined}
             onSearch={handleSearch}
-            onClearSearch={handleClearSearch}
+            onClearSearch={onClearSearch}
             isSearching={isSearching}
             error={error}
+            searchMode={searchMode}
+            onSearchModeChange={setSearchMode}
           />
         )}
       </div>
@@ -337,6 +312,8 @@ export default function Home() {
           onBack={() => setSelectedMail(null)}
           onForwardClick={() => selectedMail && setIsForwardOpen(true)}
           onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
+          onDelete={handleDeleteEmail}
+          onArchive={handleArchiveEmail}
           triggerReply={replyTrigger}
         />
       </div>

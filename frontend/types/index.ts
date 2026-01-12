@@ -6,6 +6,91 @@ export interface User {
   avatar: string; // Sửa lỗi chính tả avartar -> avatar
 }
 
+// ============================================
+// WEEK 4: DYNAMIC KANBAN TYPES
+// ============================================
+
+/**
+ * Kanban Column Configuration from Backend
+ */
+export interface KanbanColumn {
+  id: string;
+  name: string;
+  order: number;
+  gmailLabel?: string;
+  mappingType?: 'label' | 'search' | 'custom';
+  removeInboxLabel?: boolean;
+  autoArchive?: boolean;
+  color?: string;
+  isVisible: boolean;
+  emailCount?: number;
+  lastSyncedAt?: string;
+  
+  // Label Error Tracking (Edge Case Handling)
+  hasLabelError?: boolean;
+  labelErrorMessage?: string;
+  labelErrorDetectedAt?: string;
+}
+
+/**
+ * Kanban Configuration from Backend
+ */
+export interface KanbanConfig {
+  userId: string;
+  columns: KanbanColumn[];
+  showInbox: boolean;
+  syncStrategy?: 'optimistic' | 'pessimistic';
+  syncTimeoutMs?: number;
+  enableAutoSync?: boolean;
+  lastGlobalSync?: string;
+  defaultSort: string;
+  lastModified: string;
+}
+
+/**
+ * Email Metadata with Dynamic Kanban Support
+ */
+export interface EmailMetadata {
+  userId: string;
+  emailId: string;
+  threadId: string;
+  
+  // Dynamic Kanban
+  labelIds: string[];              // Source of Truth
+  cachedColumnId?: string;         // Derived cache
+  cachedColumnName?: string;
+  kanbanUpdatedAt?: string;
+  previousColumnId?: string;
+  
+  // Sync Status
+  syncStatus?: {
+    state: 'SYNCED' | 'PENDING' | 'ERROR';
+    lastAttempt?: string;
+    errorMessage?: string;
+    retryCount?: number;
+  };
+  
+  // AI Summary
+  summary?: string;
+  summaryGeneratedAt?: string;
+  summaryModel?: string;
+  
+  // Snooze
+  snoozedUntil?: string;
+  isSnoozed?: boolean;
+  
+  // Cached Gmail data
+  subject?: string;
+  from?: string;
+  snippet?: string;
+  receivedDate?: string;
+  
+  // Semantic search
+  embedding?: number[];
+  embeddingText?: string;
+  embeddingGeneratedAt?: string;
+}
+
 // Đổi tên MailList thành Mail để dùng chung cho cả app
 export interface Mail {
   id: string;
@@ -27,6 +112,22 @@ export interface Mail {
   isUnread: boolean;
   isStarred: boolean;
   hasAttachment?: boolean;
+
+  // Semantic search similarity score (0-1, higher = more similar)
+  similarityScore?: number;
+  
+  // WEEK 4: Dynamic Kanban fields
+  cachedColumnId?: string;
+  cachedColumnName?: string;
+  summary?: string;
+  isPendingSync?: boolean;
+}
+
+export interface Attachment {
+  filename: string;
+  mimeType: string;
+  attachmentId: string;
+  size: number;
 }
 
 export interface Header {
@@ -70,7 +171,7 @@ export interface EmailData {
   messageId: string;
   htmlBody: string;
   textBody: string;
-  attachments: any[]; // Mảng rỗng trong data mẫu, thường sẽ là object chứa attachmentId
+  attachments: Attachment[];
   sizeEstimate: number;
   historyId: string;
   internalDate: string; // Lưu ý: Trong JSON là chuỗi (string), dù giá trị giống số

@@ -3,12 +3,14 @@ import { Document } from 'mongoose';
 
 export type EmailMetadataDocument = EmailMetadata & Document;
 
-// Enum cho Kanban status
-// ⚠️ INBOX không có trong enum vì emails trong inbox không lưu DB
-export enum EmailStatus {
-  TODO = 'TODO',
-  IN_PROGRESS = 'IN_PROGRESS',
-  DONE = 'DONE',
+// ============================================
+// SYNC STATUS - Theo dõi trạng thái đồng bộ với Gmail
+// ============================================
+export interface SyncStatus {
+  state: 'SYNCED' | 'PENDING' | 'ERROR';
+  lastAttempt?: Date;
+  errorMessage?: string;
+  retryCount?: number;
 }
 
 @Schema({ timestamps: true })
@@ -23,17 +25,56 @@ export class EmailMetadata {
   threadId: string; // Gmail thread ID
 
   // ============================================
-  // KANBAN STATUS 
+  // DYNAMIC KANBAN - SOURCE OF TRUTH
   // ============================================
-  @Prop({ 
-    type: String, 
-    enum: Object.values(EmailStatus),
-    required: true
-  })
-  status: EmailStatus; // Main status field (TODO/IN_PROGRESS/DONE only)
+  /**
+   * [PRIMARY] Gmail Label IDs - Source of Truth
+   * Ví dụ: ['INBOX', 'STARRED', 'Label_123']
+   * Luôn đồng bộ với Gmail, không bị mất khi user xóa column
+   */
+  @Prop({ type: [String], default: [] })
+  labelIds: string[];
 
+  /**
+   * [CACHE] Column ID hiện tại - Derived từ labelIds
+   * Dùng để query nhanh, nhưng có thể tính toán lại từ labelIds + KanbanConfig
+   * Có thể null nếu email không thuộc column nào (chỉ ở INBOX)
+   */
   @Prop()
-  statusUpdatedAt?: Date; // Timestamp khi status thay đổi
+  cachedColumnId?: string;
+
+  /**
+   * [CACHE] Column name - Denormalized để hiển thị nhanh
+   */
+  @Prop()
+  cachedColumnName?: string;
+
+  /**
+   * Timestamp khi email được move giữa các columns
+   */
+  @Prop()
+  kanbanUpdatedAt?: Date;
+
+  /**
+   * Column trước đó - Dùng cho undo operation
+   */
+  @Prop()
+  previousColumnId?: string;
+
+  // ============================================
+  // GMAIL SYNC STATE
+  // ============================================
+  /**
+   * Trạng thái đồng bộ với Gmail API
+   * - SYNCED: Đã sync thành công
+   * - PENDING: Đang chờ sync (optimistic update)
+   * - ERROR: Sync thất bại, cần retry
+   */
+  @Prop({ 
+    type: Object,
+    default: { state: 'SYNCED', retryCount: 0 }
+  })
+  syncStatus: SyncStatus;
 
 
 
@@ -55,8 +96,7 @@ export class EmailMetadata {
   @Prop()
   snoozedUntil?: Date; // When to wake up the email
 
-  @Prop()
-  originalStatus?: string; // Status before snoozing (TODO/IN_PROGRESS/DONE)
+  // Note: previousColumnId (đã định nghĩa ở trên) dùng cho cả snooze và undo operations
 
   @Prop({ default: false })
   isSnoozed: boolean;
@@ -106,8 +146,17 @@ EmailMetadataSchema.index({ isSnoozed: 1, snoozedUntil: 1 });
 // Index for finding user's emails with summaries
 EmailMetadataSchema.index({ userId: 1, summary: 1 });
 
-// Index for Kanban queries by status
-EmailMetadataSchema.index({ userId: 1, status: 1 });
+// ============================================
+// DYNAMIC KANBAN INDEXES
+// ============================================
+// Compound index cho Kanban queries by cached column
+EmailMetadataSchema.index({ userId: 1, cachedColumnId: 1 });
+
+// Index cho label-based queries (array field)
+EmailMetadataSchema.index({ userId: 1, labelIds: 1 });
+
+// Index cho pending sync operations
+EmailMetadataSchema.index({ 'syncStatus.state': 1, 'syncStatus.retryCount': 1 });
 
 // ============================================
 // TEXT SEARCH INDEX for Fuzzy Search

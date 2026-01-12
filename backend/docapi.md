@@ -12,7 +12,7 @@ Tài liệu này mô tả chi tiết các endpoint backend mà frontend (React S
   - Mail (Gmail proxy): `/mailboxes`, `/mailboxes/:id/emails`, `/emails/:id`
   - AI APIs: `/ai/summarize`, `/ai/batch-summarize`
   - Snooze APIs: `/emails/:id/snooze`, `/emails/:id/unsnooze`, `/snooze/list`
-  - Search APIs: `/search/fuzzy`, `/search/suggestions`
+  - Search APIs: `/search/fuzzy`, `/search/semantic`, `/search/suggestions`, `/search/index`
   - Kanban APIs: `/kanban/columns`, `/emails/:id/move`, `/kanban/config`
 - AI và Kanban APIs (Week 2 Features)
 - Ví dụ mã frontend (`fetch`) để login, refresh, gọi API mail
@@ -686,18 +686,190 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   - `500`: Search failed
 
 #### GET /search/suggestions
-- **Mục đích**: Lấy gợi ý tìm kiếm (autocomplete)
+- **Mục đích**: Lấy gợi ý tìm kiếm (autocomplete) từ sender và subject
 - **Auth**: Required (Bearer token)
 - **Query Parameters**:
-  - `prefix` (required): Prefix string để suggest
-  - `limit` (optional): Số lượng suggestions (default: 5)
+  - `prefix` (required): Prefix string để suggest (min 2 chars)
+  - `limit` (optional): Số lượng suggestions (default: 5, max: 10)
+- **Caching**: MongoDB TTL cache (1 hour expiration)
 - **Response**:
   ```json
   {
     "status": 200,
     "data": {
       "suggestions": [
-        "Instagram",
+        {
+          "value": "Looking Ahead to Motion in 2026",
+          "type": "subject"
+        },
+        {
+          "value": "iconscout@mail.iconscout.com",
+          "type": "sender"
+        }
+      ],
+      "prefix": "look",
+      "cached": true
+    }
+  }
+  ```
+- **Suggestion Priority**:
+  1. Subjects (prioritized for semantic search relevance)
+  2. Senders (normalized to email addresses)
+- **Data Processing**:
+  - Extracts from 200 recent INBOX emails
+  - Normalizes senders: "Name <email@domain.com>" → "email@domain.com"
+  - Cleans subjects: Removes "Re:", "Fwd:" prefixes
+  - Minimum subject length: 3 characters
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/suggestions?prefix=${encodeURIComponent(prefix)}&limit=5`, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
+  const data = await res.json();
+  // Display suggestions in dropdown
+  ```
+- **Cache Behavior**:
+  - First request: Fetch from Gmail API → Cache in MongoDB
+  - Subsequent requests: Serve from cache (instant)
+  - TTL: 1 hour (auto-cleanup via MongoDB index)
+
+#### POST /search/semantic
+- **Mục đích**: Tìm kiếm emails theo ý nghĩa (concept-based search) sử dụng AI embeddings
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "query": "meeting about project deadline",
+    "limit": 20,
+    "threshold": 0.5
+  }
+  ```
+- **Query Processing**:
+  1. Generate embedding cho query (768 dimensions)
+  2. Compare với embeddings của emails trong database
+  3. Calculate cosine similarity scores
+  4. Filter results với threshold (default: 0.5)
+  5. Sort by similarity score (highest first)
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "query": "meeting about project deadline",
+      "results": [
+        {
+          "emailId": "19aba6e5873a9087",
+          "threadId": "19aba6e5873a9087",
+          "subject": "Q4 Project Milestone Discussion",
+          "from": "manager@company.com",
+          "snippet": "Let's discuss the upcoming project milestones and deadlines...",
+          "receivedDate": "2025-12-20T14:30:00.000Z",
+          "similarityScore": 0.87,
+          "matchedText": "From: manager@company.com\nSubject: Q4 Project Milestone Discussion\nLet's discuss..."
+        }
+      ],
+      "totalResults": 5,
+      "processingTimeMs": 1240
+    }
+  }
+  ```
+- **Auto-Indexing**: Nếu chưa có embeddings → tự động index 200 emails gần nhất
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "query": "meeting",
+      "results": [],
+      "totalResults": 0,
+      "message": "Indexing emails in background. Please try again in a few seconds."
+    }
+  }
+  ```
+- **Semantic Features**:
+  - Concept matching: "meeting" → finds "discussion", "call", "sync"
+  - Language understanding: "urgent" → finds "ASAP", "critical", "important"
+  - Context awareness: Considers sender, subject, and body together
+  - Embedding text includes: `From: <sender>\nSubject: <subject>\n<body>`
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/semantic`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query: searchQuery,
+      limit: 50,
+      threshold: 0.5
+    })
+  });
+  const data = await res.json();
+  ```
+- **Performance**:
+  - Query embedding: 1 Gemini API call (~200ms)
+  - Similarity calculation: Local computation (O(N) where N = indexed emails)
+  - Gmail API calls: Only for matched emails (typically 5-20)
+  - Total time: ~1-2 seconds for 200 indexed emails
+
+#### POST /search/index
+- **Mục đích**: Manually trigger email indexing cho semantic search
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "limit": 200
+  }
+  ```
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "success": 185,
+      "failed": 15,
+      "failedEmails": [
+        "email_id_1 (Network timeout)",
+        "email_id_2 (Empty content)"
+      ]
+    }
+  }
+  ```
+- **Indexing Process**:
+  1. Fetch N recent emails from INBOX
+  2. For each email: Generate embedding (768D vector)
+  3. Store embedding + text in MongoDB
+  4. Retry failed emails (max 2 retries)
+- **Auto-Indexing on First Login**: Triggered automatically for new users
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/search/index`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ limit: 200 })
+  });
+  ```
+
+#### GET /search/index/stats
+- **Mục đích**: Lấy thống kê indexing status
+- **Auth**: Required (Bearer token)
+- **Response**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "totalEmails": 250,
+      "indexedEmails": 200,
+      "pendingEmails": 50,
+      "lastIndexedAt": "2025-12-24T18:30:00.000Z"
+    }
+  }
+  ```
         "Invoice",
         "Important meeting"
       ]
@@ -705,125 +877,532 @@ Lưu ý: các URL mặc định dùng port backend 5000 (http://localhost:5000) 
   }
   ```
 
-### Kanban APIs
+### Kanban APIs (Dynamic Columns with Gmail Label Sync)
 
-#### GET /kanban/columns
-- **Mục đích**: Lấy tất cả emails trong Kanban board (TODO/DONE columns)
-- **Auth**: Required (Bearer token)
-- **Response**:
-  ```json
-  {
-    "todo": [
-      {
-        "id": "email1",
-        "threadId": "thread1",
-        "subject": "Task 1",
-        "from": "sender@example.com",
-        "snippet": "...",
-        "summary": "AI-generated summary",
-        "status": "TODO",
-        "order": 0
-      }
-    ],
-    "done": [
-      {
-        "id": "email2",
-        "threadId": "thread2",
-        "subject": "Task 2",
-        "status": "DONE",
-        "order": 0
-      }
-    ]
-  }
-  ```
+> **🎯 Kiến trúc:** Mỗi cột Kanban ánh xạ tới một Gmail Label. Moving emails = thay đổi labels trong Gmail. Inbox luôn hiện diện (không lưu DB), các cột khác là custom columns với Gmail label mapping.
 
-#### POST /emails/:id/move
-- **Mục đích**: Di chuyển email giữa các columns trong Kanban
+---
+
+#### GET /kanban/config
+- **Mục đích**: Lấy cấu hình Kanban board của user (danh sách columns)
 - **Auth**: Required (Bearer token)
-- **Params**: `:id` - Message ID
-- **Body**:
-  ```json
-  {
-    "threadId": "19aba6e5873a9087",
-    "fromStatus": "INBOX",
-    "toStatus": "TODO",
-    "destinationIndex": 2
-  }
-  ```
-- **Response**:
+- **Response 200**:
   ```json
   {
     "status": 200,
-    "message": "Email moved successfully",
     "data": {
-      "emailId": "19aba6e5873a9087",
-      "newStatus": "TODO",
-      "order": 2
+      "_id": "507f1f77bcf86cd799439011",
+      "userId": "user-123",
+      "columns": [
+        {
+          "id": "todo",
+          "name": "To Do",
+          "order": 0,
+          "gmailLabel": "STARRED",
+          "gmailLabelName": "Starred",
+          "mappingType": "label",
+          "color": "#FFA500",
+          "isVisible": true,
+          "emailCount": 15,
+          "hasLabelError": false
+        },
+        {
+          "id": "done_1735901234567",
+          "name": "Done",
+          "order": 1,
+          "gmailLabel": "Label_123",
+          "gmailLabelName": "Done",
+          "mappingType": "label",
+          "color": "#32CD32",
+          "isVisible": true,
+          "emailCount": 8,
+          "hasLabelError": false
+        }
+      ],
+      "showInbox": true,
+      "defaultSort": "date",
+      "lastModified": "2026-01-03T10:30:00.000Z"
     }
   }
   ```
-- **Supported statuses**: `INBOX`, `TODO`, `DONE`, `SNOOZED`
+- **Lưu ý**:
+  - `gmailLabel`: Gmail API label ID (ví dụ: `STARRED`, `Label_123`)
+  - `gmailLabelName`: Tên hiển thị thân thiện (lưu trong MongoDB)
+  - `hasLabelError: true`: Gmail label đã bị xóa (cần recovery)
+  - Cột Inbox KHÔNG được trả về trong config (được xử lý riêng ở frontend)
+
+---
+
+#### POST /kanban/columns
+- **Mục đích**: Tạo cột Kanban mới với Gmail label mapping
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "name": "Urgent",
+    "color": "#FF0000",
+    "gmailLabel": "Urgent",
+    "createNewLabel": true
+  }
+  ```
+- **Parameters**:
+  - `name` (string, bắt buộc): Tên cột hiển thị (tối đa 100 ký tự)
+  - `color` (string, tùy chọn): Mã hex màu, mặc định: `#64748b`
+  - `gmailLabel` (string, bắt buộc): Gmail label để ánh xạ
+  - `createNewLabel` (boolean, bắt buộc): 
+    - `true`: Tạo Gmail label mới
+    - `false`: Ánh xạ tới label hiện có
+- **Response 201**:
+  ```json
+  {
+    "status": 201,
+    "message": "Column created successfully",
+    "data": {
+      "id": "urgent_1735901234567",
+      "name": "Urgent",
+      "order": 2,
+      "gmailLabel": "Label_456",
+      "gmailLabelName": "Urgent",
+      "newLabelId": "Label_456",
+      "mappingType": "label",
+      "color": "#FF0000",
+      "isVisible": true,
+      "emailCount": 0
+    }
+  }
+  ```
+- **Response 400 - Validation Errors**:
+  ```json
+  {
+    "status": 400,
+    "message": "Cannot create new label with reserved Gmail label name \"inbox\". Reserved labels: inbox, sent, drafts, spam, trash, starred, important, unread, chat, scheduled, snoozed. Tip: Use \"Map to existing label\" option to map with system labels like IMPORTANT, STARRED, etc."
+  }
+  ```
+  ```json
+  {
+    "status": 400,
+    "message": "Gmail label \"STARRED\" is already mapped to column \"To Do\""
+  }
+  ```
+- **Lưu ý**:
+  - **Reserved Labels**: KHÔNG thể TẠO label mới tên `inbox`, `sent`, `drafts`, `spam`, `trash`, `starred`, `important`, `unread`, `chat`, `scheduled`, `snoozed`
+  - **System Label Mapping**: CÓ THỂ ánh xạ tới system labels hiện có (ví dụ: `STARRED`, `IMPORTANT`) bằng cách set `createNewLabel: false`
+  - **Duplicate Prevention**: Backend validate không có hai cột ánh xạ cùng một Gmail label
 - **Example**:
   ```js
-  const res = await fetch(BACKEND + `/emails/${emailId}/move`, {
+  const res = await fetch(BACKEND + '/kanban/columns', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      threadId: email.threadId,
-      fromStatus: 'INBOX',
-      toStatus: 'TODO',
-      destinationIndex: 2
+      name: 'High Priority',
+      color: '#FF4500',
+      gmailLabel: 'IMPORTANT',
+      createNewLabel: false // Map to existing system label
     })
   });
   ```
 
-#### GET /kanban/config
-- **Mục đích**: Lấy cấu hình Kanban board của user (custom columns)
+---
+
+#### PUT /kanban/columns/:columnId
+- **Mục đích**: Cập nhật thuộc tính cột (tên, màu, hiển thị)
 - **Auth**: Required (Bearer token)
-- **Response**:
+- **Params**: `:columnId` - ID cột
+- **Body**:
   ```json
   {
-    "columns": [
-      {
-        "id": "col1",
-        "name": "Backlog",
-        "color": "#3B82F6",
-        "order": 0
-      },
-      {
-        "id": "col2",
-        "name": "In Review",
-        "color": "#F59E0B",
-        "order": 1
-      }
-    ]
+    "name": "High Priority",
+    "color": "#FF4500",
+    "isVisible": true
   }
   ```
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column updated successfully",
+    "data": {
+      "id": "urgent_1735901234567",
+      "name": "High Priority",
+      "color": "#FF4500",
+      "isVisible": true
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Không thể cập nhật `gmailLabel` trực tiếp (dùng endpoint `remap-label` thay thế)
+  - Frontend sử dụng optimistic update với rollback khi lỗi
 
-#### POST /kanban/columns
-- **Mục đích**: Tạo custom column mới trong Kanban
+---
+
+#### POST /kanban/columns/reorder
+- **Mục đích**: Sắp xếp lại thứ tự các cột (thay đổi thứ tự hiển thị)
 - **Auth**: Required (Bearer token)
 - **Body**:
   ```json
   {
-    "name": "Testing",
-    "color": "#10B981",
-    "order": 2
+    "columnOrder": [
+      "urgent_1735901234567",
+      "todo",
+      "done_1735901234567"
+    ]
   }
   ```
-- **Response**:
+- **Response 200**:
   ```json
   {
     "status": 200,
-    "message": "Column created successfully",
+    "message": "Columns reordered successfully",
     "data": {
-      "id": "col3",
-      "name": "Testing",
-      "color": "#10B981",
-      "order": 2
+      "columns": [
+        {
+          "id": "urgent_1735901234567",
+          "name": "Urgent",
+          "order": 0
+        },
+        {
+          "id": "todo",
+          "name": "To Do",
+          "order": 1
+        },
+        {
+          "id": "done_1735901234567",
+          "name": "Done",
+          "order": 2
+        }
+      ]
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Frontend sử dụng optimistic update và hiển thị success toast
+  - Rollback và error toast nếu API call thất bại
+
+---
+
+#### POST /kanban/columns/:columnId/remap-label
+- **Mục đích**: Ánh xạ lại cột tới Gmail label khác (dùng cho recovery sau khi label bị xóa)
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột cần remap
+- **Body**:
+  ```json
+  {
+    "gmailLabel": "Label_789",
+    "gmailLabelName": "Urgent Tasks",
+    "createNewLabel": false
+  }
+  ```
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column remapped to label \"Urgent Tasks\" successfully",
+    "data": {
+      "id": "urgent_1735901234567",
+      "name": "Urgent",
+      "gmailLabel": "Label_789",
+      "gmailLabelName": "Urgent Tasks",
+      "hasLabelError": false,
+      "labelErrorMessage": null
+    }
+  }
+  ```
+- **Use Cases**:
+  - **Gmail label bị xóa**: User có thể remap cột tới label mới/hiện có
+  - **Thay đổi label mapping**: Chuyển cột sang label khác mà không cần tạo lại cột
+- **Lưu ý**:
+  - Xóa flag `hasLabelError` khi remap thành công
+  - Sử dụng bởi component `RecoverLabelModal` với optimistic update
+
+---
+
+#### POST /kanban/columns/:columnId/delete
+- **Mục đích**: Xóa cột Kanban (tùy chọn xóa Gmail label)
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột cần xóa
+- **Body**:
+  ```json
+  {
+    "deleteGmailLabel": false
+  }
+  ```
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Column deleted successfully",
+    "data": {
+      "deletedColumnId": "urgent_1735901234567",
+      "gmailLabelDeleted": false
+    }
+  }
+  ```
+- **Lưu ý**:
+  - **Optimistic deletion**: Frontend xóa cột ngay lập tức, rollback khi lỗi
+  - Không thể xóa system columns (`isSystem: true`)
+  - Nếu `deleteGmailLabel: true`, cũng xóa Gmail label (cẩn thận!)
+
+---
+
+#### POST /kanban/columns/:columnId/clear-error
+- **Mục đích**: Xóa flag lỗi label (sau khi user tự tạo lại Gmail label)
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Label error cleared",
+    "data": {
+      "id": "urgent_1735901234567",
+      "hasLabelError": false,
+      "labelErrorMessage": null
+    }
+  }
+  ```
+
+---
+
+#### GET /kanban/columns/:columnId/emails
+- **Mục đích**: Lấy danh sách emails cho một cột Kanban cụ thể
+- **Auth**: Required (Bearer token)
+- **Params**: `:columnId` - ID cột
+- **Query**: 
+  - `limit` (tùy chọn): Số email tối đa trả về (mặc định: 50)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "messages": [
+        {
+          "id": "msg_123abc",
+          "threadId": "thread_456def",
+          "subject": "Project Update",
+          "from": "Alice <alice@example.com>",
+          "to": "me@gmail.com",
+          "snippet": "Here's the latest update on the project...",
+          "summary": "Alice provides a project status update with three key milestones.",
+          "date": "2026-01-03T09:15:00.000Z",
+          "isUnread": true,
+          "hasAttachment": false,
+          "labelIds": ["STARRED", "INBOX"],
+          "htmlBody": "<div>...</div>",
+          "textBody": "Here's the latest update..."
+        }
+      ],
+      "total": 15
+    }
+  }
+  ```
+- **Response 404 - Label Error**:
+  ```json
+  {
+    "status": 404,
+    "message": "Gmail label not found. It may have been deleted.",
+    "data": {
+      "hasLabelError": true,
+      "labelErrorMessage": "Gmail label not found",
+      "labelErrorDetectedAt": "2026-01-03T10:00:00.000Z"
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Trả về emails có `gmailLabel` của cột từ Gmail API
+  - Bao gồm AI summary nếu đã được tạo trước đó
+  - `hasLabelError: true` kích hoạt recovery UI ở frontend
+- **Example**:
+  ```js
+  const res = await fetch(BACKEND + `/kanban/columns/todo/emails?limit=50`, {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const data = await res.json();
+  console.log('Emails in To Do:', data.data.messages);
+  ```
+
+---
+
+#### GET /mail/inbox
+- **Mục đích**: Lấy emails từ Gmail INBOX label (endpoint đặc biệt cho cột inbox)
+- **Auth**: Required (Bearer token)
+- **Query**: 
+  - `limit` (tùy chọn): Số email tối đa (mặc định: 50)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "messages": [
+      {
+        "id": "msg_789xyz",
+        "threadId": "thread_012abc",
+        "subject": "Meeting Tomorrow",
+        "from": "Bob <bob@example.com>",
+        "snippet": "Don't forget our meeting tomorrow at 2pm",
+        "date": "2026-01-03T08:00:00.000Z",
+        "isUnread": true,
+        "hasAttachment": false,
+        "labelIds": ["INBOX"],
+        "htmlBody": "<div>...</div>"
+      }
+    ]
+  }
+  ```
+- **Lưu ý**:
+  - Frontend áp dụng **client-side deduplication** (xóa emails đã có trong cột khác)
+  - Được fetch **SAU CÙNG** sau tất cả cột khác để đảm bảo filtering chính xác
+- **Example**:
+  ```js
+  // Frontend fetching strategy
+  // 1. Fetch non-inbox columns first
+  await Promise.all(
+    nonInboxColumns.map(col => fetchColumnEmails(col.id))
+  );
+  
+  // 2. Fetch inbox LAST for accurate deduplication
+  const inboxRes = await fetch(BACKEND + '/mail/inbox?limit=50', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  
+  // 3. Filter out emails already in other columns
+  const inboxEmails = inboxRes.messages.filter(email =>
+    !otherColumnEmailIds.has(email.id)
+  );
+  ```
+
+---
+
+#### POST /kanban/move
+- **Mục đích**: Di chuyển email giữa các cột Kanban (thay đổi Gmail labels)
+- **Auth**: Required (Bearer token)
+- **Body**:
+  ```json
+  {
+    "emailId": "msg_123abc",
+    "threadId": "thread_456def",
+    "fromColumnId": "inbox",
+    "toColumnId": "todo",
+    "destinationIndex": 0
+  }
+  ```
+- **Parameters**:
+  - `emailId` (string, bắt buộc): Gmail message ID
+  - `threadId` (string, bắt buộc): Gmail thread ID
+  - `fromColumnId` (string, bắt buộc): ID cột nguồn
+  - `toColumnId` (string, bắt buộc): ID cột đích
+  - `destinationIndex` (number, tùy chọn): Vị trí trong cột đích (chỉ UI, không persist)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Email moved successfully",
+    "data": {
+      "emailId": "msg_123abc",
+      "fromColumnId": "inbox",
+      "toColumnId": "todo",
+      "addedLabels": ["STARRED"],
+      "removedLabels": ["INBOX"],
+      "newMetadata": {
+        "cachedColumnId": "todo",
+        "labelIds": ["STARRED", "IMPORTANT"],
+        "kanbanUpdatedAt": "2026-01-03T10:30:00.000Z"
+      }
+    }
+  }
+  ```
+- **Special Cases**:
+  1. **Từ Inbox → Cột khác**:
+     - Xóa label `INBOX` (archives email trong Gmail)
+     - Thêm label của cột đích
+  2. **Từ Cột khác → Inbox**:
+     - Thêm label `INBOX` (un-archives email)
+     - Xóa label của cột nguồn
+  3. **Auto-Summary Generation**:
+     - Nếu di chuyển TỪ inbox VÀ email chưa có summary
+     - Backend tự động queue AI summarization task
+- **Lưu ý**:
+  - **Optimistic UI**: Frontend di chuyển email ngay lập tức, revert khi lỗi
+  - **EventEmitter**: Backend emit event `email.moved` để xử lý async
+  - **MongoDB Cache**: Cập nhật `EmailMetadata.cachedColumnId` và `labelIds`
+- **Example**:
+  ```js
+  // Optimistic move with rollback
+  const backup = [...columns];
+  setColumns(optimisticUpdate);
+  
+  try {
+    await fetch(BACKEND + '/kanban/move', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        emailId: email.id,
+        threadId: email.threadId,
+        fromColumnId: 'inbox',
+        toColumnId: 'todo'
+      })
+    });
+    showToast('Moved to To Do', 'success');
+  } catch (error) {
+    setColumns(backup); // Rollback
+    showToast('Failed to move email', 'error');
+  }
+  ```
+
+---
+
+#### GET /kanban/validate-labels
+- **Mục đích**: Validate tất cả Gmail labels của các cột vẫn tồn tại (check label bị xóa)
+- **Auth**: Required (Bearer token)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "data": {
+      "isValid": false,
+      "duplicates": [
+        {
+          "label": "STARRED",
+          "columns": ["todo", "urgent_1735901234567"]
+        }
+      ],
+      "missing": [
+        {
+          "columnId": "done_1735901234567",
+          "columnName": "Done",
+          "gmailLabel": "Label_123"
+        }
+      ]
+    }
+  }
+  ```
+- **Lưu ý**:
+  - Dùng cho health checks và diagnostics
+  - Missing labels kích hoạt recovery UI
+
+---
+
+#### POST /kanban/fix-duplicate-labels
+- **Mục đích**: Tự động fix các label mapping bị duplicate (admin/repair endpoint)
+- **Auth**: Required (Bearer token)
+- **Response 200**:
+  ```json
+  {
+    "status": 200,
+    "message": "Fixed 1 duplicate label mapping(s)",
+    "data": {
+      "fixed": [
+        {
+          "columnId": "urgent_1735901234567",
+          "oldLabel": "STARRED",
+          "newLabel": "Label_999",
+          "newLabelName": "Urgent (fixed)"
+        }
+      ]
     }
   }
   ```
@@ -1934,4 +2513,118 @@ curl -X POST http://localhost:5000/emails/msg_123/move \
 
 ---
 
-*Last updated: December 10, 2025 - Week 2 Implementation Complete*
+## 🔍 Week 4: Semantic Search & Auto-Suggestions
+
+### Architecture Overview
+
+**Semantic Search Pipeline:**
+```
+User Query → Gemini Embedding (768D) → Cosine Similarity → Filter (threshold 0.5) → Sort → Results
+     ↓                                         ↑
+  1 API call                          MongoDB Cached Embeddings
+                                      (From: sender, Subject: subject, Body: text)
+```
+
+**Auto-Suggestions Pipeline:**
+```
+User Input (≥2 chars) → Check MongoDB Cache → Return Suggestions
+                              ↓ (cache miss)
+                        Fetch 200 INBOX emails → Extract senders/subjects → Cache (1h TTL)
+```
+
+### Key Features
+
+#### 1. **Semantic Search (Meaning-based)**
+- **Technology**: Gemini text-embedding-004 (768 dimensions)
+- **Algorithm**: Cosine similarity matching
+- **Threshold**: 0.5 (configurable)
+- **Auto-Indexing**: Triggered on first login or first semantic search
+- **Performance**: 
+  - Indexing: 200 emails × 1 API call = ~60 seconds (one-time)
+  - Search: 1 API call + local computation = ~1-2 seconds
+- **Use Cases**:
+  - Concept matching: "meeting" finds "discussion", "call", "sync"
+  - Language understanding: "urgent" finds "ASAP", "critical"
+  - Context-aware: Searches across sender, subject, and body
+
+#### 2. **Auto-Suggestions (Autocomplete)**
+- **Technology**: MongoDB TTL cache (1-hour expiration)
+- **Data Source**: 200 recent INBOX emails
+- **Suggestion Types**:
+  - Subjects (prioritized for semantic relevance)
+  - Senders (normalized to email addresses)
+- **Processing**:
+  - Cleans subjects: Removes "Re:", "Fwd:" prefixes
+  - Normalizes senders: "Name <email@domain.com>" → "email@domain.com"
+  - Minimum length: 3 characters for subjects
+- **Performance**: 
+  - Cache hit: <10ms (instant)
+  - Cache miss: ~500ms (Gmail API fetch + cache store)
+
+#### 3. **Integration Flow**
+
+**Frontend → Backend → AI → Database:**
+```javascript
+// 1. User types "meet" → Show suggestions
+const suggestions = await fetch('/search/suggestions?prefix=meet&limit=5');
+// Returns: ["Meeting Notes 2025", "Team Meeting Schedule", ...]
+
+// 2. User clicks suggestion → Switch to semantic mode
+setSearchMode('semantic');
+router.push(`/inbox?q=${encodeURIComponent(suggestion)}`);
+
+// 3. Semantic search triggered
+const results = await fetch('/search/semantic', {
+  body: JSON.stringify({ query: suggestion, threshold: 0.5 })
+});
+// Returns emails ranked by similarity score (0.5-1.0)
+```
+
+### API Summary
+
+| Endpoint | Method | Purpose | Performance |
+|----------|--------|---------|-------------|
+| `/search/suggestions` | GET | Autocomplete dropdown | <10ms (cached) |
+| `/search/semantic` | POST | AI-powered search | ~1-2s |
+| `/search/fuzzy` | GET | Typo-tolerant search | ~100-200ms |
+| `/search/index` | POST | Manual indexing | ~60s (200 emails) |
+| `/search/index/stats` | GET | Indexing progress | <50ms |
+
+### Cost Analysis
+
+**Gemini API Quota:**
+- **Indexing** (one-time): 200 API calls per user
+- **Search**: 1 API call per query
+- **Total per user per day**: ~1 indexing + ~20 searches = ~220 API calls
+- **Free tier**: 1500 requests/day (supports ~75 users/day)
+
+### Auto-Indexing Behavior
+
+**Trigger Points:**
+1. **First Login**: Auto-index 200 emails in background
+2. **First Semantic Search**: If no embeddings found → auto-index
+3. **Manual Trigger**: User clicks "Index Emails" button
+
+**User Flow:**
+```
+Login → Background indexing starts → Toast notification
+     → Wait 30-60s → Semantic search enabled
+     → Click suggestion → Force semantic mode → Results!
+```
+
+### Error Handling
+
+**Indexing Errors:**
+- Network timeout: Retry (max 2)
+- Empty email: Skip
+- Rate limit: Wait and retry
+- Failed emails: Log and continue
+
+**Search Errors:**
+- No embeddings: Trigger auto-indexing + return message
+- Query too long: Truncate to 8000 chars
+- Gemini API error: Fallback to fuzzy search (optional)
+
+---
+
+*Last updated: December 24, 2025 - Week 4 Implementation Complete*

@@ -20,7 +20,7 @@ export class EmailMetadataService {
     userId: string,
     emailId: string,
     threadId: string,
-    status: string,
+    cachedColumnId: string,
   ) {
     return this.emailMetadataModel.findOneAndUpdate(
       { userId, emailId },
@@ -28,8 +28,8 @@ export class EmailMetadataService {
         userId,
         emailId,
         threadId,
-        status,
-        statusUpdatedAt: new Date(),
+        cachedColumnId,
+        kanbanUpdatedAt: new Date(),
       },
       { upsert: true, new: true },
     );
@@ -47,25 +47,24 @@ export class EmailMetadataService {
     userId: string;
     emailId: string;
     threadId: string;
-    status: string;
+    cachedColumnId?: string;
     subject?: string;
     from?: string;
     snippet?: string;
     receivedDate?: Date;
   }) {
-    const metadata = new this.emailMetadataModel({
+    return this.emailMetadataModel.create({
       ...data,
-      statusUpdatedAt: new Date(),
+      kanbanUpdatedAt: new Date(),
     });
-    return metadata.save();
   }
 
-  async getEmailsByStatus(userId: string, status: string) {
-    return this.emailMetadataModel.find({ userId, status }).sort({ statusUpdatedAt: -1 });
+  async getEmailsByStatus(userId: string, columnId: string) {
+    return this.emailMetadataModel.find({ userId, cachedColumnId: columnId }).sort({ kanbanUpdatedAt: -1 });
   }
 
-  async getAllEmailsForUser(userId: string) {
-    return this.emailMetadataModel.find({ userId }).sort({ statusUpdatedAt: -1 });
+  async getAllKanbanEmails(userId: string) {
+    return this.emailMetadataModel.find({ userId }).sort({ kanbanUpdatedAt: -1 });
   }
 
 
@@ -123,7 +122,7 @@ export class EmailMetadataService {
     emailId: string,
     threadId: string,
     snoozedUntil: Date,
-    originalStatus: string,
+    currentColumnId?: string,
   ) {
     return this.emailMetadataModel.findOneAndUpdate(
       { userId, emailId },
@@ -132,7 +131,7 @@ export class EmailMetadataService {
         emailId,
         threadId,
         snoozedUntil,
-        originalStatus,
+        previousColumnId: currentColumnId,
         isSnoozed: true,
       },
       { upsert: true, new: true },
@@ -145,7 +144,6 @@ export class EmailMetadataService {
       {
         isSnoozed: false,
         snoozedUntil: null,
-        originalStatus: null,
       },
       { new: true },
     );
@@ -164,7 +162,6 @@ export class EmailMetadataService {
       {
         isSnoozed: false,
         snoozedUntil: null,
-        originalStatus: null,
       },
     );
   }
