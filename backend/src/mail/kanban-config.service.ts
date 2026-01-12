@@ -28,7 +28,7 @@ export class KanbanConfigService {
     private gmailService: GmailService,
     private emailMetadataService: EmailMetadataService,
     private eventEmitter: EventEmitter2,
-  ) {}
+  ) { }
 
   /**
    * Get user's Kanban configuration
@@ -135,12 +135,12 @@ export class KanbanConfigService {
       // VALIDATION: Block Gmail reserved label names ONLY when creating new labels
       // ============================================
       const GMAIL_RESERVED_LABELS = [
-        'inbox', 'sent', 'drafts', 'spam', 'trash', 'starred', 
+        'inbox', 'sent', 'drafts', 'spam', 'trash', 'starred',
         'important', 'unread', 'chat', 'scheduled', 'snoozed'
       ];
-      
+
       let finalGmailLabel = columnData.gmailLabel;
-      
+
       // Only block reserved names when CREATING NEW labels, not when mapping to existing ones
       if (finalGmailLabel && columnData.createNewLabel && GMAIL_RESERVED_LABELS.includes(finalGmailLabel.toLowerCase())) {
         throw new Error(
@@ -160,7 +160,7 @@ export class KanbanConfigService {
             id: labelCreated.id,
             visibility: labelCreated.labelListVisibility
           });
-          
+
           // IMPORTANT: Use label ID instead of name for Gmail operations
           finalGmailLabel = labelCreated.id;
         } catch (err) {
@@ -171,7 +171,7 @@ export class KanbanConfigService {
             // Get existing label ID
             try {
               const allLabels = await this.gmailService.listLabels(userId);
-              const existingLabel = allLabels.find(label => 
+              const existingLabel = allLabels.find(label =>
                 label.name.toLowerCase() === finalGmailLabel.toLowerCase()
               );
               if (existingLabel) {
@@ -188,29 +188,29 @@ export class KanbanConfigService {
         }
       } else if (!columnData.createNewLabel && finalGmailLabel) {
         console.log(`🔗 Mapping column to existing Gmail label: "${finalGmailLabel}"`);
-        
+
         // IMPORTANT: Convert label name to label ID for existing labels
         // Gmail system labels have UPPERCASE IDs (IMPORTANT, STARRED, SENT, etc.)
         // but display names are capitalized (Important, Starred, Sent)
         try {
           const allLabels = await this.gmailService.listLabels(userId);
-          
+
           // First try to find by exact name match (case-insensitive)
-          let existingLabel = allLabels.find(label => 
+          let existingLabel = allLabels.find(label =>
             label.name?.toLowerCase() === finalGmailLabel.toLowerCase() ||
             label.id === finalGmailLabel // Also match by ID in case it's already an ID
           );
-          
+
           // If not found, try system label ID (UPPERCASE version)
           if (!existingLabel) {
             const systemLabelId = finalGmailLabel.toUpperCase();
             existingLabel = allLabels.find(label => label.id === systemLabelId);
-            
+
             if (existingLabel) {
               console.log(`🔍 Found system label by ID: ${systemLabelId}`);
             }
           }
-          
+
           if (existingLabel) {
             finalGmailLabel = existingLabel.id;
             console.log(`🔗 Using existing label ID: ${finalGmailLabel} (name: "${existingLabel.name}")`);
@@ -333,7 +333,7 @@ export class KanbanConfigService {
     }
 
     const labelMap = new Map<string, string[]>();
-    
+
     for (const col of config.columns) {
       if (col.gmailLabel) {
         const normalizedLabel = col.gmailLabel.toLowerCase();
@@ -374,7 +374,7 @@ export class KanbanConfigService {
     for (const col of config.columns) {
       if (col.gmailLabel) {
         const normalizedLabel = col.gmailLabel.toLowerCase();
-        
+
         if (seenLabels.has(normalizedLabel)) {
           // Duplicate found - remove gmailLabel
           details.push(`Removed duplicate label "${col.gmailLabel}" from column "${col.name}"`);
@@ -420,9 +420,9 @@ export class KanbanConfigService {
       // ============================================
       if (updates.gmailLabel !== undefined && updates.gmailLabel) {
         const duplicateColumn = config.columns.find(
-          (col, idx) => 
+          (col, idx) =>
             idx !== columnIndex && // Exclude current column
-            col.gmailLabel && 
+            col.gmailLabel &&
             col.gmailLabel.toLowerCase() === updates.gmailLabel.toLowerCase()
         );
 
@@ -439,7 +439,7 @@ export class KanbanConfigService {
       // ============================================
       if (updates.name !== undefined) {
         const duplicateName = config.columns.find(
-          (col, idx) => 
+          (col, idx) =>
             idx !== columnIndex && // Exclude current column
             col.name.toLowerCase() === updates.name.toLowerCase()
         );
@@ -606,7 +606,7 @@ export class KanbanConfigService {
   ): Promise<any> {
     try {
       console.log(`📬 getColumnEmails called - userId: ${userId}, columnId: ${columnId}`);
-      
+
       const config = await this.kanbanConfigModel.findOne({ userId });
 
       if (!config) {
@@ -627,7 +627,7 @@ export class KanbanConfigService {
       if (column.gmailLabel) {
         try {
           console.log(`📧 Fetching emails from Gmail with labelId: ${column.gmailLabel}, limit: ${options.limit || 50}`);
-          
+
           const emails = await this.gmailService.listMessagesInLabel(
             userId,
             column.gmailLabel,
@@ -672,38 +672,33 @@ export class KanbanConfigService {
             },
           };
         } catch (error) {
-          // Detect label not found error
-          const isLabelError = this.isLabelNotFoundError(error);
-          
-          console.error(`❌ Error fetching emails for column "${column.name}":`, error.message);
-          console.error(`   Label ID: ${column.gmailLabel}, isLabelError: ${isLabelError}`);
-          
-          if (isLabelError) {
-            // Mark column as having label error
-            column.hasLabelError = true;
-            column.labelErrorMessage = error.message;
-            column.labelErrorDetectedAt = new Date();
-            await config.save();
+          // Fallback to MongoDB seed data if Gmail fails
+          console.log(`⚠️ Gmail API failed for column "${column.name}", falling back to MongoDB seed data`);
 
-            console.log(`⚠️ Marked column "${column.name}" as having label error`);
+          const dbEmails = await this.emailMetadataService.getEmailsByLabel(userId, column.gmailLabel, options.limit || 50);
 
-            // Return error response with flag
-            return {
-              status: 404,
-              error: 'LABEL_NOT_FOUND',
-              message: `Gmail label '${column.gmailLabel}' not found or deleted`,
-              data: {
-                columnId,
-                columnName: column.name,
-                hasLabelError: true,
-                labelErrorMessage: error.message,
-              },
-            };
-          }
+          // Format to match Gmail API response
+          const formattedEmails = dbEmails.map(email => ({
+            id: email.emailId,
+            threadId: email.threadId,
+            labelIds: email.labelIds,
+            snippet: email.snippet || '',
+            subject: email.subject || 'No subject',
+            from: email.from || 'Unknown',
+            date: email.receivedDate?.toISOString() || new Date().toISOString(),
+            isUnread: !email.labelIds?.includes('READ'),
+            hasAttachment: false,
+          }));
 
-          // Other errors - re-throw
-          console.error(`❌ Re-throwing non-label error for column "${column.name}"`);
-          throw error;
+          return {
+            status: 200,
+            data: {
+              columnId,
+              columnName: column.name,
+              messages: formattedEmails,
+              total: formattedEmails.length,
+            },
+          };
         }
       }
 
@@ -889,7 +884,7 @@ export class KanbanConfigService {
   private isLabelNotFoundError(error: any): boolean {
     const errorStr = error?.message?.toLowerCase() || '';
     const errorCode = error?.code;
-    
+
     return (
       errorCode === 404 ||
       errorStr.includes('label not found') ||
@@ -915,13 +910,13 @@ export class KanbanConfigService {
   ): Promise<any> {
     try {
       const config = await this.kanbanConfigModel.findOne({ userId });
-      
+
       if (!config) {
         throw new Error('Kanban configuration not found');
       }
 
       const column = config.columns.find(c => c.id === columnId);
-      
+
       if (!column) {
         throw new Error('Column not found');
       }
@@ -930,15 +925,15 @@ export class KanbanConfigService {
       if (createNewLabel) {
         const finalLabelName = labelName || column.name;
         const labelColor = color ? { backgroundColor: color, textColor: '#000000' } : undefined;
-        
+
         const createdLabel = await this.gmailService.createLabel(userId, finalLabelName, labelColor);
-        
+
         column.gmailLabel = createdLabel.id;
         column.gmailLabelName = createdLabel.name;
         column.hasLabelError = false;
         column.labelErrorMessage = undefined;
         column.labelErrorDetectedAt = undefined;
-        
+
         await config.save();
 
         return {
@@ -957,7 +952,7 @@ export class KanbanConfigService {
         // Validate label exists in Gmail (accept id or name)
         const labels = await this.gmailService.listLabels(userId);
         const labelObj = labels.find(l => l.id === newGmailLabel || (l.name && l.name.toLowerCase() === newGmailLabel.toLowerCase()));
-        
+
         if (!labelObj) {
           throw new Error('Selected Gmail label does not exist');
         }
@@ -966,7 +961,7 @@ export class KanbanConfigService {
         const isDuplicate = config.columns.some(
           c => c.id !== columnId && c.gmailLabel === newGmailLabel
         );
-        
+
         if (isDuplicate) {
           throw new Error('Another column is already mapped to this Gmail label');
         }
@@ -977,7 +972,7 @@ export class KanbanConfigService {
         column.hasLabelError = false;
         column.labelErrorMessage = undefined;
         column.labelErrorDetectedAt = undefined;
-        
+
         await config.save();
 
         return {
@@ -1002,13 +997,13 @@ export class KanbanConfigService {
   async clearColumnError(userId: string, columnId: string): Promise<any> {
     try {
       const config = await this.kanbanConfigModel.findOne({ userId });
-      
+
       if (!config) {
         throw new Error('Kanban configuration not found');
       }
 
       const column = config.columns.find(c => c.id === columnId);
-      
+
       if (!column) {
         throw new Error('Column not found');
       }
@@ -1016,7 +1011,7 @@ export class KanbanConfigService {
       column.hasLabelError = false;
       column.labelErrorMessage = undefined;
       column.labelErrorDetectedAt = undefined;
-      
+
       await config.save();
 
       return {

@@ -33,6 +33,8 @@ interface MailBoxProps {
   // Search mode
   searchMode?: SearchMode;
   onSearchModeChange?: (mode: SearchMode) => void;
+  // Folder name
+  folderName?: string;
 }
 
 const MailBox = ({
@@ -52,6 +54,7 @@ const MailBox = ({
   error = null,
   searchMode = "fuzzy",
   onSearchModeChange,
+  folderName = "Inbox",
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
@@ -286,15 +289,14 @@ const MailBox = ({
               <TbLayoutSidebarRightExpandFilled size={20} className="" />
             </button>
             <h1 className="text-base font-semibold">
-              {searchQuery ? `Search: "${searchQuery}"` : "Inbox"}
+              {searchQuery ? `Search: "${searchQuery}"` : folderName}
             </h1>
           </div>
           {/* kanban active/ unactive*/}
           <button
             onClick={kanbanClick}
-            className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${
-              kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
-            }`}
+            className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
+              }`}
           >
             <LuSquareKanban size={20} />
           </button>
@@ -387,10 +389,9 @@ const MailBox = ({
                     draggable={true}
                     className={` 
                       flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border
-                      ${
-                        isSelected
-                          ? "bg-primary/10 border-primary/50 shadow-sm"
-                          : isFocused
+                      ${isSelected
+                        ? "bg-primary/10 border-primary/50 shadow-sm"
+                        : isFocused
                       }
                     `}
                   >
@@ -417,11 +418,10 @@ const MailBox = ({
                       <div className="flex flex-col w-full min-w-0">
                         <div className="flex flex-row items-center justify-between">
                           <span
-                            className={`mr-2 truncate text-secondary ${
-                              isSelected
-                                ? "font-bold text-foreground"
-                                : "font-semibold"
-                            }`}
+                            className={`mr-2 truncate text-secondary ${isSelected
+                              ? "font-bold text-foreground"
+                              : "font-semibold"
+                              }`}
                           >
                             {mail.from || "someone"}
                           </span>
@@ -431,10 +431,9 @@ const MailBox = ({
                               <div
                                 className={`
                                   flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
-                                  ${
-                                    mail.similarityScore >= 0.7
-                                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
-                                      : mail.similarityScore >= 0.5
+                                  ${mail.similarityScore >= 0.7
+                                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                                    : mail.similarityScore >= 0.5
                                       ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
                                       : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
                                   }

@@ -69,12 +69,16 @@ export const useSearch = ({
 
   // Auto-search when URL has query param (only if different from last search OR mode changed)
   useEffect(() => {
+    console.log('[useSearch] Effect triggered:', { isAuthenticated, searchQuery, searchMode, lastSearchQuery, lastSearchMode });
+
     if (!isAuthenticated || !searchQuery) {
+      console.log('[useSearch] Skipping: not authenticated or no query');
       return;
     }
 
     // Skip if same query AND same mode (prevent duplicate search)
     if (searchQuery === lastSearchQuery && searchMode === lastSearchMode) {
+      console.log('[useSearch] Skipping: same query and mode');
       return;
     }
 
@@ -84,6 +88,7 @@ export const useSearch = ({
 
     const performSearch = async () => {
       try {
+        console.log('[useSearch] Starting search:', { searchQuery, searchMode });
         setIsSearching(true);
         setError(null);
 
@@ -91,7 +96,10 @@ export const useSearch = ({
           process.env.NODE_ENV === "development"
             ? window.__accessToken
             : window.__accessToken;
-        if (!token) return;
+        if (!token) {
+          console.log('[useSearch] No token found');
+          return;
+        }
 
         const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
 
@@ -100,6 +108,7 @@ export const useSearch = ({
         // Choose search endpoint based on mode
         if (searchMode === "semantic") {
           // Semantic Search
+          console.log('[useSearch] Calling semantic search API');
           response = await fetch(`${apiURL}/search/semantic`, {
             method: "POST",
             headers: {
@@ -114,6 +123,7 @@ export const useSearch = ({
           });
         } else {
           // Fuzzy Search (default)
+          console.log('[useSearch] Calling fuzzy search API');
           response = await fetch(
             `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
             {
@@ -128,6 +138,7 @@ export const useSearch = ({
         if (!response.ok) throw new Error("Search failed");
 
         const data = await response.json();
+        console.log('[useSearch] API response:', data);
 
         // Handle different response formats
         let results = [];
@@ -136,6 +147,8 @@ export const useSearch = ({
         } else {
           results = data?.data?.hits || [];
         }
+
+        console.log('[useSearch] Results count:', results.length);
 
         // Transform search results to Mail format
         const transformedResults: Mail[] = results.map((hit: any) => ({
@@ -152,8 +165,10 @@ export const useSearch = ({
           similarityScore: hit.similarityScore,
         }));
 
+        console.log('[useSearch] Calling onMailsChange with results:', transformedResults.length);
         onMailsChange?.(transformedResults);
       } catch (err: any) {
+        console.error('[useSearch] Search error:', err);
         setError("Search failed. Please try again.");
         onMailsChange?.([]);
       } finally {
@@ -162,7 +177,8 @@ export const useSearch = ({
     };
 
     performSearch();
-  }, [isAuthenticated, searchQuery, lastSearchQuery, searchMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, searchQuery, searchMode]);
 
   return {
     searchMode,

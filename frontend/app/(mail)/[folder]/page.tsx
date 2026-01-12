@@ -23,6 +23,20 @@ const FOLDER_MAP: Record<string, string> = {
   archive: "ARCHIVE",
 };
 
+// Helper function to get display name from folder slug
+const getFolderDisplayName = (slug: string): string => {
+  const displayNames: Record<string, string> = {
+    inbox: "Inbox",
+    starred: "Starred",
+    sent: "Sent",
+    drafts: "Drafts",
+    spam: "Spam",
+    trash: "Trash",
+    archive: "Archive",
+  };
+  return displayNames[slug?.toLowerCase()] || "Inbox";
+};
+
 export default function FolderPage() {
   const router = useRouter();
   const params = useParams();
@@ -33,24 +47,35 @@ export default function FolderPage() {
   // Get folder from URL params
   const folderSlug = params.folder as string;
   const folderId = FOLDER_MAP[folderSlug?.toLowerCase()] || "INBOX";
+  const folderDisplayName = getFolderDisplayName(folderSlug);
 
   // Search query from URL
   const searchQuery = searchParams.get("q");
 
-  // Use custom hook to fetch mails
+  // State for mails (will be updated by either useMailFolder or useSearch)
+  const [mails, setMails] = useState<Mail[]>([]);
+
+  // Use custom hook to fetch mails (only when NOT searching)
   const {
-    mails,
+    mails: folderMails,
     isLoading: isMailsLoading,
     error,
     hasMore,
     isLoadingMore,
     loadMoreMails,
     refreshMails,
-  } = useMailFolder({ folderId, searchQuery });
+  } = useMailFolder({ folderId, searchQuery: null }); // Don't pass searchQuery
 
   // Use search hook for search functionality
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Stable callback for updating mails from search
+  const handleMailsChange = useCallback((newMails: Mail[]) => {
+    console.log('[Page] onMailsChange called with mails:', newMails.length);
+    setMails(newMails);
+  }, []);
+
   const {
     searchMode,
     setSearchMode,
@@ -61,10 +86,19 @@ export default function FolderPage() {
   } = useSearch({
     folderSlug,
     isAuthenticated,
-    onMailsChange: () => {}, // We use useMailFolder for mails
+    onMailsChange: handleMailsChange,
     onErrorChange: setSearchError,
     onLoadingChange: setIsSearching,
   });
+
+  // Update mails when folder mails change (only if not searching)
+  useEffect(() => {
+    console.log('[Page] Folder mails effect:', { searchQuery, folderMailsCount: folderMails.length });
+    if (!searchQuery) {
+      console.log('[Page] Setting mails from folderMails:', folderMails.length);
+      setMails(folderMails);
+    }
+  }, [folderMails, searchQuery]);
 
   // Update local states from hook
   useEffect(() => {
@@ -238,7 +272,7 @@ export default function FolderPage() {
             isLoadingMore={isLoadingMore}
             hasMore={hasMore}
             kanbanMode={isKanBanMode}
-            kanbanClick={() => {}}
+            kanbanClick={() => { }}
             searchQuery={searchQuery ?? undefined}
             onSearch={handleSearch}
             onClearSearch={onClearSearch}
@@ -246,6 +280,7 @@ export default function FolderPage() {
             error={combinedError}
             searchMode={searchMode}
             onSearchModeChange={setSearchMode}
+            folderName={folderDisplayName}
           />
         )}
       </div>

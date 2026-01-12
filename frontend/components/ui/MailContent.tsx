@@ -8,7 +8,8 @@ import {
   IoMdSend,
 } from "react-icons/io";
 import { BsArchive, BsTrash3 } from "react-icons/bs";
-import { FaReply, FaShare, FaPaperclip, FaDownload } from "react-icons/fa";
+import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt } from "react-icons/fa";
+import { SiGmail } from "react-icons/si";
 import { type EmailData } from "@/types/index";
 
 // --- CẤU HÌNH API ---
@@ -349,6 +350,15 @@ const MailContent = ({
         </div>
 
         <div className="flex items-center gap-2 text-secondary">
+          <a
+            href={`https://mail.google.com/mail/u/0/#all/${mail.threadId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-500 cursor-pointer"
+            title="Open in Gmail"
+          >
+            <SiGmail size={18} />
+          </a>
           <button
             onClick={handleArchive}
             disabled={isArchiving}
@@ -406,7 +416,17 @@ const MailContent = ({
                 <span className="text-xs text-secondary">To: {mail.to}</span>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-secondary text-sm">
+            <div className="flex items-center gap-3 text-secondary text-sm">
+              <a
+                href={`https://mail.google.com/mail/u/0/#all/${mail.threadId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden md:flex items-center gap-1.5 hover:text-foreground hover:bg-muted px-2 py-1 rounded transition-colors text-xs font-medium"
+                title="Open in Gmail"
+              >
+                <SiGmail size={14} />
+                Open in Gmail
+              </a>
               <span>{formatDate(mail.date)}</span>
               <button className="p-1 hover:bg-muted rounded hover:text-foreground cursor-pointer">
                 <IoMdMore size={20} />
@@ -469,12 +489,11 @@ const MailContent = ({
                     </style>
                   </head>
                   <body>
-                    ${
-                      mail.htmlBody ||
-                      mail.textBody ||
-                      mail.snippet ||
-                      '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
-                    }
+                    ${mail.htmlBody ||
+                mail.textBody ||
+                mail.snippet ||
+                '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
+                }
                   </body>
                 </html>
               `}

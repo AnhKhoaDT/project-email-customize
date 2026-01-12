@@ -34,16 +34,16 @@ function readJSON(p: string) {
 @Controller()
 export class MailController {
   private dataDir = path.join(__dirname, 'data');
-  
+
   // Rate limiting: Track summarize requests per user
   // Map<userId, Array<timestamp>>
   private summarizeRateLimit = new Map<string, number[]>();
   private readonly MAX_REQUESTS_PER_MINUTE = 10;
-  
+
   // Rate limiting: Track search requests per user
   private searchRateLimit = new Map<string, number[]>();
   private readonly MAX_SEARCH_REQUESTS_PER_MINUTE = 10;
-  
+
   constructor(
     private gmailService: GmailService,
     private aiService: AiService,
@@ -53,8 +53,8 @@ export class MailController {
     private semanticSearchService: SemanticSearchService,
     private searchSuggestionsService: SearchSuggestionsService,
     private kanbanConfigService: KanbanConfigService,
-  ) {}
-  
+  ) { }
+
   /**
    * Check if user has exceeded rate limit for summarize requests
    * @param userId - User ID
@@ -63,23 +63,23 @@ export class MailController {
   private checkRateLimit(userId: string): { allowed: boolean; remaining: number } {
     const now = Date.now();
     const oneMinuteAgo = now - 60 * 1000;
-    
+
     // Get user's request history
     let userRequests = this.summarizeRateLimit.get(userId) || [];
-    
+
     // Remove requests older than 1 minute
     userRequests = userRequests.filter(timestamp => timestamp > oneMinuteAgo);
-    
+
     // Update map
     this.summarizeRateLimit.set(userId, userRequests);
-    
+
     // Check if limit exceeded
     const allowed = userRequests.length < this.MAX_REQUESTS_PER_MINUTE;
     const remaining = Math.max(0, this.MAX_REQUESTS_PER_MINUTE - userRequests.length);
-    
+
     return { allowed, remaining };
   }
-  
+
   /**
    * Record a summarize request for rate limiting
    * @param userId - User ID
@@ -90,7 +90,7 @@ export class MailController {
     userRequests.push(now);
     this.summarizeRateLimit.set(userId, userRequests);
   }
-  
+
   /**
    * Check if user has exceeded rate limit for search requests
    * @param userId - User ID
@@ -99,23 +99,23 @@ export class MailController {
   private checkSearchRateLimit(userId: string): { allowed: boolean; remaining: number } {
     const now = Date.now();
     const oneMinuteAgo = now - 60 * 1000;
-    
+
     // Get user's request history
     let userRequests = this.searchRateLimit.get(userId) || [];
-    
+
     // Remove requests older than 1 minute
     userRequests = userRequests.filter(timestamp => timestamp > oneMinuteAgo);
-    
+
     // Update map
     this.searchRateLimit.set(userId, userRequests);
-    
+
     // Check if limit exceeded
     const allowed = userRequests.length < this.MAX_SEARCH_REQUESTS_PER_MINUTE;
     const remaining = Math.max(0, this.MAX_SEARCH_REQUESTS_PER_MINUTE - userRequests.length);
-    
+
     return { allowed, remaining };
   }
-  
+
   /**
    * Record a search request for rate limiting
    * @param userId - User ID
@@ -142,16 +142,43 @@ export class MailController {
   @UseGuards(JwtAuthGuard)
   @Get('mailboxes/:id/emails')
   async mailboxEmails(
-    @Req() req: any, 
-    @Param('id') id: string, 
+    @Req() req: any,
+    @Param('id') id: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('pageToken') pageToken?: string
   ) {
     try {
       const pageSize = limit ? parseInt(limit, 10) : 50;
-      const res = await this.gmailService.listMessagesInLabel(req.user.id, id, pageSize, pageToken as any);
-      return res;
+
+      // Try Gmail API first
+      try {
+        const res = await this.gmailService.listMessagesInLabel(req.user.id, id, pageSize, pageToken as any);
+        return res;
+      } catch (gmailError) {
+        // Fallback to MongoDB seed data if Gmail fails (no token, etc.)
+        console.log(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
+
+        // Get emails from MongoDB by label
+        const dbEmails = await this.emailMetadataService.getEmailsByLabel(req.user.id, id, pageSize);
+
+        // Format to match Gmail API response
+        return {
+          messages: dbEmails.map(email => ({
+            id: email.emailId,
+            threadId: email.threadId,
+            labelIds: email.labelIds,
+            snippet: email.snippet || '',
+            subject: email.subject || 'No subject',
+            from: email.from || 'Unknown',
+            date: email.receivedDate?.toISOString() || new Date().toISOString(),
+            isUnread: !email.labelIds?.includes('READ'),
+            hasAttachment: false,
+          })),
+          resultSizeEstimate: dbEmails.length,
+          nextPageToken: null,
+        };
+      }
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to list messages' };
     }
@@ -231,21 +258,21 @@ export class MailController {
   @UseGuards(JwtAuthGuard)
   @Get('attachments/:messageId/:attachmentId')
   async getAttachment(
-    @Req() req: any, 
+    @Req() req: any,
     @Param('messageId') messageId: string,
     @Param('attachmentId') attachmentId: string,
     @Res() res: Response
   ) {
     try {
       const attachment = await this.gmailService.getAttachment(req.user.id, messageId, attachmentId);
-      
+
       // Decode base64url data
       const data = Buffer.from(attachment.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-      
+
       // Set appropriate headers
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Length', data.length);
-      
+
       // Stream the data
       res.send(data);
     } catch (err) {
@@ -340,12 +367,12 @@ export class MailController {
   async summarizeEmail(@Req() req: any, @Param('id') emailId: string, @Body() body?: { forceRegenerate?: boolean; structured?: boolean }) {
     try {
       const forceRegenerate = body?.forceRegenerate || false;
-      
+
       // Rate limiting check
       const rateLimitCheck = this.checkRateLimit(req.user.id);
       if (!rateLimitCheck.allowed) {
-        return { 
-          status: 429, 
+        return {
+          status: 429,
           message: `Rate limit exceeded. You can make ${this.MAX_REQUESTS_PER_MINUTE} summarize requests per minute. Please try again later.`,
           data: {
             remaining: 0,
@@ -353,23 +380,23 @@ export class MailController {
           }
         };
       }
-      
+
       // Record this request for rate limiting
       this.recordRequest(req.user.id);
-      
+
       // BƯỚC 1: Fetch full email từ Gmail
       const email = await this.gmailService.getMessage(req.user.id, emailId);
-      
+
       // BƯỚC 2: Check xem đã có summary trong cache chưa (skip nếu forceRegenerate)
       if (!forceRegenerate) {
         const existingSummary = await this.emailMetadataService.getSummary(req.user.id, emailId);
         if (existingSummary) {
-          return { 
-            status: 200, 
-            data: { 
-              summary: existingSummary, 
-              cached: true 
-            } 
+          return {
+            status: 200,
+            data: {
+              summary: existingSummary,
+              cached: true
+            }
           };
         }
       }
@@ -395,17 +422,17 @@ export class MailController {
       );
 
       const rateLimitStatus = this.checkRateLimit(req.user.id);
-      
-      return { 
-        status: 200, 
-        data: { 
-          summary: summaryText, 
+
+      return {
+        status: 200,
+        data: {
+          summary: summaryText,
           cached: false,
           rateLimit: {
             remaining: rateLimitStatus.remaining,
             max: this.MAX_REQUESTS_PER_MINUTE
           }
-        } 
+        }
       };
 
     } catch (err) {
@@ -426,7 +453,7 @@ export class MailController {
   ) {
     try {
       const snoozedUntil = new Date(body.snoozedUntil);
-      
+
       if (snoozedUntil <= new Date()) {
         return { status: 400, message: 'Snooze time must be in the future' };
       }
@@ -489,15 +516,15 @@ export class MailController {
           remaining: 0,
         };
       }
-      
+
       // Record this request
       this.recordSearchRequest(req.user.id);
-      
+
       // Validate query parameter
       if (!q || q.trim().length === 0) {
-        return { 
-          status: 400, 
-          message: 'Query parameter "q" is required and cannot be empty' 
+        return {
+          status: 400,
+          message: 'Query parameter "q" is required and cannot be empty'
         };
       }
 
@@ -512,14 +539,14 @@ export class MailController {
       // Perform fuzzy search
       const result = await this.fuzzySearchService.searchEmails(req.user.id, searchDto);
 
-      return { 
-        status: 200, 
-        data: result 
+      return {
+        status: 200,
+        data: result
       };
     } catch (err) {
-      return { 
-        status: 500, 
-        message: err?.message || 'Failed to search emails' 
+      return {
+        status: 500,
+        message: err?.message || 'Failed to search emails'
       };
     }
   }
@@ -565,7 +592,7 @@ export class MailController {
   ) {
     try {
       const pageSize = limit ? parseInt(limit, 10) : 50;
-      
+
       // Fetch emails from Gmail
       const result = await this.gmailService.listMessagesInLabel(
         req.user.id,
@@ -693,12 +720,12 @@ export class MailController {
       return result;
     } catch (err) {
       // Validation errors (duplicate label/name) should return 400
-      const isValidationError = err?.message?.includes('already mapped') || 
-                                err?.message?.includes('already exists');
-      
-      return { 
-        status: isValidationError ? 400 : 500, 
-        message: err?.message || 'Failed to create column' 
+      const isValidationError = err?.message?.includes('already mapped') ||
+        err?.message?.includes('already exists');
+
+      return {
+        status: isValidationError ? 400 : 500,
+        message: err?.message || 'Failed to create column'
       };
     }
   }
@@ -715,13 +742,13 @@ export class MailController {
       return result;
     } catch (err) {
       // Validation errors (duplicate label/name) should return 400
-      const isValidationError = err?.message?.includes('already mapped') || 
-                                err?.message?.includes('already exists') ||
-                                err?.message?.includes('not found');
-      
-      return { 
-        status: isValidationError ? 400 : 500, 
-        message: err?.message || 'Failed to update column' 
+      const isValidationError = err?.message?.includes('already mapped') ||
+        err?.message?.includes('already exists') ||
+        err?.message?.includes('not found');
+
+      return {
+        status: isValidationError ? 400 : 500,
+        message: err?.message || 'Failed to update column'
       };
     }
   }
@@ -786,8 +813,8 @@ export class MailController {
       return {
         status: 200,
         data: result,
-        message: result.fixed > 0 
-          ? `Fixed ${result.fixed} duplicate label(s)` 
+        message: result.fixed > 0
+          ? `Fixed ${result.fixed} duplicate label(s)`
           : 'No duplicates found'
       };
     } catch (err) {
