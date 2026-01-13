@@ -35,106 +35,158 @@ const embeddingModel = this.genAI.getGenerativeModel({
 
 ---
 
-## 🔧 Bước 2: Tạo Atlas Vector Search Index
+## 🔧 Bước 2: Tạo Vector Search Index
 
 ### 2.1. Login vào MongoDB Atlas
 
 1. Truy cập: https://cloud.mongodb.com
 2. Chọn cluster của bạn
-3. Click tab **"Atlas Search"** (bên cạnh "Collections")
+3. Click tab **"Atlas Search"** → Hoặc vào **Database** → Click **"Create Index"**
 
-### 2.2. Create Search Index
+### 2.2. Chọn Vector Search (QUAN TRỌNG!)
+
+**⚠️ KHÔNG CHỌN "Atlas Search"**
 
 1. Click **"Create Search Index"**
-2. Chọn **"JSON Editor"** (không dùng Visual Editor)
-3. Paste JSON config sau:
+2. **Chọn "Vector Search"** (màu xanh lá)
+   - ❌ KHÔNG chọn "Atlas Search" (cho full-text search)
+   - ✅ Chọn "Vector Search" - For semantic search and AI applications
+3. Click **"Next"**
+
+### 2.3. Chọn JSON Editor
+
+1. Chọn **"JSON Editor"** (không dùng Visual Editor)
+2. Paste JSON config sau:
 
 ```json
 {
-  "mappings": {
-    "dynamic": false,
-    "fields": {
-      "embedding": {
-        "type": "knnVector",
-        "dimensions": 768,
-        "similarity": "cosine"
-      },
-      "userId": {
-        "type": "token"
-      },
-      "receivedDate": {
-        "type": "date"
-      },
-      "from": {
-        "type": "string"
-      },
-      "subject": {
-        "type": "string"
-      }
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 768,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "userId"
     }
-  }
+  ]
 }
 ```
 
-### 2.3. Configure Index Details
+### 2.4. Configure Index Details
 
-- **Index Name**: `vector_search_index` (QUAN TRỌNG: phải đúng tên này)
-- **Database**: Tên database của bạn (vd: `email-customize-db`)
+**Thông tin cần điền:**
+- **Index Name**: `vector_search_index` ⚠️ **QUAN TRỌNG: phải đúng tên này**
+- **Database**: Tên database của bạn (ví dụ: `mail-your`)
 - **Collection**: `emailmetadatas`
 
-### 2.4. Create & Wait
+### 2.5. Create & Wait
 
-- Click **"Create Search Index"**
-- ⏳ Đợi 5-10 phút để index build
-- ✅ Status chuyển từ "Building" → "Active"
+- Click **"Create Vector Search Index"**
+- ⏳ Đợi **2-5 phút** để index build (nhanh hơn Atlas Search)
+- ✅ Status chuyển từ "Initial Sync" → "Active"
 
 ---
 
 ## 📝 Giải thích Config
 
-### Field: `embedding`
+### Cấu trúc JSON mới của Vector Search
+
+**❗ LƯU Ý:** Vector Search dùng cấu trúc JSON khác với Atlas Search!
 
 ```json
 {
-  "type": "knnVector",           // K-Nearest Neighbors Vector Search
-  "dimensions": 768,             // Gemini embedding size
-  "similarity": "cosine"         // Cosine similarity (best for text)
+  "fields": [           // ← Array of fields (khác với mappings.fields)
+    {
+      "type": "vector",         // ← Loại: vector search field
+      "path": "embedding",      // ← Field name trong document
+      "numDimensions": 768,     // ← Gemini embedding size
+      "similarity": "cosine"    // ← Similarity metric
+    },
+    {
+      "type": "filter",         // ← Loại: filter field (cho pre-filtering)
+      "path": "userId"          // ← Field name để filter
+    }
+  ]
 }
 ```
 
-**Why cosine similarity?**
-- ✅ Normalized vectors (không bị ảnh hưởng bởi độ dài document)
-- ✅ Tốt cho text embeddings
-- ✅ Range: -1 đến 1 (1 = giống nhau, 0 = không liên quan)
-
-### Field: `userId`
+### Field 1: `embedding` (Vector Field)
 
 ```json
 {
-  "type": "token"                // Exact match, không tokenize
+  "type": "vector",             // Vector search field
+  "path": "embedding",          // Path to embedding array
+  "numDimensions": 768,         // Gemini text-embedding-004 = 768 dimensions
+  "similarity": "cosine"        // Cosine similarity (best for text)
 }
 ```
 
-**🔥 CỰC QUAN TRỌNG:**
+**Similarity Options:**
+- ✅ **`cosine`** - Recommended cho text embeddings (normalized, -1 to 1)
+- `euclidean` - L2 distance (cho spatial data)
+- `dotProduct` - Dot product (cho pre-normalized vectors)
+
+**Why cosine?**
+- Không bị ảnh hưởng bởi độ dài document
+- Tốt nhất cho semantic text search
+- Range: 1 = giống nhau, 0 = không liên quan, -1 = ngược nghĩa
+
+### Field 2: `userId` (Filter Field)
+
+```json
+{
+  "type": "filter",             // Pre-filter field (index cho filtering)
+  "path": "userId"              // Field path trong document
+}
+```
+
+**🔥 CỰC QUAN TRỌNG - Security:**
+- Cho phép filter theo userId TRƯỚC KHI vector search
 - Prevent data leakage giữa users
-- Filter trong `$vectorSearch` pipeline
-- Nếu thiếu → User A có thể search emails của User B!
+- ⚠️ Nếu thiếu → User A có thể search emails của User B!
 
-### Fields: `receivedDate`, `from`, `subject`
-
-```json
-{
-  "type": "date"    // For date range filters
-},
-{
-  "type": "string"  // For text filters
+**Cách hoạt động:**
+```typescript
+$vectorSearch: {
+  index: 'vector_search_index',
+  queryVector: [...],
+  filter: {
+    userId: userId  // ← Pre-filter bằng indexed field
+  }
 }
 ```
 
-**Dùng cho Advanced Filters** (future):
-- Search trong khoảng thời gian
-- Filter theo sender
-- Combined with semantic search
+### Optional: Thêm Filter Fields (Tương lai)
+
+Có thể thêm nhiều filter fields để advanced search:
+
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 768,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",
+      "path": "userId"
+    },
+    {
+      "type": "filter",
+      "path": "receivedDate"    // Filter theo date range
+    },
+    {
+      "type": "filter",
+      "path": "labelIds"        // Filter theo labels
+    }
+  ]
+}
+```
 
 ---
 
@@ -215,64 +267,248 @@ curl -X POST http://localhost:5000/search/semantic \
 
 ## 🐛 Troubleshooting
 
-### Problem 1: "Index not found"
+### Problem 1: "Index not found" hoặc Fallback to Linear Search
+
+**Error trong logs:**
+```
+[SemanticSearch] Vector search failed, falling back to linear search: ...
+[SemanticSearch] Using linear search (slow) - Consider enabling Vector Search Index
+```
 
 **Nguyên nhân:**
-- Index name sai (phải là `vector_search_index`)
-- Index chưa build xong (status != "Active")
-- Database/collection name sai
+- ❌ Index name sai (phải là `vector_search_index`)
+- ❌ Index chưa build xong (status != "Active")
+- ❌ Database/collection name sai
+- ❌ Tạo nhầm Atlas Search thay vì Vector Search
 
 **Giải pháp:**
-1. Vào Atlas → Atlas Search → Kiểm tra index name
-2. Đảm bảo status = "Active"
-3. Sửa code nếu cần:
-   ```typescript
-   $vectorSearch: {
-     index: 'vector_search_index',  // ← Phải match với tên trên Atlas
-   }
-   ```
+
+**Bước 1:** Kiểm tra index trên Atlas
+1. Vào Atlas → **Atlas Search** tab
+2. Tìm index tên `vector_search_index`
+3. Kiểm tra:
+   - **Type**: Phải là **Vector Search** (không phải Atlas Search)
+   - **Status**: Phải là **Active** (không phải Initial Sync)
+   - **Database & Collection**: Đúng với project của bạn
+
+**Bước 2:** Nếu index sai type → Xóa và tạo lại
+1. Click **"Delete"** index cũ
+2. Tạo lại theo hướng dẫn Bước 2 (nhớ chọn **Vector Search**)
+
+**Bước 3:** Kiểm tra code
+```typescript
+// semantic-search.service.ts - line ~361
+$vectorSearch: {
+  index: 'vector_search_index',  // ← Phải match với tên trên Atlas
+  path: 'embedding',
+  queryVector: queryEmbedding,
+  // ...
+}
+```
 
 ### Problem 2: "Dimension mismatch"
 
 **Error:**
 ```
-Vector search failed: dimensions mismatch (expected 768, got 1536)
+Vector search failed: vector dimension mismatch (expected 768, got 1536)
 ```
 
 **Nguyên nhân:**
-- Index config dùng sai dimensions
-- Hoặc code đổi model nhưng không update index
+- Index config dùng sai `numDimensions`
+- Code đổi model nhưng không update index
 
 **Giải pháp:**
+
+**Option 1:** Sửa index config (Recommended)
 1. Delete index cũ trên Atlas
-2. Tạo lại với `"dimensions": 768`
+2. Tạo lại với đúng dimensions:
+   ```json
+   {
+     "type": "vector",
+     "path": "embedding",
+     "numDimensions": 768,    // ← Gemini text-embedding-004
+     "similarity": "cosine"
+   }
+   ```
 3. Re-index emails
 
-### Problem 3: Vector Search không nhanh hơn
+**Option 2:** Đổi model trong code (không khuyến nghị)
+```typescript
+// ai.service.ts
+// Nếu muốn dùng OpenAI thay vì Gemini:
+// numDimensions: 1536 (OpenAI text-embedding-ada-002)
+```
+
+### Problem 3: "userId filter not working" - Security Issue!
+
+**Triệu chứng:**
+- User A thấy emails của User B
+- Results không được filter theo userId
 
 **Nguyên nhân:**
-- Dataset quá nhỏ (< 1000 emails) → Linear search vẫn nhanh
-- Index không được warm-up
+- Thiếu filter field `userId` trong index config
+- Filter syntax sai trong code
 
 **Giải pháp:**
-- Index thêm emails (recommend > 5000)
-- Chạy vài queries để warm-up
 
-### Problem 4: Kết quả không chính xác
+**Bước 1:** Kiểm tra index config có filter field
+```json
+{
+  "fields": [
+    {
+      "type": "vector",
+      "path": "embedding",
+      "numDimensions": 768,
+      "similarity": "cosine"
+    },
+    {
+      "type": "filter",      // ← PHẢI CÓ
+      "path": "userId"       // ← Chính xác field name
+    }
+  ]
+}
+```
+
+**Bước 2:** Kiểm tra code có filter
+```typescript
+// semantic-search.service.ts
+$vectorSearch: {
+  index: 'vector_search_index',
+  path: 'embedding',
+  queryVector: queryEmbedding,
+  filter: {
+    userId: userId  // ← PHẢI CÓ để security
+  }
+}
+```
+
+### Problem 4: "Slow performance despite Vector Search"
+
+**Triệu chứng:**
+- Vector Search đang hoạt động
+- Nhưng vẫn chậm (~500ms+)
 
 **Nguyên nhân:**
-- Threshold quá thấp/cao
-- Text cleaning không đủ tốt
+- `numCandidates` quá lớn
+- Không dùng pre-filtering
+- MongoDB Atlas cluster quá yếu (M0/M2)
 
 **Giải pháp:**
-1. Tăng threshold từ 0.5 → 0.6
-2. Kiểm tra `embeddingText` có clean không:
-   ```typescript
-   const textForEmbedding = `From: ${email.from}
-   Subject: ${email.subject}
-   ${email.textBody || email.snippet}`
-     .replace(/<[^>]*>/g, '')  // Remove HTML
-     .replace(/\s+/g, ' ')     // Normalize whitespace
+
+**Tối ưu `numCandidates`:**
+```typescript
+$vectorSearch: {
+  index: 'vector_search_index',
+  path: 'embedding',
+  queryVector: queryEmbedding,
+  numCandidates: Math.min(limit * 10, 1000),  // ← Giảm nếu cần
+  limit: limit,
+  filter: { userId }
+}
+```
+
+**Recommended values:**
+- `limit = 10` → `numCandidates = 100`
+- `limit = 20` → `numCandidates = 200`
+- `limit = 50` → `numCandidates = 500`
+
+**Rule of thumb:** `numCandidates = limit × 10` (hoặc × 5 nếu dataset lớn)
+
+### Problem 5: Index Status stuck at "Initial Sync"
+
+**Nguyên nhân:**
+- Index đang build dữ liệu lần đầu
+- Collection quá lớn
+
+**Giải pháp:**
+- ⏳ Đợi thêm (có thể mất 10-30 phút với collection lớn)
+- Check Atlas notifications/logs
+- Nếu > 1 giờ vẫn stuck → Contact MongoDB Support
+
+---
+
+## 📊 So sánh: Vector Search vs Atlas Search
+
+| Feature | **Vector Search** ✅ | Atlas Search (Full-text) |
+|---------|---------------------|-------------------------|
+| **Use Case** | Semantic/AI search | Keyword search |
+| **Config Type** | `{"fields": [{"type": "vector"}]}` | `{"mappings": {"fields": {}}}` |
+| **Query Method** | `$vectorSearch` | `$search` |
+| **Best For** | "Find similar emails" | "Find exact keywords" |
+| **Index Fields** | `type: "vector"` + `type: "filter"` | `type: "string"`, `type: "token"` |
+| **Similarity** | cosine/euclidean/dotProduct | N/A (text matching) |
+
+**🔥 Quan trọng:** Đừng nhầm lẫn 2 loại index này! Vector Search ≠ Atlas Search.
+
+---
+
+## ✅ Checklist Hoàn Thành
+
+- [ ] Chọn **Vector Search** (không phải Atlas Search)
+- [ ] JSON config đúng format: `{"fields": [...]}`
+- [ ] Index name: `vector_search_index`
+- [ ] `numDimensions: 768` (Gemini)
+- [ ] `similarity: "cosine"`
+- [ ] Có filter field `userId` cho security
+- [ ] Index status: **Active**
+- [ ] Test semantic search → `method: "vectorSearch"` trong response
+- [ ] Performance: < 100ms cho 10k+ emails
+
+---
+
+## 🚀 Next Steps (Tương lai)
+
+### Advanced Filtering
+
+Thêm filter fields để combine semantic + structured search:
+
+```json
+{
+  "fields": [
+    {"type": "vector", "path": "embedding", "numDimensions": 768, "similarity": "cosine"},
+    {"type": "filter", "path": "userId"},
+    {"type": "filter", "path": "receivedDate"},    // Date range
+    {"type": "filter", "path": "labelIds"},        // By labels
+    {"type": "filter", "path": "from"}             // By sender
+  ]
+}
+```
+
+**Query example:**
+```typescript
+$vectorSearch: {
+  index: 'vector_search_index',
+  path: 'embedding',
+  queryVector: embedding,
+  filter: {
+    userId: userId,
+    receivedDate: { $gte: new Date('2026-01-01') },
+    labelIds: { $in: ['INBOX', 'IMPORTANT'] }
+  }
+}
+```
+
+### Hybrid Search
+
+Combine vector search + full-text search:
+
+1. Tạo thêm Atlas Search index (riêng biệt)
+2. Run 2 queries song song
+3. Merge & re-rank results
+
+---
+
+## 📚 References
+
+- [MongoDB Vector Search Docs](https://www.mongodb.com/docs/atlas/atlas-vector-search/vector-search-overview/)
+- [Atlas Search vs Vector Search](https://www.mongodb.com/docs/atlas/atlas-search/vs-atlas-vector-search/)
+- [Gemini Embeddings](https://ai.google.dev/gemini-api/docs/embeddings)
+- [Cosine Similarity](https://en.wikipedia.org/wiki/Cosine_similarity)
+
+---
+
+**Cập nhật:** 13/01/2026  
+**Version:** 2.0 (Updated for new Vector Search interface)
      .trim();
    ```
 

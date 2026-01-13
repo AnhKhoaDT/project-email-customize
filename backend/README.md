@@ -66,6 +66,73 @@ This will create:
 
 **Full documentation:** See `src/seed/README.md` for customization options and advanced usage.
 
+## 🤖 Auto-Indexing for Semantic Search
+
+The backend automatically indexes emails for semantic search without manual intervention. This system runs in the background and ensures your emails are always searchable.
+
+### How It Works
+
+**Automatic Triggers:**
+1. **On Login**: Queues 100 most recent emails (HIGH priority)
+2. **On Email Moved**: Queues moved email (NORMAL priority)
+
+**Processing:**
+- Background service processes 10 emails every 5 seconds
+- Checks if email already indexed (idempotency)
+- Strips HTML, truncates to 1000 chars (cost optimization)
+- Generates embedding via Gemini AI
+- Stores in MongoDB with vector index
+
+### Configuration
+
+Located in `src/mail/auto-indexing.service.ts`:
+```typescript
+BATCH_SIZE = 10;            // Emails per batch
+PROCESS_INTERVAL_MS = 5000; // Process every 5 seconds
+MAX_QUEUE_SIZE = 1000;      // Prevent memory overflow
+```
+
+### Monitoring
+
+**Check queue status:**
+```bash
+GET /search/index/stats
+```
+
+**Response:**
+```json
+{
+  "queueSize": 45,
+  "isProcessing": true,
+  "stats": {
+    "totalQueued": 1205,
+    "totalProcessed": 1160,
+    "totalSkipped": 320,
+    "totalFailed": 5
+  }
+}
+```
+
+**Backend logs:**
+```
+[Auth] 🚀 Queueing emails for auto-indexing...
+[AutoIndexingService] 📦 Processing batch of 10 emails...
+[AutoIndexingService] ✅ Batch complete: 10 success, 0 failed
+```
+
+### Testing
+
+Re-index emails after code changes:
+```bash
+# Verify current data quality
+npx ts-node scripts/verify-email-data.ts
+
+# Clear embeddings to force re-index
+npx ts-node scripts/re-index-test-emails.ts
+```
+
+**Note:** Vector Search requires MongoDB Atlas index. See `docs/VECTOR_SEARCH_SETUP.md` for setup instructions.
+
 
 
 Environment variables

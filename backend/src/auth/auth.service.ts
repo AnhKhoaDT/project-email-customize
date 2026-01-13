@@ -4,7 +4,8 @@ import { UsersService } from '../users/users.service';
 import { SessionsService } from '../sessions/sessions.service';
 import * as bcrypt from 'bcrypt';
 import { google } from 'googleapis';
-import { SemanticSearchService } from '../mail/semantic-search.service';
+import { AutoIndexingService } from '../mail/auto-indexing.service';
+import { GmailService } from '../mail/gmail.service';
 
 
 const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'access-secret-example';
@@ -17,8 +18,10 @@ export class AuthService {
   constructor(
     private usersService: UsersService, 
     private sessionsService: SessionsService,
-    @Inject(forwardRef(() => SemanticSearchService))
-    private semanticSearchService: SemanticSearchService,
+    @Inject(forwardRef(() => AutoIndexingService))
+    private autoIndexingService: AutoIndexingService,
+    @Inject(forwardRef(() => GmailService))
+    private gmailService: GmailService,
   ) {}
 
   async validateUser(email: string, password: string) {
@@ -150,35 +153,37 @@ export class AuthService {
   }
 
   /**
-   * Trigger auto-indexing for first-time users
-   * Indexes 200 recent emails in background for semantic search
+   * Trigger auto-indexing for users on login
+   * Queues 50-100 recent emails for background indexing
    */
   private async triggerAutoIndexing(userId: string): Promise<void> {
     try {
-      const user = await this.usersService.findById(userId);
+      console.log(`[Auth] 🚀 Queueing emails for auto-indexing (user: ${userId})...`);
       
-      // Skip if already indexed
-      if (user?.isSemanticSearchIndexed) {
-        console.log(`[Auth] User ${userId} already indexed, skipping auto-indexing`);
+      // Fetch 100 most recent emails from inbox
+      const inboxData = await this.gmailService.listMessagesInLabel(userId, 'INBOX', 100);
+      
+      if (!inboxData?.messages || inboxData.messages.length === 0) {
+        console.log(`[Auth] No emails found for user ${userId}, skipping auto-indexing`);
         return;
       }
 
-      console.log(`[Auth] 🚀 Starting auto-indexing for new user ${userId}...`);
+      const emailIds = inboxData.messages.map(m => m.id).filter(Boolean);
       
-      // Trigger indexing in background (don't wait)
-      this.semanticSearchService.indexAllEmails(userId, { limit: 200 })
-        .then(async (result) => {
-          console.log(`[Auth] ✅ Auto-indexing complete for user ${userId}: ${result.data?.success} emails indexed`);
-          
-          // Mark user as indexed
-          await this.usersService.markAsIndexed(userId);
-        })
-        .catch(err => {
-          console.error(`[Auth] ❌ Auto-indexing failed for user ${userId}:`, err.message);
-        });
+      // Queue emails with HIGH priority (user just logged in)
+      await this.autoIndexingService.queueBatch(userId, emailIds, 'high');
+      
+      console.log(`[Auth] ✅ Queued ${emailIds.length} emails for indexing (user: ${userId})`);
+      
+      // Mark user as indexed (will be indexed soon)
+      const user = await this.usersService.findById(userId);
+      if (user && !user.isSemanticSearchIndexed) {
+        await this.usersService.markAsIndexed(userId);
+      }
       
     } catch (err) {
-      console.error(`[Auth] Failed to trigger auto-indexing:`, err.message);
+      // Silent failure - don't break login
+      console.error(`[Auth] Failed to queue auto-indexing:`, err.message);
     }
   }
 

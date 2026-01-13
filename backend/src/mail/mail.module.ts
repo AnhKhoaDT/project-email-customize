@@ -10,6 +10,7 @@ import { SemanticSearchService } from './semantic-search.service';
 import { SearchSuggestionsService } from './search-suggestions.service';
 import { KanbanConfigService } from './kanban-config.service';
 import { GmailSyncListener } from './gmail-sync.listener';
+import { AutoIndexingService } from './auto-indexing.service';
 import { EmailMetadata, EmailMetadataSchema } from './schemas/email-metadata.schema';
 import { KanbanConfig, KanbanConfigSchema } from './schemas/kanban-config.schema';
 import { SearchSuggestionCache, SearchSuggestionCacheSchema } from './schemas/search-suggestion-cache.schema';
@@ -37,6 +38,7 @@ import { AiModule } from '../ai/ai.module';
     SearchSuggestionsService,
     KanbanConfigService,
     GmailSyncListener, // 🔥 NEW: Event listener for Gmail sync
+    AutoIndexingService, // 🔥 NEW: Auto-indexing background service
   ],
   exports: [
     GmailService, 
@@ -46,6 +48,7 @@ import { AiModule } from '../ai/ai.module';
     SemanticSearchService,
     SearchSuggestionsService,
     KanbanConfigService,
+    AutoIndexingService,
   ],
 })
 export class MailModule {}

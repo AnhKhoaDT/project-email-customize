@@ -229,6 +229,39 @@ export class GmailService {
     return parsed;
   }
 
+  /**
+   * Get email metadata (headers only) for indexing - faster and more reliable
+   * Used by semantic search indexing to get subject/from/snippet
+   */
+  async getMessageMetadata(userId: string, messageId: string) {
+    const client = await this.getOAuthClientForUser(userId);
+    const gmail = google.gmail({ version: 'v1', auth: client });
+    
+    // Fetch with metadata format - only headers, no body (faster)
+    const res = await gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'metadata',
+      metadataHeaders: ['Subject', 'From', 'To', 'Date']
+    });
+
+    const headers = res.data.payload?.headers || [];
+    const getHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+    return {
+      id: res.data.id,
+      threadId: res.data.threadId,
+      labelIds: res.data.labelIds || [],
+      snippet: res.data.snippet || '',
+      subject: getHeader('Subject'),
+      from: getHeader('From'),
+      to: getHeader('To'),
+      date: getHeader('Date'),
+      sizeEstimate: res.data.sizeEstimate,
+      internalDate: res.data.internalDate,
+    };
+  }
+
   async sendEmail(userId: string, payload: {
     to: string[];
     cc?: string[];

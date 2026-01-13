@@ -43,7 +43,7 @@ export default function SearchResultsSummary({
       
       {searchMode === "semantic" && totalResults === 0 && (
         <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-          💡 Tip: Make sure emails are indexed first by clicking "Index Emails for AI Search" above.
+          💡 Tip: Emails are automatically indexed in the background. If you just logged in, wait a few moments for indexing to complete.
         </div>
       )}
     </div>

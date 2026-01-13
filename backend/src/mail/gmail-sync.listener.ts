@@ -4,6 +4,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EmailMovedEvent } from './dto/move-email.dto';
 import { GmailService } from './gmail.service';
+import { AutoIndexingService } from './auto-indexing.service';
 import { EmailMetadata } from './schemas/email-metadata.schema';
 import { KanbanConfig } from './schemas/kanban-config.schema';
 
@@ -30,6 +31,7 @@ export class GmailSyncListener {
     @InjectModel(EmailMetadata.name) private emailMetadataModel: Model<EmailMetadata>,
     @InjectModel(KanbanConfig.name) private kanbanConfigModel: Model<KanbanConfig>,
     private gmailService: GmailService,
+    private autoIndexingService: AutoIndexingService,
   ) {}
 
   /**
@@ -39,6 +41,12 @@ export class GmailSyncListener {
   @OnEvent('email.moved', { async: true })
   async handleEmailMoved(event: EmailMovedEvent): Promise<void> {
     this.logger.log(`Processing email.moved event for ${event.emailId}`);
+
+    // Queue email for indexing (if not already indexed)
+    this.autoIndexingService.queueEmail(event.userId, event.emailId, 'normal')
+      .catch(err => {
+        this.logger.warn(`Failed to queue email ${event.emailId} for indexing: ${err.message}`);
+      });
 
     await this.syncWithRetry(event, 0);
   }

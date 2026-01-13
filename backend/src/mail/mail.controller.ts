@@ -661,6 +661,12 @@ export class MailController {
     }
   }
 
+  // ============================================
+  // DEPRECATED: Manual indexing endpoints
+  // Auto-indexing is now enabled by default
+  // These endpoints kept for admin/debugging purposes only
+  // ============================================
+
   @UseGuards(JwtAuthGuard)
   @Post('search/index')
   async indexEmails(

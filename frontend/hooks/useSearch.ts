@@ -59,13 +59,23 @@ export const useSearch = ({
       setSearchMode('semantic');
     }
 
-    router.push(`/${folderSlug}?q=${encodeURIComponent(query)}`);
-  }, [router, folderSlug, searchMode]);
+    // Use window.history to avoid Next.js server fetch (which causes "fetch failed" errors)
+    const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}`;
+    window.history.pushState(null, '', newUrl);
+    
+    // Manually trigger search since we bypassed router
+    setLastSearchQuery(''); // Force re-search by clearing last query
+  }, [folderSlug, searchMode, setLastSearchQuery]);
 
   // Clear search
   const onClearSearch = useCallback(() => {
-    router.push(`/${folderSlug}`);
-  }, [router, folderSlug]);
+    // Use window.history to avoid Next.js server fetch
+    window.history.pushState(null, '', `/${folderSlug}`);
+    
+    // Manually clear search results
+    onMailsChange?.([]);
+    onErrorChange(null);
+  }, [folderSlug, onMailsChange, onErrorChange]);
 
   // Auto-search when URL has query param (only if different from last search OR mode changed)
   useEffect(() => {

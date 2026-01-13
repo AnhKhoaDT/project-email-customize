@@ -94,11 +94,36 @@ export class SemanticSearchService {
         return { success: true, emailId };
       }
 
-      // Fetch full email content
-      const email = await this.gmailService.getMessage(userId, emailId);
+      // Fetch email metadata (headers + snippet only - faster than full)
+      const email = await this.gmailService.getMessageMetadata(userId, emailId);
       
-      // Combine from, subject and body for embedding (include sender for better matching)
-      const textForEmbedding = `From: ${email.from || ''}\nSubject: ${email.subject || ''}\n${email.textBody || email.snippet || ''}`.trim();
+      // 🐛 DEBUG: Log raw email data to diagnose missing subject/from
+      console.log(`[Indexing] Email ${emailId}:`, {
+        subject: email.subject,
+        from: email.from,
+        snippet: email.snippet?.substring(0, 50),
+        hasSubject: !!email.subject,
+        hasFrom: !!email.from
+      });
+      
+      // ✅ PRE-PROCESSING: Combine from, subject and body
+      // Note: getMessageMetadata only returns snippet, not full body (for speed)
+      let bodyText = email.snippet || '';
+      
+      // ✅ Strip HTML tags (remove <tag>...</tag>)
+      bodyText = bodyText.replace(/<[^>]*>/g, '');
+      
+      // ✅ Normalize whitespace (replace multiple spaces/newlines with single space)
+      bodyText = bodyText.replace(/\s+/g, ' ').trim();
+      
+      // ✅ Truncate to 1000 characters (save tokens & API cost)
+      const MAX_TEXT_LENGTH = 1000;
+      if (bodyText.length > MAX_TEXT_LENGTH) {
+        bodyText = bodyText.substring(0, MAX_TEXT_LENGTH) + '...';
+      }
+      
+      // Combine fields for embedding
+      const textForEmbedding = `From: ${email.from || ''}\nSubject: ${email.subject || ''}\n${bodyText}`.trim();
       
       if (!textForEmbedding || textForEmbedding === 'From:\nSubject:') {
         console.log(`[Indexing] Skipped empty email ${emailId}`);
@@ -107,6 +132,20 @@ export class SemanticSearchService {
 
       // Generate embedding with potential retry
       const embedding = await this.generateEmbedding(textForEmbedding);
+      
+      // Clean up empty values and default placeholders
+      // Gmail API returns empty string if header not present
+      const cleanSubject = (
+        !email.subject || 
+        email.subject.trim() === ''
+      ) ? null : email.subject.trim();
+      
+      const cleanFrom = (
+        !email.from || 
+        email.from.trim() === ''
+      ) ? null : email.from.trim();
+      
+      console.log(`[Indexing] ✅ Cleaned values - subject: "${cleanSubject || 'NULL'}", from: "${cleanFrom || 'NULL'}"`);
 
       // Store in database with cache fields for fast search
       if (existing) {
@@ -114,25 +153,25 @@ export class SemanticSearchService {
         existing.embedding = embedding;
         existing.embeddingText = textForEmbedding;
         existing.embeddingGeneratedAt = new Date();
-        // ✅ Update cache fields
-        existing.subject = email.subject;
-        existing.from = email.from;
+        // ✅ Update cache fields (use cleaned values)
+        existing.subject = cleanSubject;
+        existing.from = cleanFrom;
         existing.snippet = email.snippet;
         existing.receivedDate = email.date ? new Date(email.date) : new Date();
         existing.labelIds = email.labelIds || [];
         await existing.save();
       } else {
         // Create new record with cache fields
-        await this.emailMetadataModel.create({
+        const newRecord = await this.emailMetadataModel.create({
           userId,
           emailId,
           threadId: email.threadId,
           embedding,
           embeddingText: textForEmbedding,
           embeddingGeneratedAt: new Date(),
-          // ✅ Cache fields to avoid Gmail API calls during search
-          subject: email.subject,
-          from: email.from,
+          // ✅ Cache fields to avoid Gmail API calls during search (use cleaned values)
+          subject: cleanSubject,
+          from: cleanFrom,
           snippet: email.snippet,
           receivedDate: email.date ? new Date(email.date) : new Date(),
           labelIds: email.labelIds || [],
@@ -239,19 +278,25 @@ export class SemanticSearchService {
             status: 200,
             data: {
               query,
-              results: results.map(r => ({
-                id: r.emailId,
-                emailId: r.emailId,
-                threadId: r.threadId,
-                subject: r.subject || 'No subject',
-                from: r.from || 'Unknown',
-                snippet: r.snippet || '',
-                date: r.receivedDate,
-                receivedDate: r.receivedDate,
-                labelIds: r.labelIds || [],
-                similarityScore: r.score,
-                matchedText: r.embeddingText,
-              })),
+              results: results.map(r => {
+                // Better fallbacks for missing subject/from
+                const subject = r.subject || (r.snippet ? `(${r.snippet.substring(0, 50)}...)` : '(No subject)');
+                const from = r.from || 'Unknown sender';
+                
+                return {
+                  id: r.emailId,
+                  emailId: r.emailId,
+                  threadId: r.threadId,
+                  subject: subject,
+                  from: from,
+                  snippet: r.snippet || '',
+                  date: r.receivedDate,
+                  receivedDate: r.receivedDate,
+                  labelIds: r.labelIds || [],
+                  similarityScore: r.score,
+                  matchedText: r.embeddingText,
+                };
+              }),
               totalResults: results.length,
               searchedEmails: results.length,
               method: 'vectorSearch',
@@ -309,12 +354,16 @@ export class SemanticSearchService {
           const similarity = this.cosineSimilarity(queryEmbedding, emailDoc.embedding);
 
           if (similarity >= threshold) {
+            // Better fallbacks for missing subject/from
+            const subject = emailDoc.subject || (emailDoc.snippet ? `(${emailDoc.snippet.substring(0, 50)}...)` : '(No subject)');
+            const from = emailDoc.from || 'Unknown sender';
+            
             scoredEmails.push({
               id: emailDoc.emailId,
               emailId: emailDoc.emailId,
               threadId: emailDoc.threadId,
-              subject: emailDoc.subject || 'No subject',
-              from: emailDoc.from || 'Unknown',
+              subject: subject,
+              from: from,
               snippet: emailDoc.snippet || '',
               date: emailDoc.receivedDate,
               receivedDate: emailDoc.receivedDate,
@@ -389,15 +438,7 @@ export class SemanticSearchService {
       },
       {
         $project: {
-          emailId: 1,
-          threadId: 1,
-          subject: 1,
-          from: 1,
-          snippet: 1,
-          receivedDate: 1,
-          labelIds: 1,
-          embeddingText: 1,
-          score: 1,
+          embedding: 0, // ✅ Hide embedding vector (heavy field) - keep all other fields
         },
       },
       {
