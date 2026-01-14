@@ -18,7 +18,7 @@ interface UseSearchReturn {
   setSearchMode: (mode: SearchMode) => void;
   isSearching: boolean;
   error: string | null;
-  handleSearch: (query: string, isSuggestion?: boolean) => void;
+  handleSearch: (query: string, isSuggestion?: boolean, suggestionType?: 'sender' | 'subject') => void;
   onClearSearch: () => void;
 }
 
@@ -51,21 +51,29 @@ export const useSearch = ({
   }, [isSearching, onLoadingChange]);
 
   // Search handler - just updates URL, useEffect handles actual search
-  const handleSearch = useCallback((query: string, isSuggestion: boolean = false) => {
+  const handleSearch = useCallback((query: string, isSuggestion: boolean = false, suggestionType?: 'sender' | 'subject') => {
     if (!query.trim()) return;
 
-    // Force semantic search when triggered from suggestion (per requirement)
-    if (isSuggestion && searchMode !== 'semantic') {
+    // Force semantic search ONLY when triggered from KEYWORD suggestion (per requirement)
+    if (isSuggestion && suggestionType === 'subject') {
+      // Keyword → Semantic AI Search
       setSearchMode('semantic');
+      const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}&mode=semantic`;
+      window.history.pushState(null, '', newUrl);
+    } else if (isSuggestion && suggestionType === 'sender') {
+      // Contact → Exact filter with fuzzy search
+      setSearchMode('fuzzy');
+      const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}&mode=fuzzy&filter=sender`;
+      window.history.pushState(null, '', newUrl);
+    } else {
+      // Manual input → use current search mode
+      const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}`;
+      window.history.pushState(null, '', newUrl);
     }
-
-    // Use window.history to avoid Next.js server fetch (which causes "fetch failed" errors)
-    const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}`;
-    window.history.pushState(null, '', newUrl);
     
     // Manually trigger search since we bypassed router
     setLastSearchQuery(''); // Force re-search by clearing last query
-  }, [folderSlug, searchMode, setLastSearchQuery]);
+  }, [folderSlug, setLastSearchQuery]);
 
   // Clear search
   const onClearSearch = useCallback(() => {
@@ -86,19 +94,25 @@ export const useSearch = ({
       return;
     }
 
+    // Check URL params for forced mode (from suggestion)
+    const urlParams = new URLSearchParams(window.location.search);
+    const forcedMode = urlParams.get('mode');
+    const filterType = urlParams.get('filter');
+    const effectiveMode = forcedMode === 'semantic' ? 'semantic' : forcedMode === 'fuzzy' ? 'fuzzy' : searchMode;
+
     // Skip if same query AND same mode (prevent duplicate search)
-    if (searchQuery === lastSearchQuery && searchMode === lastSearchMode) {
+    if (searchQuery === lastSearchQuery && effectiveMode === lastSearchMode) {
       console.log('[useSearch] Skipping: same query and mode');
       return;
     }
 
     // Mark this query and mode as "attempted" immediately to prevent infinite loop
     setLastSearchQuery(searchQuery);
-    setLastSearchMode(searchMode);
+    setLastSearchMode(effectiveMode);
 
     const performSearch = async () => {
       try {
-        console.log('[useSearch] Starting search:', { searchQuery, searchMode });
+        console.log('[useSearch] Starting search:', { searchQuery, effectiveMode });
         setIsSearching(true);
         setError(null);
 
@@ -116,9 +130,9 @@ export const useSearch = ({
         let response;
 
         // Choose search endpoint based on mode
-        if (searchMode === "semantic") {
+        if (effectiveMode === "semantic") {
           // Semantic Search
-          console.log('[useSearch] Calling semantic search API');
+          console.log('[useSearch] Calling semantic search API (from suggestion or toggle)');
           response = await fetch(`${apiURL}/search/semantic`, {
             method: "POST",
             headers: {
@@ -134,15 +148,22 @@ export const useSearch = ({
         } else {
           // Fuzzy Search (default)
           console.log('[useSearch] Calling fuzzy search API');
-          response = await fetch(
-            `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
-            {
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
+          
+          // Check if filtering by sender (contact suggestion)
+          let fuzzyUrl = `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`;
+          if (filterType === 'sender') {
+            // Exact match on sender email (extract email if format is "Name <email>")
+            const emailMatch = searchQuery.match(/<(.+?)>/);
+            const senderEmail = emailMatch ? emailMatch[1] : searchQuery;
+            fuzzyUrl += `&from=${encodeURIComponent(senderEmail)}`;
+          }
+          
+          response = await fetch(fuzzyUrl, {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          });
         }
 
         if (!response.ok) throw new Error("Search failed");
@@ -152,7 +173,7 @@ export const useSearch = ({
 
         // Handle different response formats
         let results = [];
-        if (searchMode === "semantic") {
+        if (effectiveMode === "semantic") {
           results = data?.data?.results || [];
         } else {
           results = data?.data?.hits || [];

@@ -21,6 +21,10 @@ export class SearchEmailDto {
   @IsOptional()
   @IsString()
   status?: string; // Optional: filter by status (TODO, IN_PROGRESS, DONE)
+
+  @IsOptional()
+  @IsString()
+  from?: string; // Optional: filter by sender email (exact match for contact suggestions)
 }
 
 export interface SearchEmailResult {

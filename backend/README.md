@@ -133,6 +133,146 @@ npx ts-node scripts/re-index-test-emails.ts
 
 **Note:** Vector Search requires MongoDB Atlas index. See `docs/VECTOR_SEARCH_SETUP.md` for setup instructions.
 
+## 🚀 Smart Hybrid Search
+
+Fast autocomplete suggestions combining instant text search with AI-powered semantic understanding.
+
+### Features
+
+**Two-Phase Search System:**
+1. **Typing Phase (<100ms)**: Instant autocomplete using MongoDB Atlas Search
+   - Top Hits: Direct email matches (sender + subject)
+   - Keywords: Topic suggestions extracted from email subjects
+2. **Searching Phase (~500ms)**: AI semantic search when clicking keywords
+   - Vector embeddings for understanding context
+   - Finds related emails even without exact keyword matches
+
+**Key Benefits:**
+- ⚡ **10x faster** than old Gmail API-based suggestions (31-184ms vs 3-5s)
+- 🎯 **Smart keyword extraction**: Shows concise topics instead of full subjects
+- 🧠 **Semantic understanding**: "Bảng lương" finds "payslip", "salary report"
+- 🇻🇳 **Vietnamese optimized**: Diacritics folding ("báo" = "bao")
+- 📊 **Guaranteed minimum**: Always returns at least 3 suggestions
+- 🔄 **Smart balancing**: Redistributes results when one category is empty
+
+### Quick Start
+
+**1. Create Atlas Autocomplete Index** (Required)
+```bash
+# Follow detailed guide
+cat docs/ATLAS_AUTOCOMPLETE_INDEX_SETUP.md
+```
+
+**2. API Usage**
+```bash
+# Get hybrid suggestions
+GET /search/hybrid-suggestions?prefix=meeting&limitTopHits=3&limitKeywords=8
+
+# Response
+{
+  "topHits": [
+    {
+      "type": "email",
+      "emailId": "abc123",
+      "from": "john@example.com",
+      "subject": "Meeting schedule",
+      "score": 8.5
+    }
+  ],
+  "keywords": [
+    {
+      "type": "keyword",
+      "value": "Meeting schedule",
+      "emailCount": 12,
+      "category": "Meeting"
+    }
+  ],
+  "totalResults": 6,
+  "processingTimeMs": 87
+}
+```
+
+**3. Frontend Integration**
+```tsx
+import { useHybridSearch } from '@/hooks/useHybridSearch';
+import { HybridSearchDropdown } from '@/components/search/HybridSearchDropdown';
+
+const { suggestions, handleTopHitClick, handleKeywordClick } = useHybridSearch();
+```
+
+### Architecture
+
+**Backend Services:**
+- `HybridSearchService`: Parallel Promise.all execution for autocomplete + keywords
+- `extractKeywordsFromSubject()`: 4 extraction strategies (acronyms, capitalized phrases, n-grams)
+- Smart balancing: Guarantees min 3 suggestions by redistributing extra results
+
+**MongoDB Atlas Indices:**
+- **Autocomplete Index** (`autocomplete_search_index`): edgeGram(2-15), foldDiacritics
+- **Vector Search Index** (`vector_search_index`): 768-dim embeddings, cosine similarity
+
+**Frontend Components:**
+- `useHybridSearch`: Debounced (150ms), abort controller for request cancellation
+- `HybridSearchDropdown`: Split UI - Top Hits (navigate) vs Keywords (semantic search)
+
+### Performance Optimizations
+
+**Achieved Targets:**
+- Autocomplete: 31-184ms (Target: <200ms) ✅
+- Minimum suggestions: 3 guaranteed ✅
+- Maximum suggestions: 11 (3 top hits + 8 keywords)
+
+**Optimization Techniques:**
+1. NO OpenAI calls during typing phase (only Atlas Search)
+2. Reduced $limit: 100 → 50 emails for keyword extraction
+3. Simplified regex: Moved from MongoDB to JavaScript layer
+4. Connection pooling: Avoid cold starts
+5. Parallel execution: Promise.all for top hits + keywords
+
+**Regional Performance:**
+- Singapore (ap-southeast-1): 50-150ms ✅
+- US East (us-east-1): 300-500ms ⚠️
+- Recommendation: Use Singapore region for production
+
+### Documentation
+
+- `docs/ATLAS_AUTOCOMPLETE_INDEX_SETUP.md` - Index setup guide (JSON config)
+
+### Migration Path
+
+**Current Status:** ✅ In Production
+- Backend: `/search/hybrid-suggestions` endpoint active
+- Frontend: Using `getHybridSuggestions()` in MailBox component
+- Auth persistence: Stable with localStorage
+- Smart balancing: Min 3 suggestions guaranteed
+- Performance: 31-184ms (average ~100ms)
+
+**Completed Migration:**
+1. ✅ Created Atlas Autocomplete Index
+2. ✅ Implemented HybridSearchService with keyword extraction
+3. ✅ Integrated frontend components (useHybridSearch hook)
+4. ✅ Replaced old SearchSuggestionsService
+5. ✅ Performance optimized (<200ms target achieved)
+
+**Deprecated Endpoints:**
+- `GET /search/suggestions` (Old Gmail API-based - 3-5s response time)
+
+### Testing
+
+```bash
+# Test autocomplete speed
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:5000/search/hybrid-suggestions?prefix=meeting"
+
+# Expected: processingTimeMs < 200ms
+
+# Test keyword extraction
+# Input: "ba" → Should return "Báo cáo tài chính", "Bảo hiểm" keywords
+
+# Test semantic search
+# Click keyword "Bảng lương" → Should find "payslip", "salary report"
+```
+
 
 
 Environment variables

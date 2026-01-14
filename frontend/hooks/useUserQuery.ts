@@ -108,7 +108,8 @@ export const useUserQuery = () => {
     };
 
     initializeAuth();
-    // Re-run when accessToken changes (e.g., after login)
+    // Re-run when accessToken changes (e.g., after login/refresh)
+    // Also runs on mount to check for existing session
   }, [accessToken]);
 
   return { isLoading };

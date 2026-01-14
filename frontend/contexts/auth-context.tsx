@@ -33,9 +33,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUserState] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticatedState] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [accessToken, setAccessToken] = useState<string | null>(null);  // 🔒 IN-MEMORY
+
+  // Wrapper for setIsAuthenticated to persist state
+  const setIsAuthenticated = (value: boolean) => {
+    setIsAuthenticatedState(value);
+    if (typeof window !== 'undefined') {
+      if (value) {
+        localStorage.setItem('isAuthenticated', 'true');
+      } else {
+        localStorage.removeItem('isAuthenticated');
+      }
+    }
+  };
 
   // Wrapper cho setUser để tự động lưu vào localStorage (chỉ user data, không có tokens)
   const setUser = (userData: User | null) => {
@@ -47,14 +59,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  // Restore user data từ localStorage khi component mount
+  // Restore user data AND auth state từ localStorage khi component mount
   // NOTE: Không restore token - token phải được refresh từ HttpOnly cookie
   useEffect(() => {
     const savedUser = getUserData();
-    if (savedUser) {
+    const savedAuthState = localStorage.getItem('isAuthenticated') === 'true';
+    
+    if (savedUser && savedAuthState) {
       setUserState(savedUser);
+      setIsAuthenticatedState(true);
       console.log('[AuthContext] Restored user data from localStorage:', savedUser.email);
-      // DON'T set isAuthenticated yet - wait for useUserQuery to validate session
+      // Auth state restored - useUserQuery will validate and refresh token if needed
     }
   }, []);
 

@@ -9,6 +9,7 @@ import { FuzzySearchService } from './fuzzy-search.service';
 import { SemanticSearchService } from './semantic-search.service';
 import { SearchSuggestionsService } from './search-suggestions.service';
 import { KanbanConfigService } from './kanban-config.service';
+import { HybridSearchService } from './hybrid-search.service';
 import { SendEmailDto } from './dto/send-email.dto';
 import { ReplyEmailDto } from './dto/reply-email.dto';
 import { ModifyEmailDto } from './dto/modify-email.dto';
@@ -53,6 +54,7 @@ export class MailController {
     private semanticSearchService: SemanticSearchService,
     private searchSuggestionsService: SearchSuggestionsService,
     private kanbanConfigService: KanbanConfigService,
+    private hybridSearchService: HybridSearchService,
   ) { }
 
   /**
@@ -572,6 +574,63 @@ export class MailController {
       return { status: 200, data: suggestions };
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to get suggestions' };
+    }
+  }
+
+  /**
+   * 🔥 NEW: Hybrid Search Suggestions
+   * 
+   * Combines:
+   * - Top Hits: Direct email matches (navigate to email)
+   * - Keywords: Topic suggestions (trigger semantic search)
+   * 
+   * Example:
+   * GET /search/hybrid-suggestions?prefix=meeting&limitTopHits=2&limitKeywords=4
+   * 
+   * Response:
+   * {
+   *   topHits: [{ type: 'email', emailId: 'abc', from: '...', subject: '...' }],
+   *   keywords: [{ type: 'keyword', value: 'Meeting schedule', emailCount: 12 }],
+   *   totalResults: 6,
+   *   processingTimeMs: 45
+   * }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('search/hybrid-suggestions')
+  async getHybridSuggestions(
+    @Req() req: any,
+    @Query('prefix') prefix: string,
+    @Query('limitTopHits') limitTopHits?: string,
+    @Query('limitKeywords') limitKeywords?: string,
+  ) {
+    try {
+      if (!prefix || prefix.trim().length < 2) {
+        return { 
+          status: 400, 
+          message: 'Prefix must be at least 2 characters' 
+        };
+      }
+
+      // Convert string params to numbers
+      const topHitsLimit = limitTopHits ? parseInt(limitTopHits, 10) : 2;
+      const keywordsLimit = limitKeywords ? parseInt(limitKeywords, 10) : 4;
+
+      const result = await this.hybridSearchService.getHybridSuggestions(
+        req.user.id,
+        prefix,
+        topHitsLimit,
+        keywordsLimit,
+      );
+
+      return { 
+        status: 200, 
+        data: result 
+      };
+    } catch (err) {
+      return { 
+        status: 500, 
+        message: err?.message || 'Failed to get hybrid suggestions' 
+      };
     }
   }
 

@@ -11,6 +11,7 @@ import { SearchSuggestionsService } from './search-suggestions.service';
 import { KanbanConfigService } from './kanban-config.service';
 import { GmailSyncListener } from './gmail-sync.listener';
 import { AutoIndexingService } from './auto-indexing.service';
+import { HybridSearchService } from './hybrid-search.service';
 import { EmailMetadata, EmailMetadataSchema } from './schemas/email-metadata.schema';
 import { KanbanConfig, KanbanConfigSchema } from './schemas/kanban-config.schema';
 import { SearchSuggestionCache, SearchSuggestionCacheSchema } from './schemas/search-suggestion-cache.schema';
@@ -39,6 +40,7 @@ import { AiModule } from '../ai/ai.module';
     KanbanConfigService,
     GmailSyncListener, // 🔥 NEW: Event listener for Gmail sync
     AutoIndexingService, // 🔥 NEW: Auto-indexing background service
+    HybridSearchService, // 🔥 NEW: Hybrid search with autocomplete
   ],
   exports: [
     GmailService, 

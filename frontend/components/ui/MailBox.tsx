@@ -12,7 +12,7 @@ import SearchModeDropdown, {
   type SearchMode,
 } from "@/components/search/SearchModeDropdown";
 import SearchSuggestions from "@/components/search/SearchSuggestions";
-import { getSearchSuggestions } from "@/lib/api";
+import { getHybridSuggestions } from "@/lib/api";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
@@ -26,7 +26,7 @@ interface MailBoxProps {
   kanbanClick: () => void;
   // Search props
   searchQuery?: string;
-  onSearch?: (query: string, isSuggestion?: boolean) => void;
+  onSearch?: (query: string, isSuggestion?: boolean, suggestionType?: 'sender' | 'subject') => void;
   onClearSearch?: () => void;
   isSearching?: boolean;
   error?: string | null;
@@ -95,8 +95,9 @@ const MailBox = ({
       setSuggestionsError(null);
 
       try {
-        // Use API helper (with auto token refresh)
-        const typedSuggestions = await getSearchSuggestions(value, 5);
+        // 🚀 Use NEW Hybrid API (Atlas Search - <200ms)
+        // Increased limits: 3 top hits + 8 keywords = min 3, up to 11 suggestions
+        const result = await getHybridSuggestions(value, 3, 8);
 
         // Check if request was aborted
         if (signal?.aborted) {
@@ -104,7 +105,21 @@ const MailBox = ({
           return;
         }
 
-        setSuggestions(typedSuggestions);
+        // Convert hybrid format to old format for backward compatibility
+        const convertedSuggestions: Array<{ value: string; type: 'sender' | 'subject' }> = [
+          // Top Hits (emails) → map to 'sender' type for navigation
+          ...result.topHits.map(hit => ({
+            value: hit.subject,
+            type: 'sender' as const // Will trigger navigation
+          })),
+          // Keywords → map to 'subject' type for semantic search
+          ...result.keywords.map(keyword => ({
+            value: keyword.value,
+            type: 'subject' as const // Will trigger semantic search
+          }))
+        ];
+
+        setSuggestions(convertedSuggestions);
         setSuggestionsError(null);
         // Always show dropdown if we have suggestions OR still loading
         setShowSuggestions(true);
@@ -228,10 +243,10 @@ const MailBox = ({
         selectedSuggestionIndex >= 0 &&
         suggestions[selectedSuggestionIndex]
       ) {
-        // Use selected suggestion → trigger semantic search (per requirement)
-        const selectedValue = suggestions[selectedSuggestionIndex].value;
-        setInputValue(selectedValue);
-        onSearch?.(selectedValue, true); // true = from suggestion
+        // Use selected suggestion → Contact or Keyword logic
+        const selected = suggestions[selectedSuggestionIndex];
+        setInputValue(selected.value);
+        onSearch?.(selected.value, true, selected.type); // Pass type
         setShowSuggestions(false);
         setSuggestions([]);
       } else if (inputValue.trim()) {
@@ -262,11 +277,11 @@ const MailBox = ({
   };
 
   // Handle suggestion selection
-  // When suggestion is selected, trigger semantic search (per requirement)
+  // Contact → Exact filter, Keyword → Semantic search (per requirement)
   const handleSelectSuggestion = useCallback(
-    (suggestionValue: string) => {
+    (suggestionValue: string, suggestionType: 'sender' | 'subject') => {
       setInputValue(suggestionValue);
-      onSearch?.(suggestionValue, true); // true = from suggestion
+      onSearch?.(suggestionValue, true, suggestionType); // Pass type
       setShowSuggestions(false);
       setSuggestions([]);
       setSelectedSuggestionIndex(-1);

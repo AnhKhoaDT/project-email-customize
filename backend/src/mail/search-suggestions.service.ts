@@ -132,9 +132,9 @@ export class SearchSuggestionsService {
         }
       });
 
-      // Extract unique subjects that match prefix
-      // Clean subjects for better semantic search
-      const subjectsSet = new Set<string>();
+      // Extract unique keywords from subjects (not full subjects)
+      // Strategy: Extract meaningful keywords/topics instead of full subject lines
+      const keywordsSet = new Set<string>();
       emails.forEach(email => {
         if (email.subject && email.subject.toLowerCase().includes(lowerPrefix)) {
           // Clean up subject: remove "Re:", "Fwd:" prefixes
@@ -142,34 +142,46 @@ export class SearchSuggestionsService {
             .replace(/^(Re|RE|Fwd|FWD|Fw|FW):\s*/gi, '')
             .trim();
           
-          if (cleanSubject.length >= 3) { // Minimum length for meaningful search
-            subjectsSet.add(cleanSubject);
-          }
+          // Extract keywords from subject
+          const extractedKeywords = this.extractKeywordsFromSubject(cleanSubject, lowerPrefix);
+          extractedKeywords.forEach(keyword => keywordsSet.add(keyword));
         }
       });
 
-      console.log(`[Suggestions] Found ${sendersSet.size} senders, ${subjectsSet.size} subjects for "${prefix}"`);
+      console.log(`[Suggestions] Found ${sendersSet.size} senders, ${keywordsSet.size} keywords for "${prefix}"`);
 
-      // Combine suggestions
+      // Combine suggestions - PRIORITIZE Keywords (Track B requirement: at least 3 keywords)
       const suggestions: Array<{ value: string; type: 'sender' | 'subject' }> = [];
       
-      // Prioritize subjects for semantic search (more meaningful than sender emails)
-      const subjectsArray = Array.from(subjectsSet).slice(0, Math.ceil(limit / 2));
-      subjectsArray.forEach(subject => {
-        if (suggestions.length < limit) {
-          suggestions.push({ value: subject, type: 'subject' });
-        }
-      });
+      const sendersArray = Array.from(sendersSet);
+      const keywordsArray = Array.from(keywordsSet);
       
-      // Add senders if we still have room
-      const sendersArray = Array.from(sendersSet).slice(0, limit);
-      sendersArray.forEach(sender => {
-        if (suggestions.length < limit) {
-          suggestions.push({ value: sender, type: 'sender' });
-        }
-      });
+      // STRATEGY: Show at least 3 keywords (topics), then fill remaining with contacts
+      const MIN_KEYWORDS = 3;
+      const MAX_CONTACTS = 2; // Leave room for keywords
+      
+      // Step 1: Add keywords first (for semantic search - Track B requirement)
+      const keywordCount = Math.min(keywordsArray.length, Math.max(MIN_KEYWORDS, limit - MAX_CONTACTS));
+      for (let i = 0; i < keywordCount && i < keywordsArray.length; i++) {
+        suggestions.push({ 
+          value: keywordsArray[i], 
+          type: 'subject' 
+        });
+      }
+      
+      // Step 2: Fill remaining slots with contacts (exact filtering)
+      const remainingSlots = limit - suggestions.length;
+      const contactCount = Math.min(sendersArray.length, remainingSlots);
+      for (let i = 0; i < contactCount; i++) {
+        suggestions.push({ 
+          value: sendersArray[i], 
+          type: 'sender' 
+        });
+      }
 
-      return suggestions.slice(0, limit);
+      console.log(`[Suggestions] Returning ${suggestions.length} suggestions (${suggestions.filter(s => s.type === 'sender').length} contacts, ${suggestions.filter(s => s.type === 'subject').length} keywords)`);
+      
+      return suggestions;
     } catch (error) {
       console.error('[Suggestions] Error fetching from Gmail:', error);
       return [];
@@ -206,6 +218,74 @@ export class SearchSuggestionsService {
       console.error('[Cache STORE] Error:', error);
       // Don't throw - caching failure shouldn't break the request
     }
+  }
+
+  /**
+   * Extract keywords/topics from subject line
+   * 
+   * Strategy:
+   * 1. Extract important noun phrases (capitalized words, acronyms)
+   * 2. Extract phrases containing the search prefix
+   * 3. Limit to 2-5 words per keyword for readability
+   * 
+   * Examples:
+   * - "Modernize your APIs with AI-powered tools" → ["APIs", "AI-powered tools", "Modernize"]
+   * - "SOC L1 is getting a new member" → ["SOC L1", "new member"]
+   * - "Meeting schedule for next week" → ["Meeting schedule", "next week"]
+   */
+  private extractKeywordsFromSubject(subject: string, prefix: string): string[] {
+    const keywords: string[] = [];
+    
+    // Strategy 1: Extract acronyms and capitalized words (technical terms, names)
+    const acronyms = subject.match(/\b[A-Z]{2,}\b/g); // SOC, API, AWS, etc.
+    if (acronyms) {
+      acronyms.forEach(acronym => {
+        if (acronym.toLowerCase().includes(prefix)) {
+          keywords.push(acronym);
+        }
+      });
+    }
+    
+    // Strategy 2: Extract phrases with capitalized words (2-3 words)
+    const capitalizedPhrases = subject.match(/[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}/g);
+    if (capitalizedPhrases) {
+      capitalizedPhrases.forEach(phrase => {
+        if (phrase.toLowerCase().includes(prefix) && phrase.length >= 3) {
+          keywords.push(phrase.trim());
+        }
+      });
+    }
+    
+    // Strategy 3: Extract n-grams (2-4 words) containing the prefix
+    const words = subject.split(/\s+/);
+    for (let len = 2; len <= Math.min(4, words.length); len++) {
+      for (let i = 0; i <= words.length - len; i++) {
+        const phrase = words.slice(i, i + len).join(' ');
+        if (phrase.toLowerCase().includes(prefix) && phrase.length >= 5) {
+          // Avoid too short phrases like "is a", "for the"
+          const hasStopWords = /^(is|are|the|a|an|for|to|in|on|at|with|by)\s/i.test(phrase);
+          if (!hasStopWords) {
+            keywords.push(phrase.trim());
+          }
+        }
+      }
+    }
+    
+    // Strategy 4: If no keywords found, use first 3-5 words of subject (fallback)
+    if (keywords.length === 0) {
+      const firstWords = words.slice(0, Math.min(5, words.length)).join(' ');
+      if (firstWords.toLowerCase().includes(prefix)) {
+        keywords.push(firstWords.trim());
+      }
+    }
+    
+    // Deduplicate and sort by length (prefer shorter, more specific keywords)
+    const uniqueKeywords = Array.from(new Set(keywords))
+      .filter(k => k.length >= 3 && k.length <= 50) // Reasonable length
+      .sort((a, b) => a.length - b.length); // Shorter first
+    
+    // Return top 3 keywords per subject (avoid clutter)
+    return uniqueKeywords.slice(0, 3);
   }
 
   /**
