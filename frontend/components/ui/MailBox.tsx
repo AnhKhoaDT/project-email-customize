@@ -78,11 +78,17 @@ const MailBox = ({
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isFocusedRef = useRef(false); // Track focus state to avoid stale closures
 
   // Update local input when searchQuery prop changes (e.g., from URL)
   useEffect(() => {
     setInputValue(searchQuery || "");
   }, [searchQuery]);
+
+  // Sync isFocusedRef with isFocused state
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
 
   // Fetch suggestions with debounce
   const fetchSuggestions = useCallback(
@@ -124,10 +130,19 @@ const MailBox = ({
           }))
         ];
 
+        // Double check if request was aborted before updating state
+        if (signal?.aborted) {
+          console.log("[Suggestions] Request aborted before state update");
+          return;
+        }
+
         setSuggestions(convertedSuggestions);
         setSuggestionsError(null);
-        // Always show dropdown if we have suggestions OR still loading
-        setShowSuggestions(true);
+        // Only show dropdown if input is still focused AND not aborted
+        // Use ref to get latest focus state (avoid stale closure)
+        if (isFocusedRef.current && !signal?.aborted) {
+          setShowSuggestions(true);
+        }
         setSelectedSuggestionIndex(-1);
         setIsLoadingSuggestions(false);
       } catch (error) {
@@ -142,12 +157,15 @@ const MailBox = ({
         setSuggestionsError(
           error instanceof Error ? error.message : "Failed to load suggestions"
         );
-        // Keep dropdown open to show error message
-        setShowSuggestions(true);
+        // Only show error dropdown if input is still focused
+        // Use ref to get latest focus state (avoid stale closure)
+        if (isFocusedRef.current && !signal?.aborted) {
+          setShowSuggestions(true);
+        }
         setIsLoadingSuggestions(false);
       }
     },
-    []
+    [] // isFocusedRef is used instead of isFocused to avoid stale closures
   );
 
   // Debounced input handler
@@ -173,7 +191,7 @@ const MailBox = ({
       }
 
       // Show dropdown and loading state immediately for better UX (when >= 2 chars)
-      if (value.length >= 2 && isFocused) {
+      if (value.length >= 2 && isFocusedRef.current) {
         setShowSuggestions(true);
         setIsLoadingSuggestions(true);
         setSuggestionsError(null);
@@ -372,7 +390,16 @@ const MailBox = ({
                 onBlur={() => {
                   setIsFocused(false);
                   // Delay to allow click on suggestion
-                  setTimeout(() => setShowSuggestions(false), 200);
+                  setTimeout(() => {
+                    // Only hide if still not focused (user might have refocused)
+                    setShowSuggestions(false);
+                    // Cancel any pending suggestions request
+                    if (abortControllerRef.current) {
+                      abortControllerRef.current.abort();
+                      abortControllerRef.current = null;
+                    }
+                    setIsLoadingSuggestions(false);
+                  }, 200);
                 }}
                 disabled={isSearching}
                 className="w-full focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"

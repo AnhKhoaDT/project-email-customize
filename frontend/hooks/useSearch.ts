@@ -79,6 +79,11 @@ export const useSearch = ({
 
   // Clear search
   const onClearSearch = useCallback(() => {
+    // Only proceed if there's an active search query
+    if (!searchQuery && !lastSearchQuery) {
+      return; // No search active, do nothing
+    }
+    
     // Clear search state first
     onErrorChange(null);
     setError(null);
@@ -97,7 +102,7 @@ export const useSearch = ({
     if (onRefreshMails) {
       onRefreshMails();
     }
-  }, [folderSlug, onErrorChange, onRefreshMails]);
+  }, [folderSlug, searchQuery, lastSearchQuery, onErrorChange, onRefreshMails]);
 
   // Auto-search when URL has query param (only if different from last search OR mode changed)
   useEffect(() => {
