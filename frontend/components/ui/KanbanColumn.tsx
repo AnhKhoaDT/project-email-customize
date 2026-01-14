@@ -157,16 +157,16 @@ const ColumnHeader = ({
       setIsEditingTitle(false);
       return;
     }
-    
+
     const trimmed = editTitle.trim();
-    
+
     // If empty or unchanged, just cancel
     if (!trimmed || trimmed === title) {
       setEditTitle(title);
       setIsEditingTitle(false);
       return;
     }
-    
+
     // Call parent handler to save
     onEditTitle(trimmed);
     setIsEditingTitle(false);
@@ -221,7 +221,7 @@ const ColumnHeader = ({
             maxLength={100}
           />
         ) : (
-          <span 
+          <span
             className={`uppercase ${!isSystemColumn && onEditTitle ? 'cursor-pointer hover:opacity-70' : ''}`}
             onClick={handleTitleEdit}
             title={!isSystemColumn && onEditTitle ? 'Click to edit' : ''}
@@ -232,7 +232,7 @@ const ColumnHeader = ({
         <span className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full text-xs font-bold">
           {count}
         </span>
-        
+
         {/* Label Error Warning */}
         {hasLabelError && (
           <div className="relative">
@@ -245,7 +245,7 @@ const ColumnHeader = ({
             >
               ⚠️
             </button>
-            
+
             {showErrorTooltip && (
               <div className="absolute left-0 top-full mt-1 w-64 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 shadow-lg z-50 text-xs text-gray-700 dark:text-gray-300 font-normal">
                 <div className="flex items-start gap-2">
@@ -274,8 +274,8 @@ const ColumnHeader = ({
           <button
             onClick={() => setShowFilterMenu(!showFilterMenu)}
             className={`p-1.5 rounded transition-colors ${showFilterMenu
-                ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
-                : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
+              : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
               }`}
           >
             {/* Show a dot if filters are active */}
@@ -286,92 +286,92 @@ const ColumnHeader = ({
           </button>
 
           {showFilterMenu && (
-          <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
-            {/* Sorting Section */}
-            <div className="mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
-                SORT BY DATE
-              </p>
-              <button
-                onClick={() => onConfigChange({ ...config, sort: "newest" })}
-                className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "newest"
+            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+              {/* Sorting Section */}
+              <div className="mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
+                  SORT BY DATE
+                </p>
+                <button
+                  onClick={() => onConfigChange({ ...config, sort: "newest" })}
+                  className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "newest"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
                     : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  }`}
-              >
-                <div className="flex items-center gap-2">
-                  <TbSortDescending /> Newest First
-                </div>
-                {config.sort === "newest" && <Check size={14} />}
-              </button>
-              <button
-                onClick={() => onConfigChange({ ...config, sort: "oldest" })}
-                className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "oldest"
+                    }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <TbSortDescending /> Newest First
+                  </div>
+                  {config.sort === "newest" && <Check size={14} />}
+                </button>
+                <button
+                  onClick={() => onConfigChange({ ...config, sort: "oldest" })}
+                  className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "oldest"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
                     : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  }`}
-              >
-                <div className="flex items-center gap-2">
-                  <TbSortAscending /> Oldest First
-                </div>
-                {config.sort === "oldest" && <Check size={14} />}
-              </button>
-            </div>
-
-            {/* Filter Section */}
-            <div>
-              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
-                FILTER
-              </p>
-
-              {/* Read Status */}
-              <div className="flex bg-gray-100 dark:bg-gray-800 rounded p-1 mb-2">
-                {(["all", "unread", "read"] as const).map((status) => (
-                  <button
-                    key={status}
-                    onClick={() =>
-                      onConfigChange({ ...config, filterRead: status })
-                    }
-                    className={`flex-1 text-xs py-1 rounded capitalize transition-all ${config.filterRead === status
-                        ? "bg-white dark:bg-[#2c2c2c] shadow text-gray-900 dark:text-white font-medium"
-                        : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
-                      }`}
-                  >
-                    {status}
-                  </button>
-                ))}
+                    }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <TbSortAscending /> Oldest First
+                  </div>
+                  {config.sort === "oldest" && <Check size={14} />}
+                </button>
               </div>
 
-              {/* Attachment Toggle */}
-              <button
-                onClick={() =>
-                  onConfigChange({
-                    ...config,
-                    filterAttachment: !config.filterAttachment,
-                  })
-                }
-                className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between transition-colors ${config.filterAttachment
+              {/* Filter Section */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
+                  FILTER
+                </p>
+
+                {/* Read Status */}
+                <div className="flex bg-gray-100 dark:bg-gray-800 rounded p-1 mb-2">
+                  {(["all", "unread", "read"] as const).map((status) => (
+                    <button
+                      key={status}
+                      onClick={() =>
+                        onConfigChange({ ...config, filterRead: status })
+                      }
+                      className={`flex-1 text-xs py-1 rounded capitalize transition-all ${config.filterRead === status
+                        ? "bg-white dark:bg-[#2c2c2c] shadow text-gray-900 dark:text-white font-medium"
+                        : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
+                        }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Attachment Toggle */}
+                <button
+                  onClick={() =>
+                    onConfigChange({
+                      ...config,
+                      filterAttachment: !config.filterAttachment,
+                    })
+                  }
+                  className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between transition-colors ${config.filterAttachment
                     ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400"
                     : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-                  }`}
-              >
-                <div className="flex items-center gap-2">
-                  <TbPaperclip /> Has Attachment
-                </div>
-                {config.filterAttachment && <Check size={14} />}
-              </button>
+                    }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <TbPaperclip /> Has Attachment
+                  </div>
+                  {config.filterAttachment && <Check size={14} />}
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
         {/* Options Menu (3 dots) */}
         <div className="relative" ref={optionsMenuRef}>
           <button
             onClick={() => setShowOptionsMenu(!showOptionsMenu)}
             className={`p-1.5 rounded transition-colors ${showOptionsMenu
-                ? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-                : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              ? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+              : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
               }`}
           >
             <BsThreeDots size={18} />
@@ -444,85 +444,88 @@ const MailCard = ({
 
   return (
     <Draggable draggableId={item.id} index={index}>
-      {(provided, snapshot) => (
-        <div
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          {...provided.dragHandleProps}
-          className={`bg-white dark:bg-[#1a1a1a] rounded-lg border dark:border-gray-800 p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${snapshot.isDragging
-              ? "shadow-xl ring-2 ring-blue-400 rotate-2 opacity-90 cursor-grabbing"
-              : ""
-            }`}
-          style={{ ...provided.draggableProps.style }}
-        >
-          {item.color !== "bg-transparent" && (
-            <div
-              className={`absolute left-0 top-0 bottom-0 w-1 ${item.color}`}
-            />
-          )}
+      {(provided, snapshot) => {
+        // Fix scroll offset issue by using fixed positioning when dragging
+        return (
+          <div
+            ref={provided.innerRef}
+            {...provided.draggableProps}
+            {...provided.dragHandleProps}
+            className={`bg-white dark:bg-[#1a1a1a] rounded-lg border dark:border-gray-800 p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${snapshot.isDragging
+                ? "shadow-xl ring-2 ring-blue-400 opacity-90 cursor-grabbing"
+                : ""
+              }`}
+            style={provided.draggableProps.style}
+          >
+            {item.color !== "bg-transparent" && (
+              <div
+                className={`absolute left-0 top-0 bottom-0 w-1 ${item.color}`}
+              />
+            )}
 
-          <div className="flex flex-row justify-between items-start mb-2 pl-2">
-            <div className="flex gap-3 items-center">
-              <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-xs">
-                {item.avatar}
-              </div>
-              <div className="flex flex-col">
-                <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">
-                  {item.sender}
-                </span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">
-                  {item.time}
-                </span>
+            <div className="flex flex-row justify-between items-start mb-2 pl-2">
+              <div className="flex gap-3 items-center">
+                <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-xs">
+                  {item.avatar}
+                </div>
+                <div className="flex flex-col">
+                  <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                    {item.sender}
+                  </span>
+                  <span className="text-xs text-gray-400 dark:text-gray-500">
+                    {item.time}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-2 pl-2">
-            {item.subject}
-          </h3>
+            <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100 mb-2 pl-2">
+              {item.subject}
+            </h3>
 
-          <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 mb-3 ml-2 text-xs text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-800">
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-semibold">
-                <HiSparkles className="text-purple-500 dark:text-purple-400" />{" "}
-                <span>AI Summary</span>
+            <div className="bg-gray-50 dark:bg-gray-900 rounded p-3 mb-3 ml-2 text-xs text-gray-600 dark:text-gray-300 border border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1 text-gray-500 dark:text-gray-400 font-semibold">
+                  <HiSparkles className="text-purple-500 dark:text-purple-400" />{" "}
+                  <span>AI Summary</span>
+                </div>
+                <button
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating}
+                  className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Regenerate summary (10/min limit)"
+                >
+                  <IoMdRefresh
+                    className={`w-3.5 h-3.5 ${isRegenerating ? "animate-spin" : ""
+                      }`}
+                  />
+                </button>
               </div>
+              {rateLimitError && (
+                <p className="text-red-500 dark:text-red-400 text-xs mb-1">
+                  {rateLimitError}
+                </p>
+              )}
+              <p className="line-clamp-2">{item.summary}</p>
+            </div>
+
+            <div className="flex justify-between items-center pl-2 pt-2 border-t border-gray-50 dark:border-gray-800">
               <button
-                onClick={handleRegenerate}
-                disabled={isRegenerating}
-                className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                title="Regenerate summary (10/min limit)"
+                onClick={() => onSnoozeClick(item)}
+                className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors font-medium cursor-pointer"
               >
-                <IoMdRefresh
-                  className={`w-3.5 h-3.5 ${isRegenerating ? "animate-spin" : ""
-                    }`}
-                />
+                <TbClock /> Snooze
+              </button>
+              <button
+                onClick={() => onOpenClick(item)}
+                className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+              >
+                Open Mail <TbMailOpened />
               </button>
             </div>
-            {rateLimitError && (
-              <p className="text-red-500 dark:text-red-400 text-xs mb-1">
-                {rateLimitError}
-              </p>
-            )}
-            <p className="line-clamp-2">{item.summary}</p>
           </div>
-
-          <div className="flex justify-between items-center pl-2 pt-2 border-t border-gray-50 dark:border-gray-800">
-            <button
-              onClick={() => onSnoozeClick(item)}
-              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors font-medium cursor-pointer"
-            >
-              <TbClock /> Snooze
-            </button>
-            <button
-              onClick={() => onOpenClick(item)}
-              className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
-            >
-              Open Mail <TbMailOpened />
-            </button>
-          </div>
-        </div>
-      )}
+        );
+      }}
     </Draggable>
   );
 };
@@ -543,19 +546,19 @@ const KanbanColumn = ({
   hasLabelError = false,
   labelErrorMessage,
   onRecoverLabel,
-  onDeleteColumn,
+  onDeleteColumn, 
   isSystemColumn = false,
   onEditTitle,
   isLoading = false,
 }: KanbanColumnProps) => {
-  const columnBorderClass = hasLabelError 
-    ? "border-yellow-400 dark:border-yellow-600 border-2" 
+  const columnBorderClass = hasLabelError
+    ? "border-yellow-400 dark:border-yellow-600 border-2"
     : "border-r border-gray-200 dark:border-gray-800 last:border-r-0 border-t-2";
-  
+
   const columnOpacity = hasLabelError ? "opacity-75" : "";
 
   return (
-    <div 
+    <div
       className={`flex flex-col shrink-0 w-full min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0 ${columnBorderClass} ${columnOpacity}`}
       style={{ borderTopColor: hasLabelError ? '#facc15' : color }}
     >
@@ -581,9 +584,9 @@ const KanbanColumn = ({
           <div
             {...provided.droppableProps}
             ref={provided.innerRef}
-            className={`flex-1 md:overflow-y-auto kanban-scrollbar p-3 transition-colors ${
-              snapshot.isDraggingOver ? dragOverClass : ""
-            } ${hasLabelError ? 'bg-yellow-50/30 dark:bg-yellow-900/5' : ''}`}
+            className={`flex-1 p-3 transition-colors ${snapshot.isDraggingOver ? dragOverClass : ""
+              } ${hasLabelError ? 'bg-yellow-50/30 dark:bg-yellow-900/5' : ''}`}
+            style={{ overflow: 'visible' }}
           >
             {/* Show loading spinner */}
             {isLoading && (

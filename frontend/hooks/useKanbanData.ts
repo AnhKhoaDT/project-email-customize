@@ -499,45 +499,54 @@ export const useKanbanData = () => {
       emailToMove &&
       (!emailToMove.summary || emailToMove.summary === "No summary available");
 
-    // Optimistic Update
-    setColumns((prev) => {
-      // Clone mảng cột
-      const newColumns = prev.map(col => ({ ...col, items: [...col.items] }));
-
-      const sourceColumn = newColumns.find(c => c.id === fromColumnId);
-      const destColumn = newColumns.find(c => c.id === toColumnId);
-
-      if (!sourceColumn || !destColumn) return prev;
-
-      const emailIndex = sourceColumn.items.findIndex(e => e.id === emailId);
-      if (emailIndex === -1) return prev;
-
-      // Cắt khỏi nguồn
-      const [movedItem] = sourceColumn.items.splice(emailIndex, 1);
-
-      // Chèn vào đích
-      if (destinationIndex !== undefined) {
-        destColumn.items.splice(destinationIndex, 0, movedItem);
-      } else {
-        destColumn.items.push(movedItem);
-      }
-
-      return newColumns;
-    });
+    // ⚠️ IMPORTANT: NO optimistic update here to avoid @hello-pangea/dnd errors
+    // @hello-pangea/dnd handles the visual update during drag
+    // We only update state after API call completes
 
     try {
       // 🔥 WEEK 4: Use new dynamic moveEmail API
       await moveEmail(emailId, fromColumnId, toColumnId);
       
+      // NOW update state after API succeeds
+      setColumns((prev) => {
+        const newColumns = prev.map(col => ({ ...col, items: [...col.items] }));
+
+        const sourceColumn = newColumns.find(c => c.id === fromColumnId);
+        const destColumn = newColumns.find(c => c.id === toColumnId);
+
+        if (!sourceColumn || !destColumn) return prev;
+
+        const emailIndex = sourceColumn.items.findIndex(e => e.id === emailId);
+        if (emailIndex === -1) return prev;
+
+        // Cắt khỏi nguồn
+        const [movedItem] = sourceColumn.items.splice(emailIndex, 1);
+
+        // Chèn vào đích ở ĐÚNG VỊ TRÍ mà user drag
+        if (destinationIndex !== undefined) {
+          destColumn.items.splice(destinationIndex, 0, movedItem);
+        } else {
+          destColumn.items.push(movedItem);
+        }
+
+        return newColumns;
+      });
+      
+      // Generate summary if needed (call API directly to avoid dependency)
       if (shouldGenerateSummary) {
-        generateSummary(emailId, false);
+        generateEmailSummary(emailId, false).catch(err => {
+          console.error("Failed to generate summary:", err);
+        });
       }
     } catch (err: any) {
       console.error("Failed to move email:", err);
-      await fetchData(); // Rollback bằng cách fetch lại
+      
+      // Rollback by fetching fresh data
+      await fetchData();
+      
       throw err;
     }
-  }, [columns, fetchData]);
+  }, [columns, fetchData, moveEmail]);
 
   // --- ACTION: GENERATE SUMMARY ---
   const generateSummary = useCallback(async (emailId: string, forceRegenerate = false) => {

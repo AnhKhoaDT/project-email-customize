@@ -565,6 +565,93 @@ export default function KanbanPage() {
   const { showToast } = useToast();
   const [enabled, setEnabled] = useState(false);
 
+  // --- AUTO-SCROLL STATE FOR HORIZONTAL DRAG ---
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Auto-scroll horizontal container when dragging near edges
+  // Using Trello/Atlassian approach with live edge detection
+  useEffect(() => {
+    if (!isDragging || !scrollContainerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    let animationFrameId: number;
+    
+    // Mouse position tracking
+    let currentMouseX = 0;
+    let currentMouseY = 0;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Only store coordinates, calculation happens in autoScroll loop
+      currentMouseX = e.clientX;
+      currentMouseY = e.clientY;
+    };
+
+    const autoScroll = () => {
+      // Configuration (Trello-style)
+      const EDGE_SIZE = 80; // Hotzone: 80px from edge
+      const MAX_SCROLL_SPEED = 25; // Max pixels per frame
+      const MIN_SCROLL_SPEED = 5; // Min pixels per frame
+      
+      // Get CURRENT container bounds (updates as container scrolls/moves)
+      // This is necessary for accurate edge detection
+      const containerRect = container.getBoundingClientRect();
+      
+      // Calculate distance from edges using CURRENT viewport position
+      const distanceFromLeft = currentMouseX - containerRect.left;
+      const distanceFromRight = containerRect.right - currentMouseX;
+      const distanceFromTop = currentMouseY - containerRect.top;
+      const distanceFromBottom = containerRect.bottom - currentMouseY;
+
+      let scrollX = 0;
+      let scrollY = 0;
+
+      // Horizontal scroll (Primary for Kanban board)
+      if (distanceFromLeft < EDGE_SIZE && distanceFromLeft > 0) {
+        // Near left edge -> Scroll left
+        // Speed increases as mouse gets closer to edge
+        const intensity = 1 - (distanceFromLeft / EDGE_SIZE);
+        scrollX = -Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      } else if (distanceFromRight < EDGE_SIZE && distanceFromRight > 0) {
+        // Near right edge -> Scroll right
+        const intensity = 1 - (distanceFromRight / EDGE_SIZE);
+        scrollX = Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      }
+
+      // Vertical scroll (For long columns)
+      if (distanceFromTop < EDGE_SIZE && distanceFromTop > 0) {
+        // Near top edge -> Scroll up
+        const intensity = 1 - (distanceFromTop / EDGE_SIZE);
+        scrollY = -Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      } else if (distanceFromBottom < EDGE_SIZE && distanceFromBottom > 0) {
+        // Near bottom edge -> Scroll down
+        const intensity = 1 - (distanceFromBottom / EDGE_SIZE);
+        scrollY = Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      }
+
+      // Apply scroll using scrollBy (smoother than direct scrollLeft assignment)
+      if (scrollX !== 0 || scrollY !== 0) {
+        container.scrollBy({
+          left: scrollX,
+          top: scrollY,
+          behavior: 'auto' // Use 'auto' for instant scroll during drag
+        });
+      }
+
+      // Continue animation loop
+      animationFrameId = requestAnimationFrame(autoScroll);
+    };
+
+    // Start tracking
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    animationFrameId = requestAnimationFrame(autoScroll);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [isDragging]);
+
   // Modals State
   const [isSnoozeModalOpen, setSnoozeModalOpen] = useState(false);
   const [selectedItemToSnooze, setSelectedItemToSnooze] = useState<any>(null);
@@ -716,18 +803,22 @@ export default function KanbanPage() {
       }
 
       // Sort: Date
-      items.sort((a, b) => {
-        const dateA = new Date(a.date || "").getTime();
-        const dateB = new Date(b.date || "").getTime();
-        return config.sort === "newest" ? dateB - dateA : dateA - dateB;
-      });
+      // ⚠️ IMPORTANT: Preserve manual ordering during drag & drop
+      // Only auto-sort when NOT dragging to respect user's manual positioning
+      if (!isDragging) {
+        items.sort((a, b) => {
+          const dateA = new Date(a.date || "").getTime();
+          const dateB = new Date(b.date || "").getTime();
+          return config.sort === "newest" ? dateB - dateA : dateA - dateB;
+        });
+      }
 
       return {
         ...col,
         items, // Trả về column với items đã được xử lý
       };
     });
-  }, [columns, columnConfigs]);
+  }, [columns, columnConfigs, isDragging]);
 
   // --- HANDLERS ---
   // Edit column name handler
@@ -843,7 +934,13 @@ export default function KanbanPage() {
     }
   }, [isCreatingCol]);
 
+  const onDragStart = () => {
+    setIsDragging(true);
+  };
+
   const onDragEnd = async (result: DropResult) => {
+    setIsDragging(false);
+    
     const { source, destination, draggableId } = result;
     if (!destination) return;
 
@@ -881,16 +978,30 @@ export default function KanbanPage() {
       ) return;
 
       const sourceCol = columns.find((c: any) => c.id === source.droppableId);
+      const destCol = columns.find((c: any) => c.id === destination.droppableId);
       const movedEmail = sourceCol?.items.find((e: any) => e.id === draggableId);
 
       if (movedEmail) {
-        await moveEmail(
-          movedEmail.id,
-          movedEmail.threadId,
-          source.droppableId,
-          destination.droppableId,
-          destination.index
-        );
+        try {
+          // Pass destinationIndex to preserve exact drop position
+          await moveEmail(
+            movedEmail.id,
+            movedEmail.threadId,
+            source.droppableId,
+            destination.droppableId,
+            destination.index  // ✅ Đảm bảo email được đặt đúng vị trí
+          );
+          
+          // Show success toast with truncated subject
+          const emailSubject = (movedEmail.subject || 'Email').substring(0, 50);
+          const destColumnTitle = destCol?.title || 'column';
+          showToast(`"${emailSubject}${movedEmail.subject?.length > 50 ? '...' : ''}" moved to ${destColumnTitle}`, "success");
+        } catch (err: any) {
+          // Error handling with rollback (automatic in moveEmail hook)
+          const errorMsg = err?.response?.data?.message || err.message || "Failed to move email";
+          showToast(errorMsg, "error");
+          console.error('Move email error:', err);
+        }
       }
     }
 
@@ -919,18 +1030,22 @@ export default function KanbanPage() {
 
   return (
     <div className="flex flex-col h-full w-full bg-gray-50 dark:bg-[#0a0a0a] text-slate-800 dark:text-gray-100">
-      <DragDropContext onDragEnd={onDragEnd}>
+      <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
 
 
         <main className="flex flex-row w-full divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-800 min-h-0">
 
           {/* 1. DYNAMIC COLUMNS RENDERING */}
-          <Droppable droppableId="board" direction="horizontal" type="COLUMN">
+          <Droppable droppableId="board" direction="horizontal" type="COLUMN" mode="standard">
             {(provided) => (
               <div
-                ref={provided.innerRef}
+                ref={(el) => {
+                  provided.innerRef(el);
+                  scrollContainerRef.current = el;
+                }}
                 {...provided.droppableProps}
-                className="flex flex-row h-full overflow-x-auto overflow-y-hidden items-start" // CSS cho container ngang
+                className="flex flex-row h-full overflow-x-auto overflow-y-hidden items-start scroll-smooth" // CSS cho container ngang + smooth scroll
+                style={{ overflowX: 'auto', overflowY: 'hidden' }} // Ensure only horizontal scroll
               >
                 {processedColumns.map((col, index) => {
                   const originalCol = columns.find((c: any) => c.id === col.id);
