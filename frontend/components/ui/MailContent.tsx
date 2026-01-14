@@ -11,6 +11,7 @@ import { BsArchive, BsTrash3 } from "react-icons/bs";
 import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt } from "react-icons/fa";
 import { SiGmail } from "react-icons/si";
 import { type EmailData } from "@/types/index";
+import { useToast } from "@/contexts/toast-context";
 
 // --- CẤU HÌNH API ---
 // Thay thế đường dẫn này bằng URL backend thực tế của bạn
@@ -70,6 +71,7 @@ const MailContent = ({
   onArchive,
   triggerReply,
 }: MailContentProps) => {
+  const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -202,13 +204,15 @@ const MailContent = ({
         onArchive(mail.id);
       }
 
+      showToast("Email archived successfully", "success");
+
       // Go back to list
       if (onBack) {
         onBack();
       }
     } catch (error: any) {
       console.error("Error archiving email:", error);
-      alert(`Error: ${error.message}`);
+      showToast(`Failed to archive: ${error.message}`, "error");
     } finally {
       setIsArchiving(false);
     }
@@ -256,13 +260,15 @@ const MailContent = ({
         onDelete(mail.id);
       }
 
+      showToast("Email moved to trash", "success");
+
       // Go back to list
       if (onBack) {
         onBack();
       }
     } catch (error: any) {
       console.error("Error deleting email:", error);
-      alert(`Error: ${error.message}`);
+      showToast(`Failed to delete: ${error.message}`, "error");
     } finally {
       setIsDeleting(false);
     }
@@ -314,10 +320,10 @@ const MailContent = ({
 
       setIsReplying(false);
       setReplyBody("");
-      alert("Reply sent successfully!");
+      showToast("Reply sent successfully", "success");
     } catch (error: any) {
       console.error("Error sending reply:", error);
-      alert(`Error: ${error.message}`);
+      showToast(`Failed to send reply: ${error.message}`, "error");
     } finally {
       setIsSending(false);
     }

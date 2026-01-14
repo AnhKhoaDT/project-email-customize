@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from './button';
 import { Input } from './input';
 import { Label } from './label';
+import { useToast } from '@/contexts/toast-context';
 
 interface ComposeModalProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ interface ComposeModalProps {
 }
 
 const ComposeModal = ({ isOpen, onClose, onSend }: ComposeModalProps) => {
+  const { showToast } = useToast();
   const [to, setTo] = useState('');
   const [cc, setCc] = useState('');
   const [bcc, setBcc] = useState('');
@@ -30,7 +32,7 @@ const ComposeModal = ({ isOpen, onClose, onSend }: ComposeModalProps) => {
 
   const handleSend = async () => {
     if (!to.trim() || !subject.trim()) {
-      alert('Please fill in recipient and subject');
+      showToast('Please fill in recipient and subject', 'warning');
       return;
     }
 
@@ -53,10 +55,11 @@ const ComposeModal = ({ isOpen, onClose, onSend }: ComposeModalProps) => {
       setBody('');
       setShowCc(false);
       setShowBcc(false);
+      showToast('Email sent successfully', 'success');
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to send email:', error);
-      alert('Failed to send email. Please try again.');
+      showToast(`Failed to send email: ${error.message || 'Please try again'}`, 'error');
     } finally {
       setIsSending(false);
     }

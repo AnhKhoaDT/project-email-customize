@@ -3,6 +3,7 @@ import { TbLayoutSidebarRightExpandFilled, TbSparkles } from "react-icons/tb";
 import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
 import { LuSquareKanban } from "react-icons/lu";
+import { IoMdRefresh } from "react-icons/io";
 
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
@@ -21,9 +22,11 @@ interface MailBoxProps {
   onSelectMail: (mail: Mail) => void;
   focusedIndex?: number;
   isLoadingMore?: boolean;
+  isLoading?: boolean; // Loading state for mail list refresh
   hasMore?: boolean;
   kanbanMode: boolean;
   kanbanClick: () => void;
+  onRefresh?: () => void; // Reload emails
   // Search props
   searchQuery?: string;
   onSearch?: (query: string, isSuggestion?: boolean, suggestionType?: 'sender' | 'subject') => void;
@@ -44,9 +47,11 @@ const MailBox = ({
   onSelectMail,
   focusedIndex = 0,
   isLoadingMore = false,
+  isLoading = false,
   hasMore = true,
   kanbanMode = false,
   kanbanClick,
+  onRefresh,
   searchQuery,
   onSearch,
   onClearSearch,
@@ -307,14 +312,27 @@ const MailBox = ({
               {searchQuery ? `Search: "${searchQuery}"` : folderName}
             </h1>
           </div>
-          {/* kanban active/ unactive*/}
-          <button
-            onClick={kanbanClick}
-            className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
-              }`}
-          >
-            <LuSquareKanban size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Refresh Button */}
+            {onRefresh && !searchQuery && (
+              <button
+                onClick={onRefresh}
+                disabled={isLoading}
+                className="flex justify-center items-center h-8 w-8 hover:bg-secondary/10 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Reload emails"
+              >
+                <IoMdRefresh size={20} className={isLoading ? "animate-spin" : ""} />
+              </button>
+            )}
+            {/* kanban active/ unactive*/}
+            <button
+              onClick={kanbanClick}
+              className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
+                }`}
+            >
+              <LuSquareKanban size={20} />
+            </button>
+          </div>
         </div>
         {/* Search */}
         <div className="flex flex-col gap-2 mt-4">
@@ -390,7 +408,27 @@ const MailBox = ({
       <main className="flex-1 p-5 overflow-y-auto mailbox-scrollbar mailbox-scroll-target">
         {/* Mail List */}
         <div className="">
-          <div className="flex flex-col gap-2 ">
+          <div className="flex flex-col gap-2">
+            {/* Loading Indicator - Refreshing */}
+            {isLoading && mails.length > 0 && !isSearching && (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <span className="ml-2 text-sm text-secondary">
+                  Refreshing...
+                </span>
+              </div>
+            )}
+
+            {/* Loading Indicator - Searching */}
+            {isSearching && (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <span className="ml-2 text-sm text-secondary">
+                  Searching...
+                </span>
+              </div>
+            )}
+            
             {mails && mails.length > 0 ? (
               mails.map((mail, index) => {
                 const isSelected = selectedMail?.id === mail.id;

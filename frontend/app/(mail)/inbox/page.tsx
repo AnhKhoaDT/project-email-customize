@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useUI } from "@/contexts/ui-context"; // Import useUI
+import { useToast } from "@/contexts/toast-context";
 import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
 import ForwardModal from "@/components/ui/ForwardModal";
@@ -14,7 +15,8 @@ import { useSearch } from "@/hooks/useSearch";
 
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, isAuthInitialized, accessToken } = useAuth();
+  const { showToast } = useToast();
 
   // Lấy state từ Global UI Context thay vì state cục bộ
   const { isKanBanMode, toggleKanBanMode, toggleSidebar } = useUI();
@@ -30,34 +32,6 @@ export default function Home() {
   const searchQuery = searchParams.get("q");
   const [isSearching, setIsSearching] = useState(false);
 
-  // Use search hook
-  const {
-    searchMode,
-    setSearchMode,
-    isSearching: hookIsSearching,
-    error: searchError,
-    handleSearch,
-    onClearSearch,
-  } = useSearch({
-    folderSlug: "inbox",
-    isAuthenticated,
-    onMailsChange: setMails,
-    onErrorChange: setError,
-    onLoadingChange: setIsSearching,
-  });
-
-  // Update local searching state from hook
-  useEffect(() => {
-    setIsSearching(hookIsSearching);
-  }, [hookIsSearching]);
-
-  // Update error from search
-  useEffect(() => {
-    if (searchError) {
-      setError(searchError);
-    }
-  }, [searchError]);
-
   // Pagination state
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -72,22 +46,27 @@ export default function Home() {
   // Counter to trigger reply mode
   const [replyTrigger, setReplyTrigger] = useState(0);
 
-  // Fetch inbox mails function (reusable)
+  // Fetch inbox mails function (reusable) - Define BEFORE useSearch
   const fetchInboxMails = useCallback(async () => {
+    console.log('[Inbox] fetchInboxMails called');
     setError(null); // Clear any previous errors
     try {
       setIsMailsLoading(true);
       const id = "INBOX";
       const limit = 20;
 
-      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      // Use token from AuthContext instead of window.__accessToken
+      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+      console.log('[Inbox] Token check:', { hasToken: !!token, source: accessToken ? 'AuthContext' : 'window' });
       if (!token) {
+        console.log('[Inbox] No token found, aborting fetch');
         setIsMailsLoading(false);
         return;
       }
 
       const maiURL =
         process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+      console.log('[Inbox] Fetching from:', `${maiURL}/mailboxes/${id}/emails?limit=${limit}`);
       const response = await fetch(
         `${maiURL}/mailboxes/${id}/emails?limit=${limit}`,
         {
@@ -99,6 +78,7 @@ export default function Home() {
         }
       );
 
+      console.log('[Inbox] Response status:', response.status);
       if (!response.ok) throw new Error("Failed to fetch mails");
 
       const data = await response.json();
@@ -108,26 +88,46 @@ export default function Home() {
         ? data
         : [];
 
+      console.log('[Inbox] Fetched mails:', fetched.length);
       setMails(fetched);
       setNextPageToken(data.nextPageToken || null);
       setHasMore(!!data.nextPageToken);
     } catch (err: any) {
+      console.error('[Inbox] Fetch error:', err);
       setError("Unable to load emails. Please try again.");
     } finally {
       setIsMailsLoading(false);
     }
-  }, []);
+  }, [accessToken]);
 
-  // Clear search handler
-  const handleClearSearch = useCallback(() => {
-    // Reset all search-related states
-    setIsSearching(false);
-    setError(null);
-    // Don't clear mails immediately - let fetchInboxMails handle it
+  // Use search hook
+  const {
+    searchMode,
+    setSearchMode,
+    isSearching: hookIsSearching,
+    error: searchError,
+    handleSearch,
+    onClearSearch,
+  } = useSearch({
+    folderSlug: "inbox",
+    isAuthenticated,
+    isAuthInitialized,
+    accessToken,
+    onMailsChange: (mails) => {
+      setMails(mails);
+      setIsMailsLoading(false); // Stop loading when search results arrive
+    },
+    onErrorChange: setError,
+    onLoadingChange: setIsSearching,
+    onRefreshMails: fetchInboxMails,
+  });
 
-    // Navigate back to inbox (this will trigger inbox fetch via useEffect)
-    router.push("/inbox");
-  }, [router]);
+  // Update error from search
+  useEffect(() => {
+    if (searchError) {
+      setError(searchError);
+    }
+  }, [searchError]);
 
   // 1. Client-side authentication check
   useEffect(() => {
@@ -138,12 +138,13 @@ export default function Home() {
 
   // 2. Call API lấy danh sách mail on mount (and after clear search)
   useEffect(() => {
+    console.log('[Inbox] fetchInboxMails effect:', { isAuthenticated, searchQuery, isAuthLoading });
     if (isAuthenticated && !searchQuery) {
       // Clear error when returning to inbox
       setError(null);
       fetchInboxMails();
     }
-  }, [isAuthenticated, searchQuery, fetchInboxMails]);
+  }, [isAuthenticated, searchQuery, fetchInboxMails, isAuthLoading]);
 
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
@@ -152,7 +153,7 @@ export default function Home() {
     // Lưu ý: Đảm bảo copy lại phần logic loadMoreMails từ code cũ vào đây
     try {
       setIsLoadingMore(true);
-      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
       if (!token) return;
       const maiURL =
         process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
@@ -223,20 +224,36 @@ export default function Home() {
 
   // Hàm send email riêng cho Forward Modal (vì modal này nằm trong Page)
   const handleForwardEmail = async (emailData: any) => {
-    const token = typeof window !== "undefined" ? window.__accessToken : null;
-    if (!token) throw new Error("Not authenticated");
-    const apiURL =
-      process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-    const response = await fetch(`${apiURL}/emails/send`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(emailData),
-    });
-    if (!response.ok) throw new Error("Failed to send");
-    return await response.json();
+    try {
+      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+      console.log('[Forward] Sending email:', { emailData, hasToken: !!token });
+      if (!token) throw new Error("Not authenticated");
+      const apiURL =
+        process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+      const response = await fetch(`${apiURL}/emails/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(emailData),
+      });
+      
+      console.log('[Forward] Response status:', response.status);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+        console.error('[Forward] Error response:', errorData);
+        throw new Error(errorData.message || "Failed to send");
+      }
+      
+      showToast("Email forwarded successfully", "success");
+      setIsForwardOpen(false);
+      return await response.json();
+    } catch (error: any) {
+      console.error('[Forward] Exception:', error);
+      showToast(`Failed to forward: ${error.message}`, "error");
+      throw error;
+    }
   };
 
   // Handle delete email
@@ -285,9 +302,11 @@ export default function Home() {
             onSelectMail={handleSelectMail}
             focusedIndex={focusedIndex}
             isLoadingMore={isLoadingMore}
+            isLoading={isMailsLoading}
             hasMore={hasMore}
             kanbanMode={isKanBanMode}
             kanbanClick={toggleKanBanMode}
+            onRefresh={fetchInboxMails}
             searchQuery={searchQuery || undefined}
             onSearch={handleSearch}
             onClearSearch={onClearSearch}

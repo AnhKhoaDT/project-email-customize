@@ -8,9 +8,12 @@ import { type Mail } from "@/types";
 interface UseSearchOptions {
   folderSlug: string;
   isAuthenticated: boolean;
+  isAuthInitialized: boolean;  // 🔒 New: ensures auth check is complete
+  accessToken: string | null;
   onMailsChange?: (mails: Mail[]) => void; // Optional for pages that don't use search for mails
   onErrorChange: (error: string | null) => void;
   onLoadingChange: (loading: boolean) => void;
+  onRefreshMails?: () => void; // Callback to refresh mails after clearing search
 }
 
 interface UseSearchReturn {
@@ -25,9 +28,12 @@ interface UseSearchReturn {
 export const useSearch = ({
   folderSlug,
   isAuthenticated,
+  isAuthInitialized,
+  accessToken,
   onMailsChange,
   onErrorChange,
   onLoadingChange,
+  onRefreshMails,
 }: UseSearchOptions): UseSearchReturn => {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -47,6 +53,7 @@ export const useSearch = ({
 
   // Update parent loading state
   useEffect(() => {
+    console.log('[useSearch] Loading state changed:', isSearching);
     onLoadingChange(isSearching);
   }, [isSearching, onLoadingChange]);
 
@@ -54,16 +61,11 @@ export const useSearch = ({
   const handleSearch = useCallback((query: string, isSuggestion: boolean = false, suggestionType?: 'sender' | 'subject') => {
     if (!query.trim()) return;
 
-    // Force semantic search ONLY when triggered from KEYWORD suggestion (per requirement)
-    if (isSuggestion && suggestionType === 'subject') {
-      // Keyword → Semantic AI Search
+    // Force semantic search when triggered from ANY suggestion (contact or keyword)
+    if (isSuggestion) {
+      // Both Contact & Keyword → Semantic AI Search
       setSearchMode('semantic');
       const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}&mode=semantic`;
-      window.history.pushState(null, '', newUrl);
-    } else if (isSuggestion && suggestionType === 'sender') {
-      // Contact → Exact filter with fuzzy search
-      setSearchMode('fuzzy');
-      const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}&mode=fuzzy&filter=sender`;
       window.history.pushState(null, '', newUrl);
     } else {
       // Manual input → use current search mode
@@ -77,32 +79,58 @@ export const useSearch = ({
 
   // Clear search
   const onClearSearch = useCallback(() => {
-    // Use window.history to avoid Next.js server fetch
+    // Clear search state first
+    onErrorChange(null);
+    setError(null);
+    setIsSearching(false);
+    setLastSearchQuery(null);
+    setLastSearchMode(null);
+    
+    // Update URL and trigger popstate event to notify Next.js
     window.history.pushState(null, '', `/${folderSlug}`);
     
-    // Manually clear search results
-    onMailsChange?.([]);
-    onErrorChange(null);
-  }, [folderSlug, onMailsChange, onErrorChange]);
+    // Dispatch custom event to trigger re-render
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    
+    // Manually trigger refresh to reload inbox mails immediately
+    // This ensures mails are loaded even if URL update is async
+    if (onRefreshMails) {
+      onRefreshMails();
+    }
+  }, [folderSlug, onErrorChange, onRefreshMails]);
 
   // Auto-search when URL has query param (only if different from last search OR mode changed)
   useEffect(() => {
-    console.log('[useSearch] Effect triggered:', { isAuthenticated, searchQuery, searchMode, lastSearchQuery, lastSearchMode });
+    console.log('[useSearch] Effect triggered:', { isAuthInitialized, isAuthenticated, searchQuery, searchMode, lastSearchQuery, lastSearchMode });
 
-    if (!isAuthenticated || !searchQuery) {
-      console.log('[useSearch] Skipping: not authenticated or no query');
+    if (!searchQuery) {
+      console.log('[useSearch] Skipping: no query');
+      setIsSearching(false);
+      return;
+    }
+
+    if (!isAuthInitialized) {
+      console.log('[useSearch] Skipping: auth not initialized yet');
+      // Don't set isSearching to false here - waiting for auth
+      return;
+    }
+
+    if (!isAuthenticated) {
+      console.log('[useSearch] Skipping: not authenticated');
+      setIsSearching(false);
+      setError('Please login to search');
       return;
     }
 
     // Check URL params for forced mode (from suggestion)
     const urlParams = new URLSearchParams(window.location.search);
     const forcedMode = urlParams.get('mode');
-    const filterType = urlParams.get('filter');
     const effectiveMode = forcedMode === 'semantic' ? 'semantic' : forcedMode === 'fuzzy' ? 'fuzzy' : searchMode;
 
     // Skip if same query AND same mode (prevent duplicate search)
     if (searchQuery === lastSearchQuery && effectiveMode === lastSearchMode) {
       console.log('[useSearch] Skipping: same query and mode');
+      setIsSearching(false);
       return;
     }
 
@@ -116,12 +144,11 @@ export const useSearch = ({
         setIsSearching(true);
         setError(null);
 
-        const token =
-          process.env.NODE_ENV === "development"
-            ? window.__accessToken
-            : window.__accessToken;
+        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
         if (!token) {
           console.log('[useSearch] No token found');
+          setError('Authentication required');
+          setIsSearching(false);
           return;
         }
 
@@ -149,14 +176,7 @@ export const useSearch = ({
           // Fuzzy Search (default)
           console.log('[useSearch] Calling fuzzy search API');
           
-          // Check if filtering by sender (contact suggestion)
-          let fuzzyUrl = `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`;
-          if (filterType === 'sender') {
-            // Exact match on sender email (extract email if format is "Name <email>")
-            const emailMatch = searchQuery.match(/<(.+?)>/);
-            const senderEmail = emailMatch ? emailMatch[1] : searchQuery;
-            fuzzyUrl += `&from=${encodeURIComponent(senderEmail)}`;
-          }
+          const fuzzyUrl = `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`;
           
           response = await fetch(fuzzyUrl, {
             headers: {
@@ -203,13 +223,14 @@ export const useSearch = ({
         setError("Search failed. Please try again.");
         onMailsChange?.([]);
       } finally {
+        console.log('[useSearch] Setting isSearching to false');
         setIsSearching(false);
       }
     };
 
     performSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, searchQuery, searchMode]);
+  }, [isAuthInitialized, isAuthenticated, searchQuery, searchMode, accessToken]);
 
   return {
     searchMode,

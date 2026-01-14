@@ -111,6 +111,11 @@ const refreshAccessToken = async (): Promise<string> => {
     // Save new access token to global in-memory storage
     if (typeof window !== "undefined") {
       window.__accessToken = accessToken;
+      
+      // Dispatch custom event to notify AuthContext
+      window.dispatchEvent(new CustomEvent('tokenRefreshed', { 
+        detail: { accessToken } 
+      }));
     }
 
     return accessToken;
@@ -157,10 +162,12 @@ api.interceptors.response.use(
 
     // Handle 401 Unauthorized - Token expired
     if (error.response?.status === 401 && !originalRequest._retry) {
+      console.log('[API] 401 Unauthorized detected, attempting token refresh...');
       originalRequest._retry = true;
 
       if (!isRefreshing) {
         isRefreshing = true;
+        console.log('[API] Starting new refresh flow...');
 
         try {
           const newAccessToken = await refreshAccessToken();
@@ -171,18 +178,22 @@ api.interceptors.response.use(
 
           // Retry original request với token mới
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+          console.log('[API] Retrying original request with new token');
           return api(originalRequest);
         } catch (refreshError) {
           isRefreshing = false;
           refreshSubscribers = [];
+          console.error('[API] Refresh failed, rejecting all queued requests');
           return Promise.reject(refreshError);
         }
       }
 
       // Nếu đang refresh, chờ token mới
+      console.log('[API] Refresh already in progress, queueing request...');
       return new Promise((resolve) => {
         subscribeTokenRefresh((token: string) => {
           originalRequest.headers.Authorization = `Bearer ${token}`;
+          console.log('[API] Retrying queued request with refreshed token');
           resolve(api(originalRequest));
         });
       });

@@ -155,6 +155,13 @@ export class MailController {
 
       // Try Gmail API first
       try {
+        // Special handling for ARCHIVE: Gmail doesn't have ARCHIVE label
+        // Archived emails are those without INBOX label
+        if (id === 'ARCHIVE') {
+          const res = await this.gmailService.listArchivedMessages(req.user.id, pageSize, pageToken as any);
+          return res;
+        }
+        
         const res = await this.gmailService.listMessagesInLabel(req.user.id, id, pageSize, pageToken as any);
         return res;
       } catch (gmailError) {

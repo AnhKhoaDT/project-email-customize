@@ -220,6 +220,109 @@ export class GmailService {
     };
   }
 
+  async listArchivedMessages(userId: string, pageSize = 20, pageToken?: string) {
+    const client = await this.getOAuthClientForUser(userId);
+    const gmail = google.gmail({ version: 'v1', auth: client });
+    
+    // Gmail không có label ARCHIVE riêng biệt
+    // Archived emails = emails không có label INBOX, TRASH, SPAM
+    const query = '-in:inbox -in:trash -in:spam';
+    
+    // Lấy danh sách message IDs với query
+    const res = await gmail.users.messages.list({ 
+      userId: 'me', 
+      q: query,
+      maxResults: pageSize, 
+      pageToken 
+    });
+    
+    // Nếu không có messages thì return luôn
+    if (!res.data.messages || res.data.messages.length === 0) {
+      return {
+        messages: [],
+        nextPageToken: res.data.nextPageToken,
+        resultSizeEstimate: res.data.resultSizeEstimate || 0
+      };
+    }
+    
+    // Fetch chi tiết cho từng message (với format metadata để nhanh hơn)
+    const messagesWithDetails = await Promise.all(
+      res.data.messages.map(async (msg: any) => {
+        try {
+          const detail = await gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id,
+            format: 'metadata',
+            metadataHeaders: ['Subject', 'From', 'To', 'Date']
+          });
+          
+          const headers = detail.data.payload?.headers || [];
+          const getHeader = (name: string) => headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+          
+          // Decode RFC 2047 encoded subject (fixes Vietnamese/non-ASCII characters)
+          const decodeSubject = (subject: string): string => {
+            if (!subject) return '(No Subject)';
+            // Handle RFC 2047 encoding: =?charset?encoding?encoded-text?=
+            return subject.replace(/=\?([^?]+)\?(B|Q)\?([^?]+)\?=/gi, (match, charset, encoding, encoded) => {
+              try {
+                if (encoding.toUpperCase() === 'B') {
+                  // Base64 decoding
+                  return Buffer.from(encoded, 'base64').toString(charset || 'utf-8');
+                } else if (encoding.toUpperCase() === 'Q') {
+                  // Quoted-printable decoding
+                  return decodeURIComponent(encoded.replace(/=/g, '%'));
+                }
+              } catch (e) {
+                return match;
+              }
+              return match;
+            });
+          };
+          
+          return {
+            id: detail.data.id,
+            threadId: detail.data.threadId,
+            labelIds: detail.data.labelIds || [],
+            snippet: detail.data.snippet || '',
+            subject: decodeSubject(getHeader('Subject')),
+            from: getHeader('From'),
+            to: getHeader('To'),
+            date: getHeader('Date'),
+            sizeEstimate: detail.data.sizeEstimate,
+            internalDate: detail.data.internalDate,
+            isUnread: (detail.data.labelIds || []).includes('UNREAD'),
+            isStarred: (detail.data.labelIds || []).includes('STARRED'),
+            hasAttachment: (detail.data.payload?.parts || []).some((p: any) => p.filename && p.body?.attachmentId)
+          };
+        } catch (err) {
+          logger.error(`Failed to fetch message ${msg.id}:`, err);
+          // Fallback: trả về thông tin cơ bản
+          return {
+            id: msg.id,
+            threadId: msg.threadId,
+            labelIds: [],
+            snippet: '',
+            subject: '(Error loading)',
+            from: '',
+            to: '',
+            date: '',
+            sizeEstimate: 0,
+            internalDate: '',
+            isUnread: false,
+            isStarred: false,
+            hasAttachment: false
+          };
+        }
+      })
+    );
+    
+    return {
+      messages: messagesWithDetails,
+      nextPageToken: res.data.nextPageToken,
+      resultSizeEstimate: res.data.resultSizeEstimate || 0
+    };
+  }
+
   async getMessage(userId: string, messageId: string) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
