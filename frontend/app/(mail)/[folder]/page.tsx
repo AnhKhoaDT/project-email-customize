@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams, useParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useUI } from "@/contexts/ui-context";
+import { useToast } from "@/contexts/toast-context";
 import { useMailFolder } from "@/hooks/useMailFolder";
 import MailBox from "@/components/ui/MailBox";
 import MailContent from "@/components/ui/MailContent";
@@ -41,8 +42,9 @@ export default function FolderPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, isAuthInitialized, accessToken } = useAuth();
   const { isKanBanMode, toggleSidebar } = useUI();
+  const { showToast } = useToast();
 
   // Get folder from URL params
   const folderSlug = params.folder as string;
@@ -86,9 +88,12 @@ export default function FolderPage() {
   } = useSearch({
     folderSlug,
     isAuthenticated,
+    isAuthInitialized,
+    accessToken,
     onMailsChange: handleMailsChange,
     onErrorChange: setSearchError,
     onLoadingChange: setIsSearching,
+    onRefreshMails: refreshMails,
   });
 
   // Update mails when folder mails change (only if not searching)
@@ -99,11 +104,6 @@ export default function FolderPage() {
       setMails(folderMails);
     }
   }, [folderMails, searchQuery]);
-
-  // Update local states from hook
-  useEffect(() => {
-    setIsSearching(hookIsSearching);
-  }, [hookIsSearching]);
 
   // Combine errors
   const combinedError = error || searchError || hookSearchError;
@@ -155,8 +155,8 @@ export default function FolderPage() {
       isHtml: boolean;
     }) => {
       try {
-        const token =
-          typeof window !== "undefined" ? window.__accessToken : null;
+        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+        console.log('[Forward] Sending email:', { emailData, hasToken: !!token });
         if (!token) return;
 
         const apiURL =
@@ -171,16 +171,21 @@ export default function FolderPage() {
           body: JSON.stringify(emailData),
         });
 
-        if (!response.ok) throw new Error("Failed to send forward");
+        console.log('[Forward] Response status:', response.status);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+          console.error('[Forward] Error response:', errorData);
+          throw new Error(errorData.message || "Failed to send forward");
+        }
 
-        alert("Email forwarded successfully!");
+        showToast("Email forwarded successfully", "success");
         setIsForwardOpen(false);
-      } catch (err) {
-        console.error("Error forwarding email:", err);
-        alert("Failed to forward email. Please try again.");
+      } catch (err: any) {
+        console.error('[Forward] Exception:', err);
+        showToast(`Failed to forward: ${err.message}`, "error");
       }
     },
-    []
+    [showToast, accessToken]
   );
 
   // Handle forward
@@ -238,6 +243,27 @@ export default function FolderPage() {
     setFocusedIndex(0);
   }, [mails]);
 
+  // Scroll handler for infinite scroll
+  useEffect(() => {
+    const handleScroll = (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (!target.classList.contains("mailbox-scroll-target")) return;
+      const { scrollTop, scrollHeight, clientHeight } = target;
+      if (
+        (scrollTop + clientHeight) / scrollHeight > 0.8 &&
+        hasMore &&
+        !isLoadingMore
+      ) {
+        loadMoreMails();
+      }
+    };
+    const container = document.querySelector(".mailbox-scroll-target");
+    if (container) {
+      container.addEventListener("scroll", handleScroll);
+      return () => container.removeEventListener("scroll", handleScroll);
+    }
+  }, [hasMore, isLoadingMore, loadMoreMails]);
+
   // Show loading state
   if (isAuthLoading || (!isAuthenticated && !isAuthLoading)) {
     return null;
@@ -270,9 +296,11 @@ export default function FolderPage() {
             onSelectMail={handleMailClick}
             focusedIndex={focusedIndex}
             isLoadingMore={isLoadingMore}
+            isLoading={isMailsLoading}
             hasMore={hasMore}
             kanbanMode={isKanBanMode}
             kanbanClick={() => { }}
+            onRefresh={refreshMails}
             searchQuery={searchQuery ?? undefined}
             onSearch={handleSearch}
             onClearSearch={onClearSearch}

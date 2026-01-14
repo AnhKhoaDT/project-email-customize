@@ -94,11 +94,36 @@ export class SemanticSearchService {
         return { success: true, emailId };
       }
 
-      // Fetch full email content
-      const email = await this.gmailService.getMessage(userId, emailId);
+      // Fetch email metadata (headers + snippet only - faster than full)
+      const email = await this.gmailService.getMessageMetadata(userId, emailId);
       
-      // Combine from, subject and body for embedding (include sender for better matching)
-      const textForEmbedding = `From: ${email.from || ''}\nSubject: ${email.subject || ''}\n${email.textBody || email.snippet || ''}`.trim();
+      // 🐛 DEBUG: Log raw email data to diagnose missing subject/from
+      console.log(`[Indexing] Email ${emailId}:`, {
+        subject: email.subject,
+        from: email.from,
+        snippet: email.snippet?.substring(0, 50),
+        hasSubject: !!email.subject,
+        hasFrom: !!email.from
+      });
+      
+      // ✅ PRE-PROCESSING: Combine from, subject and body
+      // Note: getMessageMetadata only returns snippet, not full body (for speed)
+      let bodyText = email.snippet || '';
+      
+      // ✅ Strip HTML tags (remove <tag>...</tag>)
+      bodyText = bodyText.replace(/<[^>]*>/g, '');
+      
+      // ✅ Normalize whitespace (replace multiple spaces/newlines with single space)
+      bodyText = bodyText.replace(/\s+/g, ' ').trim();
+      
+      // ✅ Truncate to 1000 characters (save tokens & API cost)
+      const MAX_TEXT_LENGTH = 1000;
+      if (bodyText.length > MAX_TEXT_LENGTH) {
+        bodyText = bodyText.substring(0, MAX_TEXT_LENGTH) + '...';
+      }
+      
+      // Combine fields for embedding
+      const textForEmbedding = `From: ${email.from || ''}\nSubject: ${email.subject || ''}\n${bodyText}`.trim();
       
       if (!textForEmbedding || textForEmbedding === 'From:\nSubject:') {
         console.log(`[Indexing] Skipped empty email ${emailId}`);
@@ -107,28 +132,54 @@ export class SemanticSearchService {
 
       // Generate embedding with potential retry
       const embedding = await this.generateEmbedding(textForEmbedding);
+      
+      // Clean up empty values and default placeholders
+      // Gmail API returns empty string if header not present
+      const cleanSubject = (
+        !email.subject || 
+        email.subject.trim() === ''
+      ) ? null : email.subject.trim();
+      
+      const cleanFrom = (
+        !email.from || 
+        email.from.trim() === ''
+      ) ? null : email.from.trim();
+      
+      console.log(`[Indexing] ✅ Cleaned values - subject: "${cleanSubject || 'NULL'}", from: "${cleanFrom || 'NULL'}"`);
 
-      // Store in database
+      // Store in database with cache fields for fast search
       if (existing) {
         // Update existing record
         existing.embedding = embedding;
         existing.embeddingText = textForEmbedding;
         existing.embeddingGeneratedAt = new Date();
+        // ✅ Update cache fields (use cleaned values)
+        existing.subject = cleanSubject;
+        existing.from = cleanFrom;
+        existing.snippet = email.snippet;
+        existing.receivedDate = email.date ? new Date(email.date) : new Date();
+        existing.labelIds = email.labelIds || [];
         await existing.save();
       } else {
-        // Create new record (status not set - only for indexing)
-        await this.emailMetadataModel.create({
+        // Create new record with cache fields
+        const newRecord = await this.emailMetadataModel.create({
           userId,
           emailId,
           threadId: email.threadId,
           embedding,
           embeddingText: textForEmbedding,
           embeddingGeneratedAt: new Date(),
-          // No status field - this email is not in Kanban
+          // ✅ Cache fields to avoid Gmail API calls during search (use cleaned values)
+          subject: cleanSubject,
+          from: cleanFrom,
+          snippet: email.snippet,
+          receivedDate: email.date ? new Date(email.date) : new Date(),
+          labelIds: email.labelIds || [],
+          // No cachedColumnId - this email is not in Kanban yet
         });
       }
 
-      console.log(`[Indexing] ✅ Successfully indexed email ${emailId}`);
+      console.log(`[Indexing] ✅ Successfully indexed email ${emailId} with cache fields`);
       return { success: true, emailId };
 
     } catch (err) {
@@ -201,7 +252,8 @@ export class SemanticSearchService {
   }
 
   /**
-   * Perform semantic search using vector similarity
+   * Perform semantic search using MongoDB Atlas Vector Search
+   * Uses $vectorSearch aggregation for fast similarity search
    * @param userId - User ID for authentication
    * @param query - Search query string
    * @param options - Search options (limit, threshold)
@@ -210,28 +262,67 @@ export class SemanticSearchService {
   async semanticSearch(
     userId: string,
     query: string,
-    options: { limit?: number; threshold?: number } = {}
+    options: { limit?: number; threshold?: number; useVectorSearch?: boolean } = {}
   ): Promise<any> {
     try {
-      const { limit = 20, threshold = 0.5 } = options;
+      const { limit = 20, threshold = 0.5, useVectorSearch = true } = options;
 
       // Generate embedding for the query
       const queryEmbedding = await this.generateEmbedding(query);
 
-      // Fetch all emails with embeddings from database
+      // ✅ OPTIMIZATION: Use MongoDB Atlas Vector Search (if enabled)
+      if (useVectorSearch) {
+        try {
+          const results = await this.vectorSearch(userId, queryEmbedding, { limit, threshold });
+          return {
+            status: 200,
+            data: {
+              query,
+              results: results.map(r => {
+                // Better fallbacks for missing subject/from
+                const subject = r.subject || (r.snippet ? `(${r.snippet.substring(0, 50)}...)` : '(No subject)');
+                const from = r.from || 'Unknown sender';
+                
+                return {
+                  id: r.emailId,
+                  emailId: r.emailId,
+                  threadId: r.threadId,
+                  subject: subject,
+                  from: from,
+                  snippet: r.snippet || '',
+                  date: r.receivedDate,
+                  receivedDate: r.receivedDate,
+                  labelIds: r.labelIds || [],
+                  similarityScore: r.score,
+                  matchedText: r.embeddingText,
+                };
+              }),
+              totalResults: results.length,
+              searchedEmails: results.length,
+              method: 'vectorSearch',
+            },
+          };
+        } catch (vectorErr) {
+          console.warn('[SemanticSearch] Vector search failed, falling back to linear search:', vectorErr.message);
+          // Fall through to linear search
+        }
+      }
+
+      // ❌ FALLBACK: Linear search (slow, for backwards compatibility)
+      console.log('[SemanticSearch] Using linear search (slow) - Consider enabling Vector Search Index');
+      
       const emailsWithEmbeddings = await this.emailMetadataModel
         .find({ 
           userId, 
           embedding: { $exists: true, $ne: null, $not: { $size: 0 } }
         })
-        .select('emailId threadId embedding embeddingText')
+        .select('emailId threadId embedding embeddingText subject from snippet receivedDate labelIds')
         .lean();
 
       // Auto-index if no embeddings found
       if (emailsWithEmbeddings.length === 0) {
         console.log('[SemanticSearch] No embeddings found. Auto-indexing recent emails...');
         
-        // Fetch recent emails from Gmail
         const inboxData = await this.gmailService.listMessagesInLabel(userId, 'INBOX', 200);
         
         if (inboxData?.messages && inboxData.messages.length > 0) {
@@ -239,7 +330,6 @@ export class SemanticSearchService {
           
           console.log(`[SemanticSearch] Auto-indexing ${emailIds.length} emails in background...`);
           
-          // Index in background (don't wait)
           this.batchGenerateEmbeddings(userId, emailIds).catch(err => {
             console.error('[SemanticSearch] Background indexing failed:', err);
           });
@@ -263,13 +353,21 @@ export class SemanticSearchService {
         try {
           const similarity = this.cosineSimilarity(queryEmbedding, emailDoc.embedding);
 
-          // Only include emails above similarity threshold
           if (similarity >= threshold) {
-            // Fetch full email details from Gmail
-            const emailDetails = await this.gmailService.getMessage(userId, emailDoc.emailId);
+            // Better fallbacks for missing subject/from
+            const subject = emailDoc.subject || (emailDoc.snippet ? `(${emailDoc.snippet.substring(0, 50)}...)` : '(No subject)');
+            const from = emailDoc.from || 'Unknown sender';
             
             scoredEmails.push({
-              ...emailDetails,
+              id: emailDoc.emailId,
+              emailId: emailDoc.emailId,
+              threadId: emailDoc.threadId,
+              subject: subject,
+              from: from,
+              snippet: emailDoc.snippet || '',
+              date: emailDoc.receivedDate,
+              receivedDate: emailDoc.receivedDate,
+              labelIds: emailDoc.labelIds || [],
               similarityScore: similarity,
               matchedText: emailDoc.embeddingText,
             });
@@ -279,10 +377,8 @@ export class SemanticSearchService {
         }
       }
 
-      // Sort by similarity score (highest first)
       scoredEmails.sort((a, b) => b.similarityScore - a.similarityScore);
 
-      // Limit results
       const results = scoredEmails.slice(0, limit);
 
       return {
@@ -292,11 +388,70 @@ export class SemanticSearchService {
           results,
           totalResults: scoredEmails.length,
           searchedEmails: emailsWithEmbeddings.length,
+          method: 'linearSearch',
         },
       };
     } catch (err) {
       throw new Error(`Semantic search failed: ${err.message}`);
     }
+  }
+
+  /**
+   * MongoDB Atlas Vector Search using $vectorSearch aggregation
+   * Requires Atlas Search Index with type "knnVector" configured
+   * @param userId - User ID to filter results
+   * @param queryEmbedding - Query vector embedding
+   * @param options - Search options
+   * @returns Array of search results with similarity scores
+   */
+  private async vectorSearch(
+    userId: string,
+    queryEmbedding: number[],
+    options: { limit?: number; threshold?: number } = {}
+  ): Promise<any[]> {
+    const { limit = 20, threshold = 0.5 } = options;
+
+    // MongoDB Atlas Vector Search aggregation pipeline
+    // Note: $vectorSearch is not in TypeScript types yet, use 'as any' to bypass
+    const pipeline: any[] = [
+      {
+        $vectorSearch: {
+          index: 'vector_search_index', // Name of Atlas Search index
+          path: 'embedding',
+          queryVector: queryEmbedding,
+          numCandidates: Math.min(limit * 10, 1000), // Candidate pool size
+          limit: limit * 2, // Fetch more for threshold filtering
+          filter: {
+            userId: userId, // 🔥 CRITICAL: Filter by user to prevent data leakage
+          },
+        },
+      },
+      {
+        $addFields: {
+          score: { $meta: 'vectorSearchScore' }, // Add similarity score
+        },
+      },
+      {
+        $match: {
+          score: { $gte: threshold }, // Filter by threshold
+        },
+      },
+      {
+        $project: {
+          embedding: 0, // ✅ Hide embedding vector (heavy field) - keep all other fields
+        },
+      },
+      {
+        $limit: limit,
+      },
+    ];
+
+    // Execute aggregation
+    const results = await this.emailMetadataModel.aggregate(pipeline).exec();
+
+    console.log(`[VectorSearch] Found ${results.length} results for user ${userId}`);
+
+    return results;
   }
 
   /**

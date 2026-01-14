@@ -6,6 +6,7 @@ import { Input } from "./input";
 import { Label } from "./label";
 import { Mail } from "@/types";
 import { type EmailData } from "@/types";
+ import { useToast } from "@/contexts/toast-context";
 
 interface ForwardModalProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ const ForwardModal = ({
   onSend,
   originalMail,
 }: ForwardModalProps) => {
+  const { showToast } = useToast();
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [bcc, setBcc] = useState("");
@@ -43,12 +45,15 @@ const ForwardModal = ({
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [toError, setToError] = useState("");
 
   const handleSend = async () => {
+    // Validation
     if (!to.trim()) {
-      alert("Please fill in recipient");
+      setToError("Recipient is required");
       return;
     }
+    setToError("");
 
     setIsSending(true);
     try {
@@ -83,7 +88,7 @@ const ForwardModal = ({
       onClose();
     } catch (error) {
       console.error("Failed to forward email:", error);
-      alert("Failed to forward email. Please try again.");
+      showToast("Failed to forward email. Please try again.", "error");
     } finally {
       setIsSending(false);
     }
@@ -108,32 +113,43 @@ const ForwardModal = ({
         {/* Form */}
         <div className="p-4 space-y-3">
           {/* To Field */}
-          <div className="flex items-center gap-2">
-            <Label htmlFor="to" className="w-16 text-right">
-              To:
-            </Label>
-            <Input
-              id="to"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="recipient@example.com"
-              className="flex-1"
-            />
-            {!showCc && (
-              <button
-                onClick={() => setShowCc(true)}
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                Cc
-              </button>
-            )}
-            {!showBcc && (
-              <button
-                onClick={() => setShowBcc(true)}
-                className="text-sm text-muted-foreground hover:text-foreground"
-              >
-                Bcc
-              </button>
+          <div>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="to" className="w-16 text-right">
+                To:
+              </Label>
+              <Input
+                id="to"
+                value={to}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  if (toError) setToError("");
+                }}
+                placeholder="recipient@example.com"
+                className={`flex-1 ${toError ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+              {!showCc && (
+                <button
+                  onClick={() => setShowCc(true)}
+                  className="text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Cc
+                </button>
+              )}
+              {!showBcc && (
+                <button
+                  onClick={() => setShowBcc(true)}
+                  className="text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Bcc
+                </button>
+              )}
+            </div>
+            {toError && (
+              <div className="flex items-center gap-2">
+                <div className="w-16"></div>
+                <p className="text-sm text-red-500 mt-1">{toError}</p>
+              </div>
             )}
           </div>
 

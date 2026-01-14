@@ -3,6 +3,7 @@ import { TbLayoutSidebarRightExpandFilled, TbSparkles } from "react-icons/tb";
 import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
 import { LuSquareKanban } from "react-icons/lu";
+import { IoMdRefresh } from "react-icons/io";
 
 import { IoWarning } from "react-icons/io5";
 import { Mail } from "@/types";
@@ -12,7 +13,7 @@ import SearchModeDropdown, {
   type SearchMode,
 } from "@/components/search/SearchModeDropdown";
 import SearchSuggestions from "@/components/search/SearchSuggestions";
-import { getSearchSuggestions } from "@/lib/api";
+import { getHybridSuggestions } from "@/lib/api";
 
 interface MailBoxProps {
   toggleSidebar: () => void;
@@ -21,12 +22,14 @@ interface MailBoxProps {
   onSelectMail: (mail: Mail) => void;
   focusedIndex?: number;
   isLoadingMore?: boolean;
+  isLoading?: boolean; // Loading state for mail list refresh
   hasMore?: boolean;
   kanbanMode: boolean;
   kanbanClick: () => void;
+  onRefresh?: () => void; // Reload emails
   // Search props
   searchQuery?: string;
-  onSearch?: (query: string, isSuggestion?: boolean) => void;
+  onSearch?: (query: string, isSuggestion?: boolean, suggestionType?: 'sender' | 'subject') => void;
   onClearSearch?: () => void;
   isSearching?: boolean;
   error?: string | null;
@@ -44,9 +47,11 @@ const MailBox = ({
   onSelectMail,
   focusedIndex = 0,
   isLoadingMore = false,
+  isLoading = false,
   hasMore = true,
   kanbanMode = false,
   kanbanClick,
+  onRefresh,
   searchQuery,
   onSearch,
   onClearSearch,
@@ -73,11 +78,17 @@ const MailBox = ({
   const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isFocusedRef = useRef(false); // Track focus state to avoid stale closures
 
   // Update local input when searchQuery prop changes (e.g., from URL)
   useEffect(() => {
     setInputValue(searchQuery || "");
   }, [searchQuery]);
+
+  // Sync isFocusedRef with isFocused state
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
 
   // Fetch suggestions with debounce
   const fetchSuggestions = useCallback(
@@ -95,8 +106,9 @@ const MailBox = ({
       setSuggestionsError(null);
 
       try {
-        // Use API helper (with auto token refresh)
-        const typedSuggestions = await getSearchSuggestions(value, 5);
+        // 🚀 Use NEW Hybrid API (Atlas Search - <200ms)
+        // Increased limits: 3 top hits + 8 keywords = min 3, up to 11 suggestions
+        const result = await getHybridSuggestions(value, 3, 8);
 
         // Check if request was aborted
         if (signal?.aborted) {
@@ -104,10 +116,33 @@ const MailBox = ({
           return;
         }
 
-        setSuggestions(typedSuggestions);
+        // Convert hybrid format to old format for backward compatibility
+        const convertedSuggestions: Array<{ value: string; type: 'sender' | 'subject' }> = [
+          // Top Hits (emails) → map to 'sender' type for navigation
+          ...result.topHits.map(hit => ({
+            value: hit.subject,
+            type: 'sender' as const // Will trigger navigation
+          })),
+          // Keywords → map to 'subject' type for semantic search
+          ...result.keywords.map(keyword => ({
+            value: keyword.value,
+            type: 'subject' as const // Will trigger semantic search
+          }))
+        ];
+
+        // Double check if request was aborted before updating state
+        if (signal?.aborted) {
+          console.log("[Suggestions] Request aborted before state update");
+          return;
+        }
+
+        setSuggestions(convertedSuggestions);
         setSuggestionsError(null);
-        // Always show dropdown if we have suggestions OR still loading
-        setShowSuggestions(true);
+        // Only show dropdown if input is still focused AND not aborted
+        // Use ref to get latest focus state (avoid stale closure)
+        if (isFocusedRef.current && !signal?.aborted) {
+          setShowSuggestions(true);
+        }
         setSelectedSuggestionIndex(-1);
         setIsLoadingSuggestions(false);
       } catch (error) {
@@ -122,12 +157,15 @@ const MailBox = ({
         setSuggestionsError(
           error instanceof Error ? error.message : "Failed to load suggestions"
         );
-        // Keep dropdown open to show error message
-        setShowSuggestions(true);
+        // Only show error dropdown if input is still focused
+        // Use ref to get latest focus state (avoid stale closure)
+        if (isFocusedRef.current && !signal?.aborted) {
+          setShowSuggestions(true);
+        }
         setIsLoadingSuggestions(false);
       }
     },
-    []
+    [] // isFocusedRef is used instead of isFocused to avoid stale closures
   );
 
   // Debounced input handler
@@ -153,7 +191,7 @@ const MailBox = ({
       }
 
       // Show dropdown and loading state immediately for better UX (when >= 2 chars)
-      if (value.length >= 2 && isFocused) {
+      if (value.length >= 2 && isFocusedRef.current) {
         setShowSuggestions(true);
         setIsLoadingSuggestions(true);
         setSuggestionsError(null);
@@ -228,10 +266,10 @@ const MailBox = ({
         selectedSuggestionIndex >= 0 &&
         suggestions[selectedSuggestionIndex]
       ) {
-        // Use selected suggestion → trigger semantic search (per requirement)
-        const selectedValue = suggestions[selectedSuggestionIndex].value;
-        setInputValue(selectedValue);
-        onSearch?.(selectedValue, true); // true = from suggestion
+        // Use selected suggestion → Contact or Keyword logic
+        const selected = suggestions[selectedSuggestionIndex];
+        setInputValue(selected.value);
+        onSearch?.(selected.value, true, selected.type); // Pass type
         setShowSuggestions(false);
         setSuggestions([]);
       } else if (inputValue.trim()) {
@@ -262,11 +300,11 @@ const MailBox = ({
   };
 
   // Handle suggestion selection
-  // When suggestion is selected, trigger semantic search (per requirement)
+  // Contact → Exact filter, Keyword → Semantic search (per requirement)
   const handleSelectSuggestion = useCallback(
-    (suggestionValue: string) => {
+    (suggestionValue: string, suggestionType: 'sender' | 'subject') => {
       setInputValue(suggestionValue);
-      onSearch?.(suggestionValue, true); // true = from suggestion
+      onSearch?.(suggestionValue, true, suggestionType); // Pass type
       setShowSuggestions(false);
       setSuggestions([]);
       setSelectedSuggestionIndex(-1);
@@ -292,14 +330,27 @@ const MailBox = ({
               {searchQuery ? `Search: "${searchQuery}"` : folderName}
             </h1>
           </div>
-          {/* kanban active/ unactive*/}
-          <button
-            onClick={kanbanClick}
-            className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
-              }`}
-          >
-            <LuSquareKanban size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Refresh Button */}
+            {onRefresh && !searchQuery && (
+              <button
+                onClick={onRefresh}
+                disabled={isLoading}
+                className="flex justify-center items-center h-8 w-8 hover:bg-secondary/10 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Reload emails"
+              >
+                <IoMdRefresh size={20} className={isLoading ? "animate-spin" : ""} />
+              </button>
+            )}
+            {/* kanban active/ unactive*/}
+            <button
+              onClick={kanbanClick}
+              className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
+                }`}
+            >
+              <LuSquareKanban size={20} />
+            </button>
+          </div>
         </div>
         {/* Search */}
         <div className="flex flex-col gap-2 mt-4">
@@ -339,7 +390,16 @@ const MailBox = ({
                 onBlur={() => {
                   setIsFocused(false);
                   // Delay to allow click on suggestion
-                  setTimeout(() => setShowSuggestions(false), 200);
+                  setTimeout(() => {
+                    // Only hide if still not focused (user might have refocused)
+                    setShowSuggestions(false);
+                    // Cancel any pending suggestions request
+                    if (abortControllerRef.current) {
+                      abortControllerRef.current.abort();
+                      abortControllerRef.current = null;
+                    }
+                    setIsLoadingSuggestions(false);
+                  }, 200);
                 }}
                 disabled={isSearching}
                 className="w-full focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
@@ -375,7 +435,27 @@ const MailBox = ({
       <main className="flex-1 p-5 overflow-y-auto mailbox-scrollbar mailbox-scroll-target">
         {/* Mail List */}
         <div className="">
-          <div className="flex flex-col gap-2 ">
+          <div className="flex flex-col gap-2">
+            {/* Loading Indicator - Refreshing */}
+            {isLoading && mails.length > 0 && !isSearching && (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <span className="ml-2 text-sm text-secondary">
+                  Refreshing...
+                </span>
+              </div>
+            )}
+
+            {/* Loading Indicator - Searching */}
+            {isSearching && (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <span className="ml-2 text-sm text-secondary">
+                  Searching...
+                </span>
+              </div>
+            )}
+            
             {mails && mails.length > 0 ? (
               mails.map((mail, index) => {
                 const isSelected = selectedMail?.id === mail.id;

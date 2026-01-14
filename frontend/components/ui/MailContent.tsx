@@ -7,10 +7,11 @@ import {
   IoMdMore,
   IoMdSend,
 } from "react-icons/io";
-import { BsArchive, BsTrash3 } from "react-icons/bs";
-import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt } from "react-icons/fa";
+import { BsArchive, BsTrash3, BsInboxFill } from "react-icons/bs";
+import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt, FaStar, FaRegStar } from "react-icons/fa";
 import { SiGmail } from "react-icons/si";
 import { type EmailData } from "@/types/index";
+import { useToast } from "@/contexts/toast-context";
 
 // --- CẤU HÌNH API ---
 // Thay thế đường dẫn này bằng URL backend thực tế của bạn
@@ -70,11 +71,13 @@ const MailContent = ({
   onArchive,
   triggerReply,
 }: MailContentProps) => {
+  const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [isStarring, setIsStarring] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Trigger reply mode from parent (keyboard shortcut)
@@ -202,15 +205,123 @@ const MailContent = ({
         onArchive(mail.id);
       }
 
+      showToast("Email archived successfully", "success");
+
       // Go back to list
       if (onBack) {
         onBack();
       }
     } catch (error: any) {
       console.error("Error archiving email:", error);
-      alert(`Error: ${error.message}`);
+      showToast(`Failed to archive: ${error.message}`, "error");
     } finally {
       setIsArchiving(false);
+    }
+  };
+
+  // --- MOVE TO INBOX FUNCTION (UNARCHIVE) ---
+  const handleMoveToInbox = async () => {
+    if (!mail?.id) return;
+
+    setIsArchiving(true);
+
+    try {
+      // Get Token
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        setIsArchiving(false);
+        return;
+      }
+
+      // Call API
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "unarchive",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to move to inbox");
+      }
+
+      // Success - call parent callback
+      if (onArchive) {
+        onArchive(mail.id);
+      }
+
+      showToast("Email moved to inbox successfully", "success");
+
+      // Go back to list
+      if (onBack) {
+        onBack();
+      }
+    } catch (error: any) {
+      console.error("Error moving to inbox:", error);
+      showToast(`Failed to move to inbox: ${error.message}`, "error");
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  // --- TOGGLE STAR FUNCTION ---
+  const handleToggleStar = async () => {
+    if (!mail?.id) return;
+
+    setIsStarring(true);
+    const isCurrentlyStarred = mail.labelIds?.includes("STARRED");
+    const action = isCurrentlyStarred ? "unstar" : "star";
+
+    try {
+      // Get Token
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        setIsStarring(false);
+        return;
+      }
+
+      // Call API
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to ${action} email`);
+      }
+
+      // Update local state optimistically
+      if (mail.labelIds) {
+        if (isCurrentlyStarred) {
+          mail.labelIds = mail.labelIds.filter(id => id !== "STARRED");
+        } else {
+          mail.labelIds.push("STARRED");
+        }
+      }
+
+      showToast(
+        isCurrentlyStarred ? "Star removed" : "Email starred",
+        "success"
+      );
+    } catch (error: any) {
+      console.error("Error toggling star:", error);
+      showToast(`Failed to ${action}: ${error.message}`, "error");
+    } finally {
+      setIsStarring(false);
     }
   };
 
@@ -256,13 +367,15 @@ const MailContent = ({
         onDelete(mail.id);
       }
 
+      showToast("Email moved to trash", "success");
+
       // Go back to list
       if (onBack) {
         onBack();
       }
     } catch (error: any) {
       console.error("Error deleting email:", error);
-      alert(`Error: ${error.message}`);
+      showToast(`Failed to delete: ${error.message}`, "error");
     } finally {
       setIsDeleting(false);
     }
@@ -314,10 +427,10 @@ const MailContent = ({
 
       setIsReplying(false);
       setReplyBody("");
-      alert("Reply sent successfully!");
+      showToast("Reply sent successfully", "success");
     } catch (error: any) {
       console.error("Error sending reply:", error);
-      alert(`Error: ${error.message}`);
+      showToast(`Failed to send reply: ${error.message}`, "error");
     } finally {
       setIsSending(false);
     }
@@ -360,13 +473,36 @@ const MailContent = ({
             <SiGmail size={18} />
           </a>
           <button
-            onClick={handleArchive}
-            disabled={isArchiving}
-            className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Archive email"
+            onClick={handleToggleStar}
+            disabled={isStarring}
+            className="p-2 hover:bg-muted rounded-md transition-colors hover:text-yellow-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title={mail.labelIds?.includes("STARRED") ? "Remove star" : "Add star"}
           >
-            <BsArchive size={18} />
+            {mail.labelIds?.includes("STARRED") ? (
+              <FaStar size={18} className="text-yellow-500" />
+            ) : (
+              <FaRegStar size={18} />
+            )}
           </button>
+          {mail.labelIds?.includes("INBOX") ? (
+            <button
+              onClick={handleArchive}
+              disabled={isArchiving}
+              className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Archive email"
+            >
+              <BsArchive size={18} />
+            </button>
+          ) : (
+            <button
+              onClick={handleMoveToInbox}
+              disabled={isArchiving}
+              className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Move to inbox"
+            >
+              <BsInboxFill size={18} />
+            </button>
+          )}
           <button
             onClick={handleDelete}
             disabled={isDeleting}

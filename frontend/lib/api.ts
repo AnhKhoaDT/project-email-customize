@@ -111,6 +111,11 @@ const refreshAccessToken = async (): Promise<string> => {
     // Save new access token to global in-memory storage
     if (typeof window !== "undefined") {
       window.__accessToken = accessToken;
+      
+      // Dispatch custom event to notify AuthContext
+      window.dispatchEvent(new CustomEvent('tokenRefreshed', { 
+        detail: { accessToken } 
+      }));
     }
 
     return accessToken;
@@ -157,10 +162,12 @@ api.interceptors.response.use(
 
     // Handle 401 Unauthorized - Token expired
     if (error.response?.status === 401 && !originalRequest._retry) {
+      console.log('[API] 401 Unauthorized detected, attempting token refresh...');
       originalRequest._retry = true;
 
       if (!isRefreshing) {
         isRefreshing = true;
+        console.log('[API] Starting new refresh flow...');
 
         try {
           const newAccessToken = await refreshAccessToken();
@@ -171,18 +178,22 @@ api.interceptors.response.use(
 
           // Retry original request với token mới
           originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+          console.log('[API] Retrying original request with new token');
           return api(originalRequest);
         } catch (refreshError) {
           isRefreshing = false;
           refreshSubscribers = [];
+          console.error('[API] Refresh failed, rejecting all queued requests');
           return Promise.reject(refreshError);
         }
       }
 
       // Nếu đang refresh, chờ token mới
+      console.log('[API] Refresh already in progress, queueing request...');
       return new Promise((resolve) => {
         subscribeTokenRefresh((token: string) => {
           originalRequest.headers.Authorization = `Bearer ${token}`;
+          console.log('[API] Retrying queued request with refreshed token');
           resolve(api(originalRequest));
         });
       });
@@ -421,7 +432,53 @@ export const unsnoozeEmail = async (emailId: string) => {
 };
 
 /**
- * Get search suggestions
+ * 🔥 NEW: Get hybrid search suggestions (FAST - Atlas Search)
+ * 
+ * Performance: <200ms (vs old API ~3-5s)
+ * Uses MongoDB Atlas Search Index instead of Gmail API
+ * Ensures minimum 3 suggestions with smart balancing
+ * 
+ * @param prefix - Search prefix (minimum 2 characters)
+ * @param limitTopHits - Max top hits (default: 3)
+ * @param limitKeywords - Max keywords (default: 8)
+ * @returns Hybrid suggestions with top hits and keywords
+ */
+export const getHybridSuggestions = async (
+  prefix: string,
+  limitTopHits: number = 3,
+  limitKeywords: number = 8
+): Promise<{
+  topHits: Array<{
+    type: 'email';
+    emailId: string;
+    threadId: string;
+    from: string;
+    subject: string;
+    snippet: string;
+    date: Date;
+    score: number;
+  }>;
+  keywords: Array<{
+    type: 'keyword';
+    value: string;
+    emailCount: number;
+    category?: string;
+  }>;
+  totalResults: number;
+  processingTimeMs: number;
+}> => {
+  const response = await api.get(`/search/hybrid-suggestions`, {
+    params: { prefix, limitTopHits, limitKeywords }
+  });
+  return response.data.data || { topHits: [], keywords: [], totalResults: 0, processingTimeMs: 0 };
+};
+
+/**
+ * ⚠️ DEPRECATED: Get search suggestions (SLOW - Gmail API)
+ * 
+ * Use getHybridSuggestions() instead for better performance
+ * 
+ * @deprecated Use getHybridSuggestions() instead
  * @param prefix - Search prefix (minimum 2 characters)
  * @param limit - Maximum number of suggestions (default: 5)
  * @returns Array of suggestions with value and type

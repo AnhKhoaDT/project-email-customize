@@ -31,11 +31,15 @@ export const useUserQuery = () => {
 
   useEffect(() => {
     const initializeAuth = async () => {
-      console.log('[useUserQuery] 🔄 Initialization - Has in-memory accessToken:', !!accessToken);
+      console.log('[useUserQuery] 🔄 Initialization - Has in-memory accessToken:', !!accessToken, 'isLoading:', isLoading);
       
       if (accessToken) {
         // Có accessToken in-memory → fetch user profile
         console.log('[useUserQuery] Has accessToken in-memory, fetching user profile...');
+        
+        // Ensure window.__accessToken is also set for non-axios requests
+        setGlobalAccessToken(accessToken);
+        
         try {
           const userProfile = await getCurrentUser();
           
@@ -48,17 +52,19 @@ export const useUserQuery = () => {
             console.warn('[useUserQuery] Auto-index failed (non-critical):', err);
           });
           
-          setIsLoading(false);
-          return;
         } catch (fetchError: any) {
           console.error('[useUserQuery] ❌ Failed to fetch user:', fetchError?.response?.status, fetchError?.message);
-          // Access token might be expired, will try refresh below
+          // Access token might be expired, clear it and try refresh
+          setAccessToken(null);
+          setGlobalAccessToken(null);
+        } finally {
+          setIsLoading(false);
         }
+        return;
       }
       
-      // Only try refresh if we don't have a token AND we're still loading
-      if (!accessToken && isLoading) {
-        // Không có accessToken → thử refresh từ HttpOnly cookie
+      // No accessToken → try refresh from HttpOnly cookie
+      if (!accessToken) {
         console.log('[useUserQuery] No accessToken, attempting to refresh from HttpOnly cookie...');
         
         try {
@@ -108,8 +114,9 @@ export const useUserQuery = () => {
     };
 
     initializeAuth();
-    // Re-run when accessToken changes (e.g., after login)
-  }, [accessToken]);
+    // Re-run when accessToken changes (e.g., after login/refresh)
+    // Also runs on mount to check for existing session
+  }, [accessToken]); // Keep only accessToken to avoid infinite loops
 
   return { isLoading };
 };

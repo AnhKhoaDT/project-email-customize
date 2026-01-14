@@ -8,9 +8,12 @@ import { type Mail } from "@/types";
 interface UseSearchOptions {
   folderSlug: string;
   isAuthenticated: boolean;
+  isAuthInitialized: boolean;  // 🔒 New: ensures auth check is complete
+  accessToken: string | null;
   onMailsChange?: (mails: Mail[]) => void; // Optional for pages that don't use search for mails
   onErrorChange: (error: string | null) => void;
   onLoadingChange: (loading: boolean) => void;
+  onRefreshMails?: () => void; // Callback to refresh mails after clearing search
 }
 
 interface UseSearchReturn {
@@ -18,16 +21,19 @@ interface UseSearchReturn {
   setSearchMode: (mode: SearchMode) => void;
   isSearching: boolean;
   error: string | null;
-  handleSearch: (query: string, isSuggestion?: boolean) => void;
+  handleSearch: (query: string, isSuggestion?: boolean, suggestionType?: 'sender' | 'subject') => void;
   onClearSearch: () => void;
 }
 
 export const useSearch = ({
   folderSlug,
   isAuthenticated,
+  isAuthInitialized,
+  accessToken,
   onMailsChange,
   onErrorChange,
   onLoadingChange,
+  onRefreshMails,
 }: UseSearchOptions): UseSearchReturn => {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -47,57 +53,107 @@ export const useSearch = ({
 
   // Update parent loading state
   useEffect(() => {
+    console.log('[useSearch] Loading state changed:', isSearching);
     onLoadingChange(isSearching);
   }, [isSearching, onLoadingChange]);
 
   // Search handler - just updates URL, useEffect handles actual search
-  const handleSearch = useCallback((query: string, isSuggestion: boolean = false) => {
+  const handleSearch = useCallback((query: string, isSuggestion: boolean = false, suggestionType?: 'sender' | 'subject') => {
     if (!query.trim()) return;
 
-    // Force semantic search when triggered from suggestion (per requirement)
-    if (isSuggestion && searchMode !== 'semantic') {
+    // Force semantic search when triggered from ANY suggestion (contact or keyword)
+    if (isSuggestion) {
+      // Both Contact & Keyword → Semantic AI Search
       setSearchMode('semantic');
+      const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}&mode=semantic`;
+      window.history.pushState(null, '', newUrl);
+    } else {
+      // Manual input → use current search mode
+      const newUrl = `/${folderSlug}?q=${encodeURIComponent(query)}`;
+      window.history.pushState(null, '', newUrl);
     }
-
-    router.push(`/${folderSlug}?q=${encodeURIComponent(query)}`);
-  }, [router, folderSlug, searchMode]);
+    
+    // Manually trigger search since we bypassed router
+    setLastSearchQuery(''); // Force re-search by clearing last query
+  }, [folderSlug, setLastSearchQuery]);
 
   // Clear search
   const onClearSearch = useCallback(() => {
-    router.push(`/${folderSlug}`);
-  }, [router, folderSlug]);
+    // Only proceed if there's an active search query
+    if (!searchQuery && !lastSearchQuery) {
+      return; // No search active, do nothing
+    }
+    
+    // Clear search state first
+    onErrorChange(null);
+    setError(null);
+    setIsSearching(false);
+    setLastSearchQuery(null);
+    setLastSearchMode(null);
+    
+    // Update URL and trigger popstate event to notify Next.js
+    window.history.pushState(null, '', `/${folderSlug}`);
+    
+    // Dispatch custom event to trigger re-render
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    
+    // Manually trigger refresh to reload inbox mails immediately
+    // This ensures mails are loaded even if URL update is async
+    if (onRefreshMails) {
+      onRefreshMails();
+    }
+  }, [folderSlug, searchQuery, lastSearchQuery, onErrorChange, onRefreshMails]);
 
   // Auto-search when URL has query param (only if different from last search OR mode changed)
   useEffect(() => {
-    console.log('[useSearch] Effect triggered:', { isAuthenticated, searchQuery, searchMode, lastSearchQuery, lastSearchMode });
+    console.log('[useSearch] Effect triggered:', { isAuthInitialized, isAuthenticated, searchQuery, searchMode, lastSearchQuery, lastSearchMode });
 
-    if (!isAuthenticated || !searchQuery) {
-      console.log('[useSearch] Skipping: not authenticated or no query');
+    if (!searchQuery) {
+      console.log('[useSearch] Skipping: no query');
+      setIsSearching(false);
       return;
     }
 
+    if (!isAuthInitialized) {
+      console.log('[useSearch] Skipping: auth not initialized yet');
+      // Don't set isSearching to false here - waiting for auth
+      return;
+    }
+
+    if (!isAuthenticated) {
+      console.log('[useSearch] Skipping: not authenticated');
+      setIsSearching(false);
+      setError('Please login to search');
+      return;
+    }
+
+    // Check URL params for forced mode (from suggestion)
+    const urlParams = new URLSearchParams(window.location.search);
+    const forcedMode = urlParams.get('mode');
+    const effectiveMode = forcedMode === 'semantic' ? 'semantic' : forcedMode === 'fuzzy' ? 'fuzzy' : searchMode;
+
     // Skip if same query AND same mode (prevent duplicate search)
-    if (searchQuery === lastSearchQuery && searchMode === lastSearchMode) {
+    if (searchQuery === lastSearchQuery && effectiveMode === lastSearchMode) {
       console.log('[useSearch] Skipping: same query and mode');
+      setIsSearching(false);
       return;
     }
 
     // Mark this query and mode as "attempted" immediately to prevent infinite loop
     setLastSearchQuery(searchQuery);
-    setLastSearchMode(searchMode);
+    setLastSearchMode(effectiveMode);
 
     const performSearch = async () => {
       try {
-        console.log('[useSearch] Starting search:', { searchQuery, searchMode });
+        console.log('[useSearch] Starting search:', { searchQuery, effectiveMode });
         setIsSearching(true);
         setError(null);
 
-        const token =
-          process.env.NODE_ENV === "development"
-            ? window.__accessToken
-            : window.__accessToken;
+        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
         if (!token) {
           console.log('[useSearch] No token found');
+          setError('Authentication required');
+          setIsSearching(false);
           return;
         }
 
@@ -106,9 +162,9 @@ export const useSearch = ({
         let response;
 
         // Choose search endpoint based on mode
-        if (searchMode === "semantic") {
+        if (effectiveMode === "semantic") {
           // Semantic Search
-          console.log('[useSearch] Calling semantic search API');
+          console.log('[useSearch] Calling semantic search API (from suggestion or toggle)');
           response = await fetch(`${apiURL}/search/semantic`, {
             method: "POST",
             headers: {
@@ -124,15 +180,15 @@ export const useSearch = ({
         } else {
           // Fuzzy Search (default)
           console.log('[useSearch] Calling fuzzy search API');
-          response = await fetch(
-            `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`,
-            {
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
+          
+          const fuzzyUrl = `${apiURL}/search/fuzzy?q=${encodeURIComponent(searchQuery)}&limit=50`;
+          
+          response = await fetch(fuzzyUrl, {
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+          });
         }
 
         if (!response.ok) throw new Error("Search failed");
@@ -142,7 +198,7 @@ export const useSearch = ({
 
         // Handle different response formats
         let results = [];
-        if (searchMode === "semantic") {
+        if (effectiveMode === "semantic") {
           results = data?.data?.results || [];
         } else {
           results = data?.data?.hits || [];
@@ -172,13 +228,14 @@ export const useSearch = ({
         setError("Search failed. Please try again.");
         onMailsChange?.([]);
       } finally {
+        console.log('[useSearch] Setting isSearching to false');
         setIsSearching(false);
       }
     };
 
     performSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, searchQuery, searchMode]);
+  }, [isAuthInitialized, isAuthenticated, searchQuery, searchMode, accessToken]);
 
   return {
     searchMode,

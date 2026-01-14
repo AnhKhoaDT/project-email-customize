@@ -22,7 +22,7 @@ export function useMailFolder({
   folderId,
   searchQuery,
 }: UseMailFolderOptions): UseMailFolderReturn {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: isAuthLoading, accessToken } = useAuth();
 
   const [mails, setMails] = useState<Mail[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -34,6 +34,9 @@ export function useMailFolder({
   // Fetch mails for a specific folder
   const fetchMails = useCallback(
     async (pageToken?: string) => {
+      console.log('[useMailFolder] fetchMails:', { isAuthLoading, isAuthenticated, hasToken: !!accessToken });
+      // Wait for auth to complete before checking authentication
+      if (isAuthLoading) return;
       if (!isAuthenticated) return;
 
       setError(null);
@@ -43,8 +46,8 @@ export function useMailFolder({
           setIsLoading(true);
         }
 
-        const token =
-          typeof window !== "undefined" ? window.__accessToken : null;
+        // Use token from AuthContext instead of window
+        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
         if (!token) {
           setError("Authentication token is missing. Please log in again.");
           setIsLoading(false);
@@ -111,7 +114,7 @@ export function useMailFolder({
         setIsLoadingMore(false);
       }
     },
-    [isAuthenticated, folderId]
+    [isAuthenticated, folderId, isAuthLoading, accessToken]
   );
 
   // Search mails
@@ -195,12 +198,21 @@ export function useMailFolder({
 
   // Effect: Fetch mails when folder changes or on mount
   useEffect(() => {
+    console.log('[useMailFolder] Main effect:', { folderId, searchQuery, isAuthenticated, isAuthLoading });
+    if (isAuthLoading) {
+      console.log('[useMailFolder] Waiting for auth to complete...');
+      return;
+    }
+    if (!isAuthenticated) {
+      console.log('[useMailFolder] Not authenticated, skipping fetch');
+      return;
+    }
     if (searchQuery) {
       searchMails(searchQuery);
     } else {
       fetchMails();
     }
-  }, [folderId, searchQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [folderId, searchQuery, isAuthenticated, isAuthLoading]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     mails,

@@ -5,7 +5,7 @@ import { FaUserAlt, FaEnvelope } from "react-icons/fa";
 interface SearchSuggestionsProps {
   suggestions: Array<{ value: string; type: 'sender' | 'subject' }>;
   selectedIndex: number;
-  onSelect: (suggestion: string) => void;
+  onSelect: (suggestion: string, type: 'sender' | 'subject') => void;
   isLoading?: boolean;
   error?: string | null;
 }
@@ -49,46 +49,111 @@ export default function SearchSuggestions({
         // Suggestions list
         <>
           <div className="max-h-[300px] overflow-y-auto">
-            {suggestions.map((suggestion, index) => {
-              const isSelected = selectedIndex === index;
-              const Icon = suggestion.type === 'sender' ? FaUserAlt : FaEnvelope;
+            {/* Separate suggestions by type */}
+            {(() => {
+              const contacts = suggestions.filter(s => s.type === 'sender');
+              const keywords = suggestions.filter(s => s.type === 'subject');
               
               return (
-                <button
-                  key={`${suggestion.type}-${index}`}
-                  onMouseDown={(e) => {
-                    // Use onMouseDown instead of onClick to prevent input blur
-                    e.preventDefault();
-                    onSelect(suggestion.value);
-                  }}
-                  className={`
-                    w-full px-4 py-2.5 text-left flex items-center gap-3 transition-all
-                    border-l-2
-                    ${isSelected 
-                      ? 'bg-primary/10 border-primary text-foreground' 
-                      : 'border-transparent hover:bg-secondary/40 text-foreground hover:border-secondary'
-                    }
-                  `}
-                >
-                  <Icon 
-                    className={`text-sm flex-shrink-0 ${
-                      isSelected ? 'text-primary' : 'text-muted-foreground'
-                    }`} 
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{suggestion.value}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {suggestion.type === 'sender' ? 'From' : 'Subject'}
+                <>
+                  {/* Keywords Section */}
+                  {keywords.length > 0 && (
+                    <div>
+                      <div className="px-4 py-2 bg-secondary/10">
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                          🔍 Keywords
+                        </span>
+                      </div>
+                      {keywords.map((suggestion, idx) => {
+                        const globalIndex = suggestions.findIndex(s => s === suggestion);
+                        const isSelected = selectedIndex === globalIndex;
+                        
+                        return (
+                          <button
+                            key={`subject-${idx}`}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              onSelect(suggestion.value, suggestion.type);
+                            }}
+                            className={`
+                              w-full px-4 py-2.5 text-left flex items-center gap-3 transition-all
+                              border-l-2
+                              ${isSelected 
+                                ? 'bg-primary/10 border-primary text-foreground' 
+                                : 'border-transparent hover:bg-secondary/40 text-foreground hover:border-secondary'
+                              }
+                            `}
+                          >
+                            <FaEnvelope 
+                              className={`text-sm shrink-0 ${
+                                isSelected ? 'text-primary' : 'text-muted-foreground'
+                              }`} 
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{suggestion.value}</div>
+                              <div className="text-xs text-muted-foreground">Topic</div>
+                            </div>
+                            {isSelected && (
+                              <kbd className="hidden sm:inline-block px-2 py-0.5 text-xs font-mono border border-primary/30 rounded bg-primary/5">
+                                ↵
+                              </kbd>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
-                  </div>
-                  {isSelected && (
-                    <kbd className="hidden sm:inline-block px-2 py-0.5 text-xs font-mono border border-primary/30 rounded bg-primary/5">
-                      ↵
-                    </kbd>
                   )}
-                </button>
+
+                                    {/* Contacts Section */}
+                  {contacts.length > 0 && (
+                    <div className="border-b border-secondary/30">
+                      <div className="px-4 py-2 bg-secondary/10">
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                          👤 Contacts
+                        </span>
+                      </div>
+                      {contacts.map((suggestion, idx) => {
+                        const globalIndex = suggestions.findIndex(s => s === suggestion);
+                        const isSelected = selectedIndex === globalIndex;
+                        
+                        return (
+                          <button
+                            key={`sender-${idx}`}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              onSelect(suggestion.value, suggestion.type);
+                            }}
+                            className={`
+                              w-full px-4 py-2.5 text-left flex items-center gap-3 transition-all
+                              border-l-2
+                              ${isSelected 
+                                ? 'bg-primary/10 border-primary text-foreground' 
+                                : 'border-transparent hover:bg-secondary/40 text-foreground hover:border-secondary'
+                              }
+                            `}
+                          >
+                            <FaUserAlt 
+                              className={`text-sm shrink-0 ${
+                                isSelected ? 'text-primary' : 'text-muted-foreground'
+                              }`} 
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">{suggestion.value}</div>
+                              <div className="text-xs text-muted-foreground">Sender</div>
+                            </div>
+                            {isSelected && (
+                              <kbd className="hidden sm:inline-block px-2 py-0.5 text-xs font-mono border border-primary/30 rounded bg-primary/5">
+                                ↵
+                              </kbd>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               );
-            })}
+            })()}
           </div>
           {isLoading && (
             <div className="px-4 py-2 text-xs text-muted-foreground bg-secondary/10 border-t border-secondary/30 flex items-center gap-2">

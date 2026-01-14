@@ -37,7 +37,7 @@ export class FuzzySearchService {
    */
   async searchEmails(userId: string, searchDto: SearchEmailDto): Promise<SearchEmailResponse> {
     const startTime = Date.now();
-    const { q, limit = 20, offset = 0, status } = searchDto;
+    const { q, limit = 20, offset = 0, status, from } = searchDto;
 
     // Validate query
     if (!q || q.trim().length === 0) {
@@ -101,11 +101,25 @@ export class FuzzySearchService {
 
       console.log(`[FuzzySearch] Fuse.js found ${fuseResults.length} matches`);
 
+      // Filter by sender if specified (exact match from contact suggestion)
+      let filteredResults = fuseResults;
+      if (from) {
+        console.log(`[FuzzySearch] Filtering by sender: ${from}`);
+        filteredResults = fuseResults.filter(result => {
+          const emailFrom = result.item.from || '';
+          // Match email address (extract from "Name <email>" format)
+          const emailMatch = emailFrom.match(/<(.+?)>/) || emailFrom.match(/([^\s]+@[^\s]+)/);
+          const senderEmail = emailMatch ? emailMatch[1] : emailFrom;
+          return senderEmail.toLowerCase().includes(from.toLowerCase());
+        });
+        console.log(`[FuzzySearch] After sender filter: ${filteredResults.length} matches`);
+      }
+
       // ============================================
       // STEP 3: Format & paginate results
       // ============================================
-      const totalHits = fuseResults.length;
-      const paginatedResults = fuseResults.slice(offset, offset + limit);
+      const totalHits = filteredResults.length;
+      const paginatedResults = filteredResults.slice(offset, offset + limit);
 
       const hits: SearchEmailResult[] = paginatedResults.map(result => ({
         id: result.item.id || '',
