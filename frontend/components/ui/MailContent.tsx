@@ -7,7 +7,7 @@ import {
   IoMdMore,
   IoMdSend,
 } from "react-icons/io";
-import { BsArchive, BsTrash3 } from "react-icons/bs";
+import { BsArchive, BsTrash3, BsInboxFill } from "react-icons/bs";
 import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt } from "react-icons/fa";
 import { SiGmail } from "react-icons/si";
 import { type EmailData } from "@/types/index";
@@ -218,6 +218,57 @@ const MailContent = ({
     }
   };
 
+  // --- MOVE TO INBOX FUNCTION (UNARCHIVE) ---
+  const handleMoveToInbox = async () => {
+    if (!mail?.id) return;
+
+    setIsArchiving(true);
+
+    try {
+      // Get Token
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) {
+        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
+        setIsArchiving(false);
+        return;
+      }
+
+      // Call API
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action: "unarchive",
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to move to inbox");
+      }
+
+      // Success - call parent callback
+      if (onArchive) {
+        onArchive(mail.id);
+      }
+
+      showToast("Email moved to inbox successfully", "success");
+
+      // Go back to list
+      if (onBack) {
+        onBack();
+      }
+    } catch (error: any) {
+      console.error("Error moving to inbox:", error);
+      showToast(`Failed to move to inbox: ${error.message}`, "error");
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   // --- DELETE EMAIL FUNCTION ---
   const handleDelete = async () => {
     if (!mail?.id) return;
@@ -365,14 +416,25 @@ const MailContent = ({
           >
             <SiGmail size={18} />
           </a>
-          <button
-            onClick={handleArchive}
-            disabled={isArchiving}
-            className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Archive email"
-          >
-            <BsArchive size={18} />
-          </button>
+          {mail.labelIds?.includes("INBOX") ? (
+            <button
+              onClick={handleArchive}
+              disabled={isArchiving}
+              className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Archive email"
+            >
+              <BsArchive size={18} />
+            </button>
+          ) : (
+            <button
+              onClick={handleMoveToInbox}
+              disabled={isArchiving}
+              className="p-2 hover:bg-muted rounded-md transition-colors hover:text-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Move to inbox"
+            >
+              <BsInboxFill size={18} />
+            </button>
+          )}
           <button
             onClick={handleDelete}
             disabled={isDeleting}
