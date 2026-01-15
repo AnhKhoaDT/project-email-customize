@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import KanbanColumn from "@/components/ui/KanbanColumn"; // Đảm bảo đường dẫn đúng
 import RecoverLabelModal from "@/components/ui/RecoverLabelModal";
+import MailContent from "@/components/ui/MailContent"; // Import MailContent
 import {
   DragDropContext,
   Droppable, // Cần import Droppable nếu muốn kéo thả CỘT (Level 2)
@@ -104,7 +105,7 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-// --- COMPONENT: MAIL READING MODAL (User Provided Logic) ---
+// --- COMPONENT: MAIL READING MODAL (Using MailContent) ---
 const MailReadingModal = ({
   isOpen,
   mail,
@@ -114,267 +115,94 @@ const MailReadingModal = ({
   mail: KanbanEmail | null;
   onClose: () => void;
 }) => {
-  const [isReplying, setIsReplying] = useState(false);
-  const [replyBody, setReplyBody] = useState("");
-  const [isSending, setIsSending] = useState(false);
-  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [emailDetail, setEmailDetail] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Reset state when mail changes
+  // Fetch email detail when modal opens
   useEffect(() => {
-    setIsReplying(false);
-    setReplyBody("");
-  }, [mail]);
-
-  useEffect(() => {
-    if (isReplying && replyTextareaRef.current) {
-      replyTextareaRef.current.focus();
-      replyTextareaRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
+    if (!isOpen || !mail) {
+      setEmailDetail(null);
+      return;
     }
-  }, [isReplying]);
+
+    const fetchEmailDetail = async () => {
+      setIsLoading(true);
+      try {
+        const token = typeof window !== "undefined" ? window.__accessToken : null;
+        if (!token) return;
+        
+        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+        const response = await fetch(`${apiURL}/emails/${mail.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        
+        if (!response.ok) throw new Error("Failed to fetch email detail");
+        const data = await response.json();
+        setEmailDetail(data);
+      } catch (err) {
+        console.error("Error fetching email detail:", err);
+        // Fallback to using the original mail data if API fails
+        setEmailDetail(mail);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchEmailDetail();
+  }, [isOpen, mail]);
 
   if (!isOpen) return null;
-
-  // Render Placeholder if no mail
   if (!mail) return null;
 
-  const senderName = getSenderName(mail.from);
-  const senderEmail = getSenderEmail(mail.from);
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const handleReplyClick = () => {
-    setIsReplying(true);
-  };
+  // Use fetched email detail or fallback to original mail data
+  const emailData = emailDetail || mail;
 
-  const handleSendReply = async () => {
-    if (!replyBody.trim()) return;
-    setIsSending(true);
-    // Simulate API Call
-    setTimeout(() => {
-      alert(`Reply sent to ${senderEmail}: \n${replyBody}`);
-      setIsSending(false);
-      setIsReplying(false);
-      setReplyBody("");
-    }, 1000);
+  // Transform KanbanEmail to EmailData format expected by MailContent
+  const transformedEmailData = {
+    ...emailData,
+    cc: emailData.cc || '',
+    bcc: emailData.bcc || '',
+    messageId: emailData.messageId || '',
+    attachments: emailData.attachments || [],
+    sizeEstimate: emailData.sizeEstimate || 0,
+    historyId: emailData.historyId || '',
+    internalDate: emailData.date,
+    raw: {
+      id: emailData.id,
+      threadId: emailData.threadId,
+      labelIds: emailData.labelIds || [],
+      snippet: emailData.snippet,
+      payload: {
+        partId: '',
+        mimeType: 'text/html',
+        filename: '',
+        headers: [],
+        body: { size: 0 }
+      }
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Main Content Container */}
       <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
-        {/* --- TOP ACTION BAR --- */}
-        <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background dark:bg-[#1e1e1e]">
-          <div className="flex items-center gap-4 text-secondary dark:text-gray-400">
-            <button
-              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
-              onClick={onClose}
-            >
-              <IoMdClose size={24} />
-            </button>
-            <div className="h-4 w-px bg-divider dark:bg-white/20 mx-1"></div>
-            <button
-              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
-              onClick={onClose}
-            >
-              <IoMdArrowBack size={20} />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 text-secondary dark:text-gray-400">
-            <button
-              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors cursor-pointer"
-              title="Archive"
-            >
-              <BsArchive size={18} />
-            </button>
-            <button
-              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors hover:text-red-400 cursor-pointer"
-              title="Delete"
-            >
-              <BsTrash3 size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* --- SCROLLABLE CONTENT AREA --- */}
-        <div className="flex-1 overflow-y-auto mailbox-scrollbar pb-20">
-          {/* Subject and Sender Info - Unified Section */}
-          <div className="px-6 pt-6 pb-4 bg-background dark:bg-[#121212] border-b border-divider dark:border-gray-800">
-            {/* Subject Header */}
-            <div className="mb-4">
-              <div className="flex flex-row justify-between items-start gap-4">
-                <h1 className="text-xl md:text-2xl font-semibold text-foreground dark:text-white flex-1">
-                  {mail.subject || "(No Subject)"}
-                </h1>
-                <div className="flex gap-2 shrink-0">
-                  {mail.labelIds?.includes("SENT") && (
-                    <span className="bg-muted dark:bg-gray-700 text-xs px-2 py-1 rounded text-secondary dark:text-gray-300">
-                      Sent Mail
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Sender Info Row */}
-            <div className="flex flex-row justify-between items-start">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
-                  {senderName.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-foreground dark:text-white">
-                      {senderName}
-                    </span>
-                    <span className="text-xs text-secondary dark:text-gray-400">
-                      &lt;{senderEmail}&gt;
-                    </span>
-                  </div>
-                  <span className="text-xs text-secondary dark:text-gray-500">
-                    To: {mail.to}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-secondary dark:text-gray-400 text-sm">
-                <span>{formatDate(mail.date)}</span>
-                <button className="p-1 hover:bg-muted dark:hover:bg-white/10 rounded hover:text-foreground dark:hover:text-white cursor-pointer">
-                  <IoMdMore size={20} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Mail Body with Iframe */}
-          <div className="px-6 py-6">
-            <div className="w-full bg-white dark:bg-[#1a1a1a] rounded-lg overflow-hidden border border-divider dark:border-gray-800 shadow-sm">
-              <iframe
-                ref={(iframe) => {
-                  if (iframe) {
-                    iframe.onload = () => {
-                      try {
-                        const iframeDoc =
-                          iframe.contentDocument ||
-                          iframe.contentWindow?.document;
-                        if (iframeDoc) {
-                          const height = iframeDoc.documentElement.scrollHeight;
-                          iframe.style.height =
-                            Math.max(height + 20, 200) + "px";
-                        }
-                      } catch (e) {
-                        // Cross-origin restriction - fallback to min height
-                        iframe.style.height = "500px";
-                      }
-                    };
-                  }
-                }}
-                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-                className="w-full border-0"
-                style={{ height: "200px" }}
-                srcDoc={`
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <meta charset="utf-8">
-                      <base target="_blank">
-                      <style>
-                        body {
-                          margin: 0;
-                          padding: 2rem;
-                          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                          font-size: 15px;
-                          line-height: 1.7;
-                          color: #475569;
-                          background-color: transparent;
-                          overflow: hidden;
-                        }
-                        a { 
-                          color: #2563eb; 
-                          text-decoration: underline;
-                          cursor: pointer;
-                        }
-                        a:hover { text-decoration: none; }
-                        * { max-width: 100%; }
-                        img { max-width: 100%; height: auto; }
-                        pre { white-space: pre-wrap; word-wrap: break-word; }
-                      </style>
-                    </head>
-                    <body>
-                      ${mail.htmlBody ||
-                  mail.textBody ||
-                  mail.snippet ||
-                  '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
-                  }
-                    </body>
-                  </html>
-                `}
-              />
-            </div>
-          </div>
-
-          {/* --- REPLY EDITOR AREA --- */}
-          {isReplying && (
-            <div className="px-6 pb-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
-              <div className="flex items-center gap-2 text-sm text-secondary dark:text-gray-400 mb-1">
-                <FaReply /> Replying to{" "}
-                <span className="text-foreground dark:text-white font-medium">
-                  {senderName}
-                </span>
-              </div>
-              <textarea
-                ref={replyTextareaRef}
-                autoFocus
-                className="w-full bg-background dark:bg-[#1e1e1e] border border-divider dark:border-gray-700 rounded-md p-4 text-foreground dark:text-gray-200 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
-                placeholder="Type your reply here..."
-                value={replyBody}
-                onChange={(e) => setReplyBody(e.target.value)}
-                disabled={isSending}
-              />
-
-              <div className="flex gap-3 mt-2">
-                <button
-                  onClick={handleSendReply}
-                  disabled={isSending || !replyBody.trim()}
-                  className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition-colors cursor-pointer font-medium"
-                >
-                  {isSending ? (
-                    "Sending..."
-                  ) : (
-                    <>
-                      <IoMdSend /> Send
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => setIsReplying(false)}
-                  disabled={isSending}
-                  className="px-4 py-2 hover:bg-muted dark:hover:bg-white/10 text-secondary dark:text-gray-400 hover:text-foreground dark:hover:text-white text-sm rounded transition-colors cursor-pointer"
-                >
-                  Discard
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* --- BOTTOM ACTION BAR --- */}
-        {!isReplying && (
-          <div className="border-t border-divider dark:border-gray-800 p-4 flex flex-row gap-3 bg-background dark:bg-[#121212]">
-            <button
-              onClick={handleReplyClick}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded transition-colors cursor-pointer"
-            >
-              <FaReply /> Reply
-            </button>
-            <button
-              onClick={() => alert("Forward clicked")}
-              className="flex items-center gap-2 px-4 py-2 bg-muted dark:bg-[#2c2c2c] hover:bg-muted/80 dark:hover:bg-[#383838] text-foreground dark:text-gray-200 text-sm rounded transition-colors cursor-pointer"
-            >
-              <FaShare /> Forward
-            </button>
-          </div>
-        )}
+        <MailContent
+          mail={transformedEmailData}
+          onBack={onClose}
+        />
       </div>
     </div>
   );
@@ -560,7 +388,7 @@ export default function KanbanPage() {
     fetchColumnData, // <-- Hàm fetch emails cho một cột
     columnLoadingStates, // <-- Loading states cho từng cột
     refreshData, // <-- Thêm refreshData để reload sau khi tạo column
-  } = useKanbanData();
+                  } = useKanbanData();
 
   const { showToast } = useToast();
   const [enabled, setEnabled] = useState(false);
@@ -1067,6 +895,9 @@ export default function KanbanPage() {
                             id={col.id}
                             title={col.title}
                             color={col.color}
+                            gmailLabel={originalCol?.gmailLabel}
+                            gmailLabelName={originalCol?.gmailLabelName}
+                            autoArchive={originalCol?.autoArchive}
                             icon={getColumnIcon(col)}
                             items={col.items}
                             totalRawItems={originalCol?.items.length || 0}
@@ -1101,6 +932,10 @@ export default function KanbanPage() {
                                 showToast(errorMsg, "error");
                               }
                             } : undefined}
+                            // Infinite scroll props
+                            hasMore={originalCol?.hasMore}
+                            isLoadingMore={originalCol?.isLoadingMore}
+                            onLoadMore={() => fetchColumnData(col.id)}
                           />
                         </div>
                       )}

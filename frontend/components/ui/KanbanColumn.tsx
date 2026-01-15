@@ -95,6 +95,9 @@ interface KanbanColumnProps {
   // Tùy chỉnh giao diện drag over
   dragOverClass?: string;
   color?: string;
+  gmailLabel?: string;
+  gmailLabelName?: string;
+  autoArchive?: boolean;
   // Label error tracking
   hasLabelError?: boolean;
   labelErrorMessage?: string;
@@ -106,6 +109,10 @@ interface KanbanColumnProps {
   onEditTitle?: (newTitle: string) => void;
   // Loading state
   isLoading?: boolean;
+  // Infinite scroll props
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 const ColumnHeader = ({
@@ -121,6 +128,9 @@ const ColumnHeader = ({
   onDeleteColumn,
   isSystemColumn,
   onEditTitle,
+  gmailLabel,
+  gmailLabelName,
+  autoArchive,
 }: {
   title: string;
   count: number;
@@ -134,6 +144,9 @@ const ColumnHeader = ({
   onDeleteColumn?: () => void;
   isSystemColumn?: boolean;
   onEditTitle?: (newTitle: string) => void;
+  gmailLabel?: string;
+  gmailLabelName?: string;
+  autoArchive?: boolean;
 }) => {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
@@ -233,8 +246,8 @@ const ColumnHeader = ({
           {count}
         </span>
 
-        {/* Label Error Warning */}
-        {hasLabelError && (
+        {/* Label Error Warning - Don't show for autoArchive columns */}
+        {hasLabelError && !autoArchive && (
           <div className="relative">
             <button
               onMouseEnter={() => setShowErrorTooltip(true)}
@@ -378,7 +391,22 @@ const ColumnHeader = ({
           </button>
 
           {showOptionsMenu && (
-            <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+              {/* Gmail Label Info - Always show */}
+              <div className="px-3 py-2 mb-2 border-b border-gray-200 dark:border-gray-700">
+                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Gmail Label Mapping</div>
+                {gmailLabel || autoArchive ? (
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: color }}></span>
+                    {autoArchive ? 'ARCHIVE' : (gmailLabelName || gmailLabel)}
+                  </div>
+                ) : (
+                  <div className="text-sm italic text-gray-400 dark:text-gray-500">
+                    Not mapped
+                  </div>
+                )}
+              </div>
+              
               {/* Delete Column Button - Only show for non-system columns */}
               {!isSystemColumn && onDeleteColumn ? (
                 <button
@@ -442,6 +470,12 @@ const MailCard = ({
     }
   };
 
+  // Safety check: ensure item has valid id
+  if (!item?.id) {
+    console.error('MailCard: item.id is missing', item);
+    return null;
+  }
+
   return (
     <Draggable draggableId={item.id} index={index}>
       {(provided, snapshot) => {
@@ -464,12 +498,12 @@ const MailCard = ({
             )}
 
             <div className="flex flex-row justify-between items-start mb-2 pl-2">
-              <div className="flex gap-3 items-center">
-                <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-xs">
+              <div className="flex gap-3 items-center min-w-0 flex-1">
+                <div className="w-8 h-8 shrink-0 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-xs">
                   {item.avatar}
                 </div>
-                <div className="flex flex-col">
-                  <span className="font-semibold text-sm text-gray-800 dark:text-gray-200">
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="font-semibold text-sm text-gray-800 dark:text-gray-200 truncate">
                     {item.sender}
                   </span>
                   <span className="text-xs text-gray-400 dark:text-gray-500">
@@ -543,6 +577,9 @@ const KanbanColumn = ({
   onRegenerateSummary,
   dragOverClass = "bg-gray-50 dark:bg-gray-900/50", // Màu mặc định khi kéo thả vào
   color = "#64748b",
+  gmailLabel,
+  gmailLabelName,
+  autoArchive,
   hasLabelError = false,
   labelErrorMessage,
   onRecoverLabel,
@@ -550,10 +587,54 @@ const KanbanColumn = ({
   isSystemColumn = false,
   onEditTitle,
   isLoading = false,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: KanbanColumnProps) => {
-  const columnBorderClass = hasLabelError
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Infinite scroll detection
+  useEffect(() => {
+    console.log(`📜 Column ${id} scroll setup:`, { hasMore, isLoadingMore, hasHandler: !!onLoadMore });
+    
+    if (!onLoadMore || !hasMore || isLoadingMore) return;
+    
+    const container = scrollContainerRef.current;
+    if (!container) {
+      console.log(`⚠️ No scroll container found for column ${id}`);
+      return;
+    }
+
+    console.log(`✅ Setting up scroll listener for column ${id}`);
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
+      
+      console.log(`📊 Column ${id} scroll:`, {
+        scrollTop,
+        scrollHeight,
+        clientHeight,
+        percentage: (scrollPercentage * 100).toFixed(1) + '%'
+      });
+      
+      // Trigger when scrolled to 80% of content
+      if (scrollPercentage > 0.8) {
+        console.log(`🚀 Triggering loadMore for column ${id}`);
+        onLoadMore();
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => {
+      console.log(`🧹 Cleaning up scroll listener for column ${id}`);
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [hasMore, isLoadingMore, onLoadMore, id]);
+
+  const columnBorderClass = (hasLabelError && !autoArchive)
     ? "border-yellow-400 dark:border-yellow-600 border-2"
-    : "border-r border-gray-200 dark:border-gray-800 last:border-r-0 border-t-2";
+    : "border-r border-gray-200 dark:border-gray-800 border-t-2";
 
   const columnOpacity = hasLabelError ? "opacity-75" : "";
 
@@ -576,21 +657,27 @@ const KanbanColumn = ({
           onDeleteColumn={onDeleteColumn}
           isSystemColumn={isSystemColumn}
           onEditTitle={onEditTitle}
+          gmailLabel={gmailLabel}
+          gmailLabelName={gmailLabelName}
+          autoArchive={autoArchive}
         />
       </div>
 
-      <Droppable droppableId={id} isDropDisabled={hasLabelError || isLoading}>
+      <Droppable droppableId={id} isDropDisabled={(hasLabelError && !autoArchive) || isLoading}>
         {(provided, snapshot) => (
           <div
             {...provided.droppableProps}
-            ref={provided.innerRef}
-            className={`flex-1 p-3 transition-colors ${snapshot.isDraggingOver ? dragOverClass : ""
-              } ${hasLabelError ? 'bg-yellow-50/30 dark:bg-yellow-900/5' : ''}`}
-            style={{ overflow: 'visible' }}
+            ref={(el) => {
+              provided.innerRef(el);
+              scrollContainerRef.current = el;
+            }}
+            className={`flex-1 p-3 transition-colors overflow-y-auto mailbox-scrollbar ${
+              snapshot.isDraggingOver ? dragOverClass : ""
+              } ${(hasLabelError && !autoArchive) ? 'bg-yellow-50/30 dark:bg-yellow-900/5' : ''}`}
           >
             {/* Show loading spinner */}
             {isLoading && (
-              <div className="flex items-center justify-center py-8">
+              <div key="loading-spinner" className="flex items-center justify-center py-8">
                 <div className="flex flex-col items-center gap-2">
                   <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin"></div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Loading emails...</p>
@@ -599,8 +686,8 @@ const KanbanColumn = ({
             )}
 
             {/* Show error message if label is broken */}
-            {!isLoading && hasLabelError && (
-              <div className="mb-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+            {!isLoading && hasLabelError && !autoArchive && (
+              <div key="label-error" className="mb-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                 <div className="flex items-start gap-2 text-sm">
                   <span className="text-yellow-500">⚠️</span>
                   <div className="flex-1">
@@ -625,7 +712,7 @@ const KanbanColumn = ({
             )}
 
             {/* Render danh sách MailCard */}
-            {!isLoading && items.map((item: any, index: number) => (
+            {!isLoading && items.filter(item => item?.id).map((item: any, index: number) => (
               <MailCard
                 key={item.id}
                 item={item}
@@ -638,15 +725,32 @@ const KanbanColumn = ({
 
             {/* Hiển thị thông báo nếu lọc không ra kết quả */}
             {!isLoading && items.length === 0 && totalRawItems > 0 && (
-              <div className="text-center py-10 text-gray-400 text-sm italic">
+              <div key="no-match" className="text-center py-10 text-gray-400 text-sm italic">
                 No emails match the selected filters.
               </div>
             )}
 
             {/* Hiển thị thông báo nếu cột trống hoàn toàn */}
-            {!isLoading && items.length === 0 && totalRawItems === 0 && !hasLabelError && (
-              <div className="text-center py-10 text-gray-300 dark:text-gray-600 text-sm border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-lg m-2">
+            {!isLoading && items.length === 0 && totalRawItems === 0 && !(hasLabelError && !autoArchive) && (
+              <div key="empty" className="text-center py-10 text-gray-300 dark:text-gray-600 text-sm border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-lg m-2">
                 Empty
+              </div>
+            )}
+
+            {/* Loading more indicator */}
+            {!isLoading && isLoadingMore && (
+              <div className="flex justify-center items-center py-4">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary dark:border-blue-500"></div>
+                <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">
+                  Loading more...
+                </span>
+              </div>
+            )}
+
+            {/* End of list indicator - No more emails */}
+            {!isLoading && !hasMore && items.length > 0 && (
+              <div className="text-center text-gray-400 dark:text-gray-500 text-xs py-4 border-t border-gray-100 dark:border-gray-800 mt-2">
+                No more emails to load
               </div>
             )}
 

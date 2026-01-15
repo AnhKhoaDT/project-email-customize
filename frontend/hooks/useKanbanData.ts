@@ -48,6 +48,9 @@ export interface Column {
   hasLabelError?: boolean;
   labelErrorMessage?: string;
   labelErrorDetectedAt?: string;
+  autoArchive?: boolean;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
 }
 
 export const useKanbanData = () => {
@@ -116,6 +119,9 @@ export const useKanbanData = () => {
       snoozedUntil: email.snoozedUntil,
       isUnread: email.isUnread || false,
       hasAttachment: email.hasAttachment || false,
+      labelIds: email.labelIds || [],
+      htmlBody: email.htmlBody,
+      textBody: email.textBody,
     };
   };
 

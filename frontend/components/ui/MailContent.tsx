@@ -442,12 +442,12 @@ const MailContent = ({
       <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background">
         <div className="flex items-center gap-4 text-secondary">
           <button
-            className="hover:text-foreground transition-colors cursor-pointer"
+            className="hover:text-primary  hover:bg-muted rounded-md p-2 transition-colors cursor-pointer"
             onClick={onBack}
           >
             <IoMdClose size={20} />
           </button>
-          <div className="h-4 w-px bg-divider dark:bg-gray-700 mx-1"></div>
+          <div className="h-4 w-px mx-2"></div>
 
           <button
             className="hover:text-foreground transition-colors md:hidden cursor-pointer"
@@ -457,9 +457,6 @@ const MailContent = ({
             <IoMdArrowBack size={20} />
           </button>
 
-          <button className="hover:text-foreground transition-colors cursor-pointer">
-            <IoMdArrowForward size={20} />
-          </button>
         </div>
 
         <div className="flex items-center gap-2 text-secondary">
