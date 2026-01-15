@@ -1,13 +1,18 @@
 import { Body, Controller, Post, Req, UnauthorizedException, BadRequestException, Get, Query, Res } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
+import { GmailSyncService } from '../mail/gmail-sync.service';
+import { LoginDto } from './dto/login.dto';
 import { google } from 'googleapis';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService, private usersService: UsersService) {}
+  constructor(
+    private authService: AuthService, 
+    private usersService: UsersService,
+    private gmailSyncService: GmailSyncService
+  ) {}
 
   @Post('login')
   async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
@@ -206,6 +211,14 @@ export class AuthController {
 
     // create app session tokens
     const session = this.authService.createSessionForUser({ id: user._id.toString(), email: user.email });
+
+    // 🔥 AUTO-SYNC: Trigger Gmail sync after successful OAuth
+    // This runs in background and doesn't block the response
+    const userId = user._id.toString();
+    this.gmailSyncService.syncAllLabels(userId, 100).catch(err => {
+      console.error(`[Auth] Auto-sync failed for user ${userId}:`, err.message);
+      // Don't fail the login, just log the error
+    });
 
     return {
       user: { id: user._id.toString(), email: user.email, name: user.name },

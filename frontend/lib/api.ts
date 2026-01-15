@@ -255,7 +255,7 @@ export const fetchGmailLabels = async () => {
  * @param columnId - Column ID (e.g., "col_123", "todo", "done")
  */
 export const fetchColumnEmails = async (columnId: string, options?: { limit?: number }) => {
-  const response = await api.get(`/kanban/columns/${columnId}/emails`, {
+  const response = await api.get(`/mailboxes/${columnId}/kanban-emails`, {
     params: { limit: options?.limit || 50 }
   });
   return response.data;
@@ -264,26 +264,31 @@ export const fetchColumnEmails = async (columnId: string, options?: { limit?: nu
 /**
  * DEPRECATED: Fetch emails by old hardcoded status
  * Use fetchColumnEmails instead
- * @param status - Column status: TODO, IN_PROGRESS, DONE
+ * @param columnId - Column ID (e.g., "col_123", "todo", "done")
+ * @param options - Options
  */
 export const fetchKanbanColumnEmails = async (
-  status: "TODO" | "IN_PROGRESS" | "DONE"
+  columnId: string,
+  options?: { limit?: number }
 ) => {
-  const response = await api.get(`/kanban/columns/${status}/emails`);
+  const response = await api.get(`/mailboxes/${columnId}/kanban-emails`, {
+    params: { limit: options?.limit || 50 }
+  });
   return response.data;
 };
 
 /**
  * Fetch inbox emails from Gmail
  */
-export const fetchInboxEmails = async (limit = 50) => {
-  const response = await api.get("/mail/inbox", { params: { limit } });
-  console.log("Fetched inbox emails:", response.data);
+export const fetchInboxEmails = async (limit: number = 50) => {
+  const response = await api.get(`/mailboxes/inbox/kanban-emails`, {
+    params: { limit }
+  });
   return response.data;
 };
 
 /**
- * Fetch single email detail by ID
+ * Fetch email by ID
  * @param emailId - Gmail message ID
  */
 export const fetchEmailById = async (emailId: string) => {

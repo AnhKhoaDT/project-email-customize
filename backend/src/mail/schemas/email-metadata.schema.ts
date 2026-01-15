@@ -21,27 +21,24 @@ export class EmailMetadata {
   @Prop({ required: true })
   emailId: string; // Gmail message ID
 
-  @Prop({ required: true })
-  threadId: string; // Gmail thread ID
-
   // ============================================
-  // DYNAMIC KANBAN - SOURCE OF TRUTH
+  // DYNAMIC KANBAN - PRIMARY SOURCE OF TRUTH
   // ============================================
   /**
-   * [PRIMARY] Gmail Label IDs - Source of Truth
-   * Ví dụ: ['INBOX', 'STARRED', 'Label_123']
-   * Luôn đồng bộ với Gmail, không bị mất khi user xóa column
+   * [PRIMARY] Kanban Column ID - User's decision
+   * Đây là source of truth quyết định email thuộc cột nào
+   * Không phụ thuộc vào Gmail labels
+   */
+  @Prop({ required: true })
+  kanbanColumnId: string;
+
+  /**
+   * [SYNCED] Gmail Label IDs - Reflects kanban state
+   * Được đồng bộ từ kanbanColumnId thông qua column mapping
+   * Luôn phản ánh đúng trạng thái kanban
    */
   @Prop({ type: [String], default: [] })
   labelIds: string[];
-
-  /**
-   * [CACHE] Column ID hiện tại - Derived từ labelIds
-   * Dùng để query nhanh, nhưng có thể tính toán lại từ labelIds + KanbanConfig
-   * Có thể null nếu email không thuộc column nào (chỉ ở INBOX)
-   */
-  @Prop()
-  cachedColumnId?: string;
 
   /**
    * [CACHE] Column name - Denormalized để hiển thị nhanh
@@ -149,10 +146,10 @@ EmailMetadataSchema.index({ userId: 1, summary: 1 });
 // ============================================
 // DYNAMIC KANBAN INDEXES
 // ============================================
-// Compound index cho Kanban queries by cached column
-EmailMetadataSchema.index({ userId: 1, cachedColumnId: 1 });
+// Compound index cho Kanban queries by kanbanColumnId (NEW PRIMARY)
+EmailMetadataSchema.index({ userId: 1, kanbanColumnId: 1 });
 
-// Index cho label-based queries (array field)
+// Index cho label-based queries (SYNCED DATA)
 EmailMetadataSchema.index({ userId: 1, labelIds: 1 });
 
 // Index cho pending sync operations

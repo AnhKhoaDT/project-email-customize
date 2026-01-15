@@ -489,7 +489,13 @@ const MailCard = ({
                 ? "shadow-xl ring-2 ring-blue-400 opacity-90 cursor-grabbing"
                 : ""
               }`}
-            style={provided.draggableProps.style}
+            style={{
+              ...provided.draggableProps.style,
+              // Fix scroll offset during drag
+              transform: snapshot.isDragging 
+                ? provided.draggableProps.style?.transform 
+                : provided.draggableProps.style?.transform,
+            }}
           >
             {item.color !== "bg-transparent" && (
               <div
@@ -640,7 +646,7 @@ const KanbanColumn = ({
 
   return (
     <div
-      className={`flex flex-col shrink-0 w-full min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0 ${columnBorderClass} ${columnOpacity}`}
+      className={`flex flex-col shrink-0 w-full h-screen bg-white dark:bg-[#121212] ${columnBorderClass} ${columnOpacity}`}
       style={{ borderTopColor: hasLabelError ? '#facc15' : color }}
     >
       <div style={{ color: hasLabelError ? '#facc15' : color }}>

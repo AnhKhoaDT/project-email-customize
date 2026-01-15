@@ -36,7 +36,6 @@ export class SnoozeService implements OnModuleInit {
   async snoozeEmail(
     userId: string,
     emailId: string,
-    threadId: string,
     snoozedUntil: Date,
   ) {
     try {
@@ -47,7 +46,7 @@ export class SnoozeService implements OnModuleInit {
         throw new Error('Email not in Kanban. Only Kanban emails can be snoozed.');
       }
 
-      const originalColumnId = metadata.cachedColumnId; // Lưu column hiện tại
+      const originalColumnId = metadata.kanbanColumnId; // Lưu column hiện tại
 
       // BƯỚC 2: Lưu snooze data vào MongoDB
       await this.emailMetadataModel.findOneAndUpdate(

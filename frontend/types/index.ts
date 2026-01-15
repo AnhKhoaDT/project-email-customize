@@ -48,17 +48,17 @@ export interface KanbanConfig {
 }
 
 /**
- * Email Metadata with Dynamic Kanban Support
+ * Email Metadata with Dynamic Kanban Support (UPDATED)
  */
 export interface EmailMetadata {
   userId: string;
   emailId: string;
   threadId: string;
   
-  // Dynamic Kanban
-  labelIds: string[];              // Source of Truth
-  cachedColumnId?: string;         // Derived cache
-  cachedColumnName?: string;
+  // Dynamic Kanban (UPDATED)
+  kanbanColumnId: string;        // PRIMARY - User's decision
+  labelIds: string[];              // SYNCED - Reflects kanban state
+  cachedColumnName?: string;       // Column name for display
   kanbanUpdatedAt?: string;
   previousColumnId?: string;
   
@@ -116,9 +116,9 @@ export interface Mail {
   // Semantic search similarity score (0-1, higher = more similar)
   similarityScore?: number;
   
-  // WEEK 4: Dynamic Kanban fields
-  cachedColumnId?: string;
-  cachedColumnName?: string;
+  // WEEK 4: Dynamic Kanban fields (UPDATED)
+  kanbanColumnId: string;        // NEW PRIMARY - User's decision
+  cachedColumnName?: string;     // Column name display
   summary?: string;
   isPendingSync?: boolean;
 }

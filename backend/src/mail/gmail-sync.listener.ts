@@ -165,7 +165,7 @@ export class GmailSyncListener {
         userId: email.userId,
         emailId: email.emailId,
         fromColumnId: email.previousColumnId || 'inbox',
-        toColumnId: email.cachedColumnId || 'unknown',
+        toColumnId: email.kanbanColumnId || 'unknown',
         labelsToAdd: email.labelIds,
         labelsToRemove: [],
         metadataId: email._id.toString(),

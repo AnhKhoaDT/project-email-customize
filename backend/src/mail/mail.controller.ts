@@ -2,6 +2,8 @@ import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res } f
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GmailService } from './gmail.service';
+import { GmailSyncService, SyncResult } from './gmail-sync.service';
+import { GmailHistorySyncService } from './gmail-history-sync.service';
 import { AiService } from '../ai/ai.service';
 import { SnoozeService } from './snooze.service';
 import { EmailMetadataService } from './email-metadata.service';
@@ -47,6 +49,8 @@ export class MailController {
 
   constructor(
     private gmailService: GmailService,
+    private gmailSyncService: GmailSyncService,
+    private gmailHistorySyncService: GmailHistorySyncService,
     private aiService: AiService,
     private snoozeService: SnoozeService,
     private emailMetadataService: EmailMetadataService,
@@ -142,6 +146,82 @@ export class MailController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('mailboxes/:id/kanban-emails')
+  async getKanbanEmails(
+    @Req() req: any,
+    @Param('id') mailboxId: string,
+    @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('filterUnread') filterUnread?: string,
+    @Query('filterAttachment') filterAttachment?: string
+  ) {
+    try {
+      const options: any = {
+        limit: limit ? parseInt(limit, 10) : 50,
+      };
+
+      if (sortBy) options.sortBy = sortBy;
+      if (filterUnread === 'true') options.filterUnread = true;
+      if (filterAttachment === 'true') options.filterAttachment = true;
+
+      const result = await this.kanbanConfigService.getKanbanEmails(
+        req.user.id,
+        mailboxId,
+        options
+      );
+
+      return result;
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get kanban emails' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('mailboxes/all/emails')
+  async getAllEmails(
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('pageToken') pageToken?: string
+  ) {
+    try {
+      const pageSize = limit ? parseInt(limit, 10) : 300;
+
+      // Try Gmail API first
+      try {
+        const res = await this.gmailService.listAllEmails(req.user.id, pageSize, pageToken as any);
+        return res;
+      } catch (gmailError) {
+        // Fallback to MongoDB seed data if Gmail fails (no token, etc.)
+        console.log(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
+
+        // Get emails from MongoDB (exclude system labels)
+        const dbEmails = await this.emailMetadataService.getAllEmails(req.user.id, pageSize);
+
+        // Format to match Gmail API response
+        return {
+          messages: dbEmails.map(email => ({
+            id: email.emailId,
+            threadId: email.emailId, // Use emailId as fallback
+            labelIds: email.labelIds,
+            snippet: email.snippet || '',
+            subject: email.subject || 'No subject',
+            from: email.from || 'Unknown',
+            date: email.receivedDate?.toISOString() || new Date().toISOString(),
+            isUnread: !email.labelIds?.includes('READ'),
+            isStarred: email.labelIds?.includes('STARRED') || false,
+            isImportant: email.labelIds?.includes('IMPORTANT') || false,
+            hasAttachment: false,
+          })),
+          resultSizeEstimate: dbEmails.length,
+          nextPageToken: null,
+        };
+      }
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to list all emails' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('mailboxes/:id/emails')
   async mailboxEmails(
     @Req() req: any,
@@ -175,7 +255,7 @@ export class MailController {
         return {
           messages: dbEmails.map(email => ({
             id: email.emailId,
-            threadId: email.threadId,
+            threadId: email.emailId, // Use emailId as fallback
             labelIds: email.labelIds,
             snippet: email.snippet || '',
             subject: email.subject || 'No subject',
@@ -425,7 +505,6 @@ export class MailController {
       await this.emailMetadataService.saveSummary(
         req.user.id,
         emailId,
-        email.threadId,
         summaryText,
         'gemini-1.5-flash'
       );
@@ -458,7 +537,7 @@ export class MailController {
   async snoozeEmail(
     @Req() req: any,
     @Param('id') emailId: string,
-    @Body() body: { snoozedUntil: string; threadId: string }
+    @Body() body: { snoozedUntil: string }
   ) {
     try {
       const snoozedUntil = new Date(body.snoozedUntil);
@@ -470,7 +549,6 @@ export class MailController {
       const result = await this.snoozeService.snoozeEmail(
         req.user.id,
         emailId,
-        body.threadId,
         snoozedUntil
       );
 
@@ -863,6 +941,21 @@ export class MailController {
   // ============================================
 
   @UseGuards(JwtAuthGuard)
+  @Get('gmail/labels')
+  async getGmailLabels(@Req() req: any) {
+    try {
+      const labels = await this.gmailService.getSafeLabelsForKanban(req.user.id);
+      return {
+        status: 200,
+        data: labels,
+        message: 'Safe labels retrieved successfully'
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get Gmail labels' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('kanban/validate-labels')
   async validateLabels(@Req() req: any) {
     try {
@@ -1008,6 +1101,135 @@ export class MailController {
       return result;
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to clear error' };
+    }
+  }
+
+  // ============================================
+  // GMAIL SYNC ENDPOINTS
+  // ============================================
+
+  /**
+   * Sync emails from Gmail to database
+   * 
+   * POST /api/sync/gmail
+   * Body: { label?: string, limit?: number, forceResync?: boolean }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('sync/gmail')
+  async syncGmail(
+    @Req() req: any,
+    @Body() body: { label?: string; limit?: number; forceResync?: boolean }
+  ) {
+    try {
+      const result = await this.gmailSyncService.syncEmails({
+        userId: req.user.id,
+        limit: body.limit || 100,
+        forceResync: body.forceResync || false,
+      });
+
+      return {
+        status: 200,
+        message: 'Gmail sync completed',
+        data: result,
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to sync Gmail' };
+    }
+  }
+
+  /**
+   * Sync all emails for a user
+   * 
+   * POST /api/sync/all
+   * Body: { limit?: number }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('sync/all')
+  async syncAllLabels(
+    @Req() req: any,
+    @Body() body: { limit?: number }
+  ) {
+    try {
+      const result = await this.gmailSyncService.syncAllLabels(
+        req.user.id,
+        body.limit || 150
+      );
+
+      return {
+        status: 200,
+        message: 'Full sync completed',
+        data: result,
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to sync all emails' };
+    }
+  }
+
+  /**
+   * Trigger auto-sync for current user
+   * 
+   * POST /api/sync/trigger
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('sync/trigger')
+  async triggerSync(@Req() req: any) {
+    try {
+      // Trigger sync in background
+      const userId = req.user.id;
+      this.gmailSyncService.syncAllLabels(userId, 100).catch(err => {
+        console.error(`[Mail] Manual sync failed for user ${userId}:`, err.message);
+      });
+
+      return {
+        status: 200,
+        message: 'Sync triggered successfully. Check /api/sync/stats for progress.',
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to trigger sync' };
+    }
+  }
+
+  /**
+   * Trigger history sync for current user
+   * 
+   * POST /api/sync/history
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('sync/history')
+  async triggerHistorySync(@Req() req: any) {
+    try {
+      // Trigger history sync in background
+      const userId = req.user.id;
+      this.gmailHistorySyncService.triggerHistorySync(userId).catch(err => {
+        console.error(`[Mail] History sync failed for user ${userId}:`, err.message);
+      });
+
+      return {
+        status: 200,
+        message: 'History sync triggered successfully. Check /api/sync/stats for progress.',
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to trigger history sync' };
+    }
+  }
+
+  /**
+   * Get sync statistics
+   * 
+   * GET /api/sync/stats
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('sync/stats')
+  async getSyncStats(@Req() req: any) {
+    try {
+      const stats = await this.gmailSyncService.getSyncStats(req.user.id);
+
+      return {
+        status: 200,
+        data: stats,
+      };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to get sync stats' };
     }
   }
 }

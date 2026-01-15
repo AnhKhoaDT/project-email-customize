@@ -459,10 +459,24 @@ export default function KanbanPage() {
 
       // Apply scroll using scrollBy (smoother than direct scrollLeft assignment)
       if (scrollX !== 0 || scrollY !== 0) {
+        // Fix scroll offset by adjusting for current scroll position
+        const currentScrollLeft = container.scrollLeft;
+        const currentScrollTop = container.scrollTop;
+        
         container.scrollBy({
           left: scrollX,
           top: scrollY,
           behavior: 'auto' // Use 'auto' for instant scroll during drag
+        });
+        
+        // Log scroll info for debugging
+        console.log('🔄 Auto-scroll:', {
+          scrollX,
+          scrollY,
+          currentScrollLeft,
+          currentScrollTop,
+          newScrollLeft: container.scrollLeft,
+          newScrollTop: container.scrollTop
         });
       }
 
@@ -853,7 +867,14 @@ export default function KanbanPage() {
   };
 
   if (!enabled) return null;
-  if (isLoading) return <div className="p-10 text-center">Loading...</div>;
+  if (isLoading) return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+        <p className="text-sm text-muted-foreground">Loading Kanban...</p>
+      </div>
+    </div>
+  );
   if (error) return <div className="p-10 text-center text-red-500">{error}</div>;
 
   return (
@@ -886,7 +907,7 @@ export default function KanbanPage() {
                           ref={providedDrag.innerRef}
                           {...providedDrag.draggableProps}
                           {...providedDrag.dragHandleProps} // Gắn drag handle vào div bao ngoài
-                          className={`flex flex-col shrink-0 w-[350px] md:w-2/7 min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0
+                          className={`flex flex-col shrink-0 w-[350px] h-screen bg-white dark:bg-[#121212]
                           ${snapshot.isDragging ? "opacity-100 z-50 rotate-2 shadow-2xl ring-1 ring-blue-500/50" : ""}
                         `}
                         >
@@ -948,7 +969,7 @@ export default function KanbanPage() {
                 {provided.placeholder}
 
                 {/* 2. ADD COLUMN AREA (Trello-style inline form) */}
-                <div className="shrink-0 w-80 p-4 h-full flex flex-col justify-start">
+                <div className="shrink-0 w-80 p-4 h-screen flex flex-col justify-start">
                   {!isCreatingCol ? (
                     <button
                       onClick={() => setIsCreatingCol(true)}

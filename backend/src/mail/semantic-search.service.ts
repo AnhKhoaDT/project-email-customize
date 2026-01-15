@@ -159,13 +159,19 @@ export class SemanticSearchService {
         existing.snippet = email.snippet;
         existing.receivedDate = email.date ? new Date(email.date) : new Date();
         existing.labelIds = email.labelIds || [];
+        // ✅ Set kanbanColumnId if not already set
+        if (!existing.kanbanColumnId) {
+          // Default to 'inbox' for emails without kanban assignment
+          existing.kanbanColumnId = 'inbox';
+          existing.cachedColumnName = 'Inbox';
+          existing.kanbanUpdatedAt = new Date();
+        }
         await existing.save();
       } else {
         // Create new record with cache fields
         const newRecord = await this.emailMetadataModel.create({
           userId,
           emailId,
-          threadId: email.threadId,
           embedding,
           embeddingText: textForEmbedding,
           embeddingGeneratedAt: new Date(),
@@ -175,11 +181,14 @@ export class SemanticSearchService {
           snippet: email.snippet,
           receivedDate: email.date ? new Date(email.date) : new Date(),
           labelIds: email.labelIds || [],
-          // No cachedColumnId - this email is not in Kanban yet
+          // ✅ Set default kanban column for new emails
+          kanbanColumnId: 'inbox',
+          cachedColumnName: 'Inbox',
+          kanbanUpdatedAt: new Date(),
         });
       }
 
-      console.log(`[Indexing] ✅ Successfully indexed email ${emailId} with cache fields`);
+      console.log(`[Indexing] ✅ Successfully indexed email ${emailId} with kanban support`);
       return { success: true, emailId };
 
     } catch (err) {
@@ -286,7 +295,7 @@ export class SemanticSearchService {
                 return {
                   id: r.emailId,
                   emailId: r.emailId,
-                  threadId: r.threadId,
+                  threadId: r.emailId, // Use emailId as fallback
                   subject: subject,
                   from: from,
                   snippet: r.snippet || '',
@@ -316,7 +325,7 @@ export class SemanticSearchService {
           userId, 
           embedding: { $exists: true, $ne: null, $not: { $size: 0 } }
         })
-        .select('emailId threadId embedding embeddingText subject from snippet receivedDate labelIds')
+        .select('emailId embedding embeddingText subject from snippet receivedDate labelIds')
         .lean();
 
       // Auto-index if no embeddings found
@@ -361,7 +370,7 @@ export class SemanticSearchService {
             scoredEmails.push({
               id: emailDoc.emailId,
               emailId: emailDoc.emailId,
-              threadId: emailDoc.threadId,
+              threadId: emailDoc.emailId, // Use emailId as fallback
               subject: subject,
               from: from,
               snippet: emailDoc.snippet || '',
@@ -455,18 +464,18 @@ export class SemanticSearchService {
   }
 
   /**
-   * Generate embeddings for all inbox emails (background job)
+   * Generate embeddings for all emails (background job)
    */
   async indexAllEmails(userId: string, options: { limit?: number } = {}): Promise<any> {
     try {
       const { limit = 100 } = options;
 
-      console.log(`[Indexing] Fetching up to ${limit} emails from inbox...`);
+      console.log(`[Indexing] Fetching up to ${limit} emails from all labels...`);
 
-      // Fetch inbox emails
-      const inboxData = await this.gmailService.listMessagesInLabel(userId, 'INBOX', limit);
+      // Fetch all emails (not just inbox)
+      const allEmailsData = await this.gmailService.listAllEmails(userId, limit);
       
-      if (!inboxData?.messages || inboxData.messages.length === 0) {
+      if (!allEmailsData?.messages || allEmailsData.messages.length === 0) {
         return {
           status: 200,
           message: 'No emails to index',
@@ -479,7 +488,7 @@ export class SemanticSearchService {
         };
       }
 
-      const emailIds = inboxData.messages.map(m => m.id).filter(Boolean);
+      const emailIds = allEmailsData.messages.map(m => m.id).filter(Boolean);
       console.log(`[Indexing] Found ${emailIds.length} emails to process`);
 
       // Batch process embeddings with tracking

@@ -34,6 +34,8 @@ export interface KanbanEmail {
   labelIds?: string[]; // Add labelIds for checking SENT
   htmlBody?: string; // Add htmlBody for mail content
   textBody?: string; // Add textBody for mail content
+  kanbanColumnId?: string; // NEW: Primary source of truth
+  cachedColumnName?: string; // NEW: Column name display
 }
 
 // Thay đổi quan trọng: Column là một object trong mảng
@@ -122,6 +124,8 @@ export const useKanbanData = () => {
       labelIds: email.labelIds || [],
       htmlBody: email.htmlBody,
       textBody: email.textBody,
+      kanbanColumnId: email.kanbanColumnId || 'inbox',
+      cachedColumnName: email.cachedColumnName,
     };
   };
 
@@ -182,12 +186,12 @@ export const useKanbanData = () => {
             createNewLabel: false // STARRED already exists
           });
           
-          // Done → custom "Done" label
+          // Done → Archive (special system label)
           const doneRes = await api.post('/kanban/columns', {
             name: 'Done',
             color: '#22c55e',
-            gmailLabel: 'Done',
-            createNewLabel: true // Create new custom label
+            gmailLabel: 'ARCHIVE', // Use special Archive label
+            createNewLabel: false // ARCHIVE already exists as system label
           });
           
           const todoData = todoRes?.data?.data || todoRes?.data;
@@ -218,7 +222,7 @@ export const useKanbanData = () => {
           console.error('❌ Failed to create default columns:', err);
           // Fallback to client-side only defaults
           const defaultTodo: Column = { id: "todo", title: "To Do", isSystem: false, color: "#f97316", gmailLabel: "STARRED", items: [] };
-          const defaultDone: Column = { id: "done", title: "Done", isSystem: false, color: "#22c55e", gmailLabel: "Done", items: [] };
+          const defaultDone: Column = { id: "done", title: "Done", isSystem: false, color: "#22c55e", gmailLabel: "ARCHIVE", items: [] };
           finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
         }
       } else {
@@ -259,23 +263,38 @@ export const useKanbanData = () => {
           setColumnLoadingStates(prev => ({ ...prev, [col.id]: true }));
 
           try {
-            // Fetch emails for specific column
-            console.log(`  🌐 API call: fetchColumnEmails(${col.id}, limit: 50)`);
-            const res = await fetchColumnEmails(col.id, { limit: 50 });
+            // Use new unified kanban emails API for ALL columns
+            console.log(`🌐 API call: getKanbanEmails(${col.id}, limit: 50)`);
+            const res = await api.get(`/mailboxes/${col.id}/kanban-emails`, {
+              params: { limit: 50 }
+            });
+            
+            let emails = res?.data?.messages || [];
+            
+            console.log(`📦 API Response:`, res);
+            console.log(`✅ Fetched ${emails.length} emails for column: ${col.id}`);
 
-            console.log(`  📦 API Response:`, res);
-            console.log(`  📦 Response.data:`, res?.data);
-
-            const emails = res?.data?.messages || [];
-
-            console.log(`  ✅ Fetched ${emails.length} emails for column: ${col.title}`);
-
-            // Update column with fetched emails
-            setColumns(prev => prev.map(column => 
-              column.id === col.id 
-                ? { ...column, items: emails.map(transformEmail) }
-                : column
-            ));
+            // Infinite scroll: Append new emails to existing ones
+            setColumns(prev => prev.map(col => {
+              if (col.id === col.id) {
+                const existingEmails = col.items || [];
+                const existingEmailIds = new Set(existingEmails.map((e: any) => e.id));
+                
+                // Only add new emails that don't already exist
+                const newEmails = emails.filter((email: any) => !existingEmailIds.has(email.id));
+                const mergedEmails = [...existingEmails, ...newEmails];
+                
+                console.log(`📊 Infinite scroll: ${existingEmails.length} existing + ${newEmails.length} new = ${mergedEmails.length} total`);
+                
+                return {
+                  ...col,
+                  items: mergedEmails.map((email: any) => transformEmail(email)),
+                  hasMore: newEmails.length === 50, // Assume more if we got full page
+                  isLoadingMore: false
+                };
+              }
+              return col;
+            }));
           } catch (err: any) {
             console.error(`  ❌ Failed to fetch emails for column ${col.title}:`, err);
             console.error(`     Error details:`, err.response?.data || err.message);

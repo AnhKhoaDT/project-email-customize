@@ -81,4 +81,13 @@ export class UsersService {
       { new: true }
     ).exec();
   }
+
+  /**
+   * Find all users who have Google refresh tokens
+   */
+  async findAllWithGoogleToken() {
+    return this.userModel.find({ 
+      googleRefreshToken: { $exists: true, $ne: null } 
+    }).exec();
+  }
 }
