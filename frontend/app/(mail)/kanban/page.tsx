@@ -12,6 +12,7 @@ import {
   DropResult,
 } from "@hello-pangea/dnd";
 import { useKanbanData, KanbanEmail } from "@/hooks/useKanbanData";
+import useSseEvents from '@/hooks/useSseEvents';
 import api, { fetchGmailLabels, fetchEmailById, createKanbanColumn, reorderKanbanColumns } from "@/lib/api";
 import { useToast } from "@/contexts/toast-context";
 
@@ -376,6 +377,35 @@ export default function KanbanPage() {
     columnLoadingStates, // <-- Loading states cho từng cột
     refreshData, // <-- Thêm refreshData để reload sau khi tạo column
   } = useKanbanData();
+
+  // SSE: subscribe to server-sent events to get realtime restores
+  useSseEvents((payload: any) => {
+    try {
+      const colId = payload?.toColumnId;
+      const emailId = payload?.emailId;
+      if (!colId || !emailId) return;
+
+      // Refresh only the affected column
+      fetchColumnData(colId).catch((err: any) => console.error('Failed to fetch restored column:', err));
+
+      // Try to fetch email subject to display a nicer toast
+      (async () => {
+        try {
+          const email = await fetchEmailById(emailId);
+          const subject = email?.subject || 'No subject';
+          const short = subject.length > 20 ? subject.slice(0, 20) + '...' : subject;
+          const col = columns?.find((c: any) => c.id === colId);
+          const colTitle = col?.title || colId;
+          showToast(`Email "${short}" unsnoozed to ${colTitle}`, 'success');
+        } catch (e) {
+          console.error('Failed to fetch email for SSE toast', e);
+          showToast('Email restored', 'success');
+        }
+      })();
+    } catch (e) {
+      console.error('SSE handler error', e);
+    }
+  });
 
   const { showToast } = useToast();
   const [enabled, setEnabled] = useState(false);

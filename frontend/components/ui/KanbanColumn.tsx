@@ -288,7 +288,7 @@ const ColumnHeader = ({
         <div className="relative" ref={filterMenuRef}>
           <button
             onClick={() => setShowFilterMenu(!showFilterMenu)}
-            className={`p-1.5 rounded transition-colors ${showFilterMenu
+            className={`cursor-pointer p-1.5 rounded transition-colors ${showFilterMenu
               ? "bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400"
               : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
               }`}

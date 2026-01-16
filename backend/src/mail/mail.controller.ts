@@ -1,6 +1,10 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res, Logger, Sse, UnauthorizedException } from '@nestjs/common';
+import { Observable, fromEvent } from 'rxjs';
+import { filter, map } from 'rxjs/operators';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import * as jwt from 'jsonwebtoken';
 import { GmailService } from './gmail.service';
 import { GmailSyncService, SyncResult } from './gmail-sync.service';
 import { GmailHistorySyncService } from './gmail-history-sync.service';
@@ -59,6 +63,7 @@ export class MailController {
     private semanticSearchService: SemanticSearchService,
     private searchSuggestionsService: SearchSuggestionsService,
     private kanbanConfigService: KanbanConfigService,
+    private eventEmitter: EventEmitter2,
     private hybridSearchService: HybridSearchService,
   ) { }
 
@@ -132,6 +137,41 @@ export class MailController {
     const userRequests = this.searchRateLimit.get(userId) || [];
     userRequests.push(now);
     this.searchRateLimit.set(userId, userRequests);
+  }
+
+  // Accept either Authorization header or `?token=` query param (EventSource cannot set headers)
+  @Sse('events/sse')
+  events(@Req() req: any, @Query('token') token?: string): Observable<any> {
+    // Determine token: prefer Authorization header, fallback to query param
+    const authHeader = req.headers?.authorization;
+    let accessToken = null as string | null;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      accessToken = authHeader.split(' ')[1];
+    } else if (token) {
+      accessToken = token as string;
+    }
+
+    if (!accessToken) {
+      throw new UnauthorizedException('Missing access token for SSE');
+    }
+
+    const ACCESS_TOKEN_SECRET = process.env.ACCESS_TOKEN_SECRET || 'access-secret-example';
+    let payload: any = null;
+    try {
+      payload = jwt.verify(accessToken, ACCESS_TOKEN_SECRET) as any;
+    } catch (err) {
+      throw new UnauthorizedException('Invalid or expired SSE token');
+    }
+
+    const userId = payload?.sub;
+
+    // Listen to 'email.restored' events and stream only those matching this user
+    const stream$ = fromEvent(this.eventEmitter, 'email.restored').pipe(
+      filter((payload: any) => payload?.userId === userId),
+      map((payload: any) => ({ event: 'email.restored', data: payload }))
+    );
+    return stream$;
   }
 
   @UseGuards(JwtAuthGuard)

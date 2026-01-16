@@ -181,23 +181,39 @@ export const useKanbanData = () => {
 
       // Validate mapped Gmail labels against actual Gmail labels from the account
       try {
-        const gmailLabels = await fetchGmailLabels().catch(() => []);
-        const gmailIds = new Set((gmailLabels || []).map((l: any) => l.id));
-        const gmailNames = new Set((gmailLabels || []).map((l: any) => (l.name || "").toLowerCase()));
+        let gmailLabels: any[] = [];
+        let gmailFetchSucceeded = false;
+        try {
+          gmailLabels = await fetchGmailLabels();
+          gmailFetchSucceeded = true;
+        } catch (err) {
+          console.warn('Failed to fetch Gmail labels (skipping label validation):', err);
+          gmailLabels = [];
+          gmailFetchSucceeded = false;
+        }
 
-        mappedBackendColumns.forEach((col) => {
-          if (!col.gmailLabel) return;
-          // Do not validate the special 'ARCHIVE' display label (it's handled as autoArchive)
-          if (String(col.gmailLabel || '').toUpperCase() === 'ARCHIVE') return;
+        if (gmailFetchSucceeded) {
+          const gmailIds = new Set((gmailLabels || []).map((l: any) => l.id));
+          const gmailNames = new Set((gmailLabels || []).map((l: any) => (l.name || "").toLowerCase()));
 
-          const labelKey = String(col.gmailLabel || "").toLowerCase();
-          const existsById = gmailIds.has(col.gmailLabel);
-          const existsByName = gmailNames.has(labelKey);
-          if (!existsById && !existsByName) {
-            col.hasLabelError = true;
-            col.labelErrorMessage = `Gmail label "${col.gmailLabel}" not found.`;
-          }
-        });
+          mappedBackendColumns.forEach((col) => {
+            if (!col.gmailLabel) return;
+            // Do not validate the special 'ARCHIVE' display label (it's handled as autoArchive)
+            if (String(col.gmailLabel || '').toUpperCase() === 'ARCHIVE') return;
+
+            const raw = String(col.gmailLabel || "");
+            const labelKey = raw.toLowerCase();
+            // Match by id OR by uppercase id (system labels) OR by name
+            const existsById = gmailIds.has(raw) || gmailIds.has(raw.toUpperCase());
+            const existsByName = gmailNames.has(labelKey);
+            if (!existsById && !existsByName) {
+              col.hasLabelError = true;
+              col.labelErrorMessage = `Gmail label "${col.gmailLabel}" not found.`;
+            }
+          });
+        } else {
+          // Skip setting hasLabelError when we couldn't fetch labels (avoid false positives)
+        }
       } catch (e) {
         console.warn("Failed to validate Gmail labels:", e);
       }
@@ -271,151 +287,65 @@ export const useKanbanData = () => {
       setIsLoading(false);
 
       // 4. Fetch emails for each column separately (in background)
-      // IMPORTANT: Fetch non-inbox columns FIRST, then inbox LAST
-      // This ensures inbox filtering works correctly
-      
-      // 4a. Separate inbox from other columns
+      // Fetch all columns (including inbox) in parallel to avoid waiting sequentially.
+      // We will deduplicate inbox results against other columns using fetched IDs.
       const inboxColumn = finalColumns.find(c => c.id === "inbox");
-      const nonInboxColumns = finalColumns.filter(c => c.id !== "inbox");
-      
-      console.log(`📋 Will fetch ${nonInboxColumns.length} non-inbox columns:`, nonInboxColumns.map(c => c.title));
-      
-      // 4b. Fetch all non-inbox columns in parallel FIRST
-      await Promise.all(
-        nonInboxColumns.map(async (col) => {
-          console.log(`📧 Fetching emails for column: ${col.title} (id: ${col.id})`);
+      const allColumns = finalColumns;
 
-          // Skip if this column is already being fetched by another flow
-          if (columnLoadingRef.current[col.id]) {
-            console.log(`  ⏭️ Skipping ${col.id} - already loading (bulk)`);
-            return Promise.resolve();
-          }
+      // Prepare fetch promises for each column
+      const fetchPromises = allColumns.map(async (col) => {
+        // Skip if already loading
+        if (columnLoadingRef.current[col.id]) {
+          console.log(`  ⏭️ Skipping ${col.id} - already loading`);
+          return { colId: col.id, raw: [] };
+        }
 
-          // Mark loading immediately to avoid race conditions
-          columnLoadingRef.current = { ...columnLoadingRef.current, [col.id]: true };
-          setColumnLoadingStates(prev => ({ ...prev, [col.id]: true }));
+        // Mark loading
+        columnLoadingRef.current = { ...columnLoadingRef.current, [col.id]: true };
+        setColumnLoadingStates(prev => ({ ...prev, [col.id]: true }));
 
-          try {
-            // Use new unified kanban emails API for ALL columns
-            console.log(`🌐 API call: getKanbanEmails(${col.id}, limit: 50)`);
-            const res = await api.get(`/mailboxes/${col.id}/kanban-emails`, {
-              params: { limit: 50 }
-            });
-
-            // Backend may return { status, data: { messages } } or { messages }
-            let emails = res?.data?.data?.messages || res?.data?.messages || [];
-            
-            console.log(`📦 API Response:`, res);
-            console.log(`✅ Fetched ${emails.length} emails for column: ${col.id}`);
-
-            // Infinite scroll: Append new emails to existing ones
-            setColumns(prev => prev.map(c => {
-              if (c.id === col.id) {
-                const existingEmails = c.items || [];
-                const existingEmailIds = new Set(existingEmails.map((e: any) => e.id));
-                
-                // Only add new emails that don't already exist
-                const newEmails = emails.filter((email: any) => !existingEmailIds.has(email.id));
-                const mergedEmails = [...existingEmails, ...newEmails];
-                
-                console.log(`📊 Infinite scroll: ${existingEmails.length} existing + ${newEmails.length} new = ${mergedEmails.length} total`);
-                
-                return {
-                  ...c,
-                  items: mergedEmails.map((email: any) => transformEmail(email)),
-                  hasMore: newEmails.length === 50, // Assume more if we got full page
-                  isLoadingMore: false
-                };
-              }
-              return c;
-            }));
-          } catch (err: any) {
-            console.error(`  ❌ Failed to fetch emails for column ${col.title}:`, err);
-            console.error(`     Error details:`, err.response?.data || err.message);
-            // Distinguish label-mapping errors (e.g. 404 / LABEL_NOT_FOUND)
-            const status = err?.response?.status;
-            const isLabelNotFound = status === 404 || err?.response?.data?.code === 'LABEL_NOT_FOUND';
-            if (isLabelNotFound) {
-              setColumns(prev => prev.map(column => 
-                column.id === col.id 
-                  ? { ...column, hasLabelError: true, labelErrorMessage: err?.response?.data?.message || err?.message || "Label not found" }
-                  : column
-              ));
-            } else {
-              // For server/network errors, set a global error instead of a column-level label error.
-              setError(err?.response?.data?.message || err?.message || "Failed to load emails");
-            }
-          } finally {
-            columnLoadingRef.current = { ...columnLoadingRef.current, [col.id]: false };
-            setColumnLoadingStates(prev => ({ ...prev, [col.id]: false }));
-          }
-        })
-      );
-      
-      // 4c. Now fetch inbox LAST, using updated state to filter correctly
-      if (inboxColumn) {
-        setColumnLoadingStates(prev => ({ ...prev, [inboxColumn.id]: true }));
-        
         try {
-          const inboxRes = await fetchInboxEmails(50);
-          const inboxRaw = inboxRes?.messages || inboxRes?.data?.messages || [];
-
-          // Filter logic for inbox:
-          // Include messages whose kanbanColumnId is 'inbox', null/undefined,
-          // or references a column id that no longer exists (invalid).
-          // Also ensure we don't duplicate emails already present in other columns.
-          setColumns(prev => {
-            const otherColumnEmailIds = new Set<string>();
-            const currentColumnIds = new Set<string>(prev.map(c => c.id));
-
-            prev.forEach(c => {
-              if (c.id !== "inbox" && c.items) {
-                c.items.forEach(email => otherColumnEmailIds.add(email.id));
-              }
-            });
-
-            const inboxFiltered = inboxRaw.filter((e: any) => {
-              // Exclude emails already assigned to other columns by id
-              if (otherColumnEmailIds.has(e.id)) return false;
-
-              const kId = e?.kanbanColumnId ?? null;
-
-              // Include when explicitly 'inbox'
-              if (kId === 'inbox') return true;
-
-              // Include when no kanbanColumnId (null/undefined)
-              if (kId === null) return true;
-
-              // Include when the referenced kanbanColumnId is not present in current columns (invalid)
-              if (!currentColumnIds.has(kId)) return true;
-
-              // Otherwise, do not include (belongs to a valid non-inbox column)
-              return false;
-            });
-
-            return prev.map(column => 
-              column.id === inboxColumn.id 
-                ? { ...column, items: inboxFiltered.map(transformEmail) }
-                : column
-            );
-          });
+          if (col.id === "inbox") {
+            const inboxRes = await fetchInboxEmails(50);
+            const inboxRaw = inboxRes?.messages || inboxRes?.data?.messages || [];
+            return { colId: col.id, raw: inboxRaw };
+          } else {
+            const res = await fetchColumnEmails(col.id, { limit: 50 });
+            const emails = res?.data?.messages || [];
+            return { colId: col.id, raw: emails };
+          }
         } catch (err: any) {
-          console.error(`Failed to fetch emails for inbox:`, err);
+          console.error(`Failed to fetch emails for column ${col.id}:`, err);
           const status = err?.response?.status;
           const isLabelNotFound = status === 404 || err?.response?.data?.code === 'LABEL_NOT_FOUND';
           if (isLabelNotFound) {
             setColumns(prev => prev.map(column => 
-              column.id === inboxColumn.id 
+              column.id === col.id 
                 ? { ...column, hasLabelError: true, labelErrorMessage: err?.response?.data?.message || err?.message || "Label not found" }
                 : column
             ));
           } else {
             setError(err?.response?.data?.message || err?.message || "Failed to load emails");
           }
+          return { colId: col.id, raw: [] };
         } finally {
-          setColumnLoadingStates(prev => ({ ...prev, [inboxColumn.id]: false }));
+          columnLoadingRef.current = { ...columnLoadingRef.current, [col.id]: false };
+          setColumnLoadingStates(prev => ({ ...prev, [col.id]: false }));
         }
-      }
+      });
+
+      const results = await Promise.all(fetchPromises);
+
+      // Map raw results by column id and assign emails to each column based on kanbanColumnId
+      const colEmailMap: Record<string, any[]> = {};
+      results.forEach(r => {
+        colEmailMap[r.colId] = r.raw || [];
+      });
+
+      setColumns(prev => prev.map(col => ({
+        ...col,
+        items: (colEmailMap[col.id] || []).map(transformEmail)
+      })));
 
     } catch (err: any) {
       console.error("Failed to fetch Kanban data:", err);
@@ -442,33 +372,12 @@ export const useKanbanData = () => {
         const inboxRes = await fetchInboxEmails(limit);
         const inboxRaw = inboxRes?.messages || inboxRes?.data?.messages || [];
 
-        // Include messages whose kanbanColumnId is 'inbox', null/undefined,
-        // or references a column id that no longer exists (invalid).
-        setColumns(prev => {
-          const otherColumnEmailIds = new Set<string>();
-          const currentColumnIds = new Set<string>(prev.map(c => c.id));
-
-          prev.forEach(col => {
-            if (col.id !== "inbox") {
-              col.items.forEach(email => otherColumnEmailIds.add(email.id));
-            }
-          });
-
-          const inboxFiltered = inboxRaw.filter((e: any) => {
-            if (otherColumnEmailIds.has(e.id)) return false;
-            const kId = e?.kanbanColumnId ?? null;
-            if (kId === 'inbox') return true;
-            if (kId === null) return true;
-            if (!currentColumnIds.has(kId)) return true;
-            return false;
-          });
-
-          return prev.map(col => 
-            col.id === columnId 
-              ? { ...col, items: inboxFiltered.map(transformEmail) }
-              : col
-          );
-        });
+        // Assign inbox items directly; we rely on kanbanColumnId from backend.
+        setColumns(prev => prev.map(col => 
+          col.id === columnId 
+            ? { ...col, items: inboxRaw.map(transformEmail) }
+            : col
+        ));
       } else {
         // Fetch emails for specific column
         const res = await fetchColumnEmails(columnId, { limit });
@@ -708,28 +617,56 @@ export const useKanbanData = () => {
     onSuccess?: () => void,
     onError?: (error: any) => void
   ) => {
-    // Optimistic: Xóa khỏi cột hiện tại (và thêm vào list snoozed ảo nếu cần hiển thị)
+    // Optimistic: remove from source column and keep the removed email in snoozedItems
+    let removedEmail: KanbanEmail | null = null;
     setColumns((prev) => {
       const newColumns = prev.map(col => {
         if (col.id === sourceColumnId) {
-          return { ...col, items: col.items.filter(e => e.id !== emailId) };
+          const remaining = col.items.filter(e => {
+            if (e.id === emailId) {
+              removedEmail = e;
+              return false;
+            }
+            return true;
+          });
+          return { ...col, items: remaining };
         }
         return col;
       });
       return newColumns;
     });
 
-    // Cập nhật state snoozedItems riêng để trigger logic timeout
-    // (Logic thực tế phức tạp hơn chút vì cần lấy object email đầy đủ)
+    // If we captured the full email object, add it to snoozedItems (so timers/watchers work)
+    if (removedEmail) {
+      setSnoozedItems(prev => {
+        // Avoid duplicates
+        if (prev.find(e => e.id === removedEmail!.id)) return prev;
+        return [...prev, { ...removedEmail!, snoozedUntil }];
+      });
+    }
 
     try {
       await snoozeEmailAPI(emailId, threadId, snoozedUntil);
-      // Sau khi API thành công, fetch lại data để đồng bộ list snoozedItems chính xác
-      fetchData();
+      // Success: we already removed it optimistically and recorded snoozedItems.
+      // Do NOT fully refetch the board to avoid a full reload.
       onSuccess?.();
     } catch (err) {
       console.error("Failed to snooze:", err);
-      fetchData(); // Rollback
+      // Rollback: re-insert email back into its source column if we have it, otherwise trigger a refresh
+      if (removedEmail) {
+        setColumns(prev => prev.map(col => {
+          if (col.id === sourceColumnId) {
+            // Put it back at the top
+            return { ...col, items: [removedEmail!, ...col.items] };
+          }
+          return col;
+        }));
+      } else {
+        // Fallback: refresh the minimal data
+        fetchData();
+      }
+      // Remove from snoozedItems if present
+      setSnoozedItems(prev => prev.filter(e => e.id !== emailId));
       onError?.(err);
     }
   }, [fetchData]);
