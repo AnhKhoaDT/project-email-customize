@@ -906,7 +906,14 @@ export default function KanbanPage() {
   };
 
   if (!enabled) return null;
-  if (isLoading) return <div className="p-10 text-center">Loading...</div>;
+  if (isLoading) return (
+    <div className="flex items-center justify-center h-full w-full p-10">
+      <div className="flex flex-col items-center gap-3">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="text-sm text-gray-600 dark:text-gray-300">Loading Kanban…</div>
+      </div>
+    </div>
+  );
   if (error) return <div className="p-10 text-center text-red-500">{error}</div>;
 
   return (

@@ -603,28 +603,16 @@ const KanbanColumn = ({
   
   // Infinite scroll detection
   useEffect(() => {
-    console.log(`📜 Column ${id} scroll setup:`, { hasMore, isLoadingMore, hasHandler: !!onLoadMore });
-    
     if (!onLoadMore || !hasMore || isLoadingMore) return;
     
     const container = scrollContainerRef.current;
     if (!container) {
-      console.log(`⚠️ No scroll container found for column ${id}`);
       return;
     }
-
-    console.log(`✅ Setting up scroll listener for column ${id}`);
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
-      
-      console.log(`📊 Column ${id} scroll:`, {
-        scrollTop,
-        scrollHeight,
-        clientHeight,
-        percentage: (scrollPercentage * 100).toFixed(1) + '%'
-      });
       
       // Trigger when scrolled to 80% of content
       if (scrollPercentage > 0.8) {
@@ -635,7 +623,6 @@ const KanbanColumn = ({
 
     container.addEventListener('scroll', handleScroll);
     return () => {
-      console.log(`🧹 Cleaning up scroll listener for column ${id}`);
       container.removeEventListener('scroll', handleScroll);
     };
   }, [hasMore, isLoadingMore, onLoadMore, id]);
@@ -687,7 +674,7 @@ const KanbanColumn = ({
             {isLoading && (
               <div key="loading-spinner" className="flex items-center justify-center py-8">
                 <div className="flex flex-col items-center gap-2">
-                  <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-500 rounded-full animate-spin"></div>
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Loading emails...</p>
                 </div>
               </div>

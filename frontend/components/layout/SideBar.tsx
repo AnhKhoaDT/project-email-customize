@@ -204,6 +204,7 @@ const SideBar = ({
         >
           {/* Settings - Example Link */}
           <Link
+            disable="true"
             href="/settings"
             className={`cursor-pointer flex flex-row items-center rounded-sm px-2 hover:bg-muted/50
              ${

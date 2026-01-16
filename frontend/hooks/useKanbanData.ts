@@ -106,7 +106,7 @@ export const useKanbanData = () => {
       sender: getSenderName(email.from),
       subject: email.subject || "(No Subject)",
       snippet: email.snippet || "",
-      summary: email.summary || email.snippet || "No summary available",
+      summary: email.summary || "",
       from: email.from,
       date: email.date,
       time: formatTime(email.date),
@@ -171,12 +171,6 @@ export const useKanbanData = () => {
       const configRes = await fetchKanbanConfig();
       // `fetchKanbanConfig()` returns the response data (the config object), not an axios wrapper.
       const backendColumns = configRes?.columns || [];
-
-      console.log('🔍 Backend columns received:', backendColumns);
-      console.log('📊 Total columns:', backendColumns.length);
-      backendColumns.forEach((col: any) => {
-        console.log(`  - Column: "${col.name}" (id: ${col.id}, gmailLabel: ${col.gmailLabel})`);
-      });
 
       // 2. Fetch snoozed emails
       const snoozedRes = await fetchSnoozedEmails().catch(() => ({ data: [] }));
@@ -254,7 +248,7 @@ export const useKanbanData = () => {
         console.warn("Failed to validate Gmail labels:", e);
       }
 
-      // If backend has no columns, default to Inbox / To Do / Done
+      // If backend has no columns, default to Inbox / To Do / In Progress / Done
       let finalColumns: Column[];
       if (!backendColumns || backendColumns.length === 0) {
         console.log('🏗️ No backend columns found - creating defaults...');
@@ -287,6 +281,7 @@ export const useKanbanData = () => {
 
           const todoData = todoRes?.data?.data || todoRes?.data;
           const doneData = doneRes?.data?.data || doneRes?.data;
+          const progressData = progressRes?.data?.data || progressRes?.data;
 
           const defaultTodo: Column = {
             id: todoData?.id || 'todo',
@@ -317,13 +312,14 @@ export const useKanbanData = () => {
             items: []
           };
 
-          finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
+          finalColumns = [fixedInboxColumn, defaultTodo, defaultDone, defaultProgress];
           console.log('✅ Default columns created in backend');
         } catch (err: any) {
           console.error('❌ Failed to create default columns:', err);
           // Fallback to client-side only defaults
           const defaultTodo: Column = { id: "todo", title: "To Do", isSystem: false, color: "#f97316", gmailLabel: "STARRED", items: [] };
           const defaultDone: Column = { id: "done", title: "Done", isSystem: false, color: "#22c55e", gmailLabel: "ARCHIVE", items: [] };
+          const defaultProgress: Column = { id: "in_progress", title: "In Progress", isSystem: false, color: "#eab308", gmailLabel: "IMPORTANT", items: [] };
           finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
         }
       } else {
@@ -332,11 +328,6 @@ export const useKanbanData = () => {
         finalColumns = [fixedInboxColumn, ...visibleColumns];
       }
       setColumns(finalColumns);
-
-      console.log('✅ Final columns structure:');
-      finalColumns.forEach(col => {
-        console.log(`  - ${col.title} (id: ${col.id}, gmailLabel: ${col.gmailLabel}, items: ${col.items.length})`);
-      });
 
       setIsLoading(false);
 
@@ -404,17 +395,22 @@ export const useKanbanData = () => {
 
       // After assigning inbox items, trigger summary generation for first 5 inbox emails
       try {
+        setColumns(prev => prev.map(col => ({
+          ...col,
+          items: (colEmailMap[col.id] || []).map(transformEmail)
+        })));
+
         const inboxRaw = colEmailMap['inbox'] || [];
         const inboxTransformed: KanbanEmail[] = inboxRaw.map(transformEmail);
-        const firstFive = inboxTransformed.slice(0, 5);
-        firstFive.forEach((email) => {
-          if (!email.summary || email.summary === 'No summary available') {
-            // Fire-and-forget; generateSummary will update state when ready
+        const emailsToGenerate = inboxTransformed.slice(0, 5).filter(email => !email.summary || email.summary === "");
+
+        setTimeout(() => {
+          emailsToGenerate.forEach((email) => {
             generateSummary(email.id, false).catch(err => {
               console.debug('generateSummary (inbox preload) failed for', email.id, err?.message || err);
             });
-          }
-        });
+          });
+        }, 0);
       } catch (e) {
         console.debug('Failed to trigger inbox preload summaries', e);
       }
@@ -457,7 +453,7 @@ export const useKanbanData = () => {
         // Trigger summary generation for first 5 inbox emails if missing
         try {
           transformed.slice(0, 5).forEach(email => {
-            if (!email.summary || email.summary === 'No summary available') {
+            if (!email.summary || email.summary === "") {
               generateSummary(email.id, false).catch(err => {
                 console.debug('generateSummary (inbox column) failed for', email.id, err?.message || err);
               });
@@ -614,15 +610,6 @@ export const useKanbanData = () => {
     toColumnId: string,
     destinationIndex?: number
   ) => {
-    // Tìm email để check logic summary
-    const sourceCol = columns.find(c => c.id === fromColumnId);
-    const emailToMove = sourceCol?.items.find(e => e.id === emailId);
-
-    const shouldGenerateSummary =
-      fromColumnId === "inbox" &&
-      emailToMove &&
-      (!emailToMove.summary || emailToMove.summary === "No summary available");
-
     // ⚠️ IMPORTANT: NO optimistic update here to avoid @hello-pangea/dnd errors
     // @hello-pangea/dnd handles the visual update during drag
     // We only update state after API call completes
@@ -655,9 +642,6 @@ export const useKanbanData = () => {
 
         return newColumns;
       });
-
-      // NOTE: Auto-generation of summaries on move was removed.
-      // Summary generation is left to explicit user action (Regenerate) or background processes.
     } catch (err: any) {
       console.error("Failed to move email:", err);
 
