@@ -94,12 +94,12 @@ export class GmailService {
         }
       });
       
-      logger.log(`✅ Created label "${name}" with ID: ${res.data.id}`);
+      logger.debug(`Created label "${name}" id=${res.data.id}`);
       return res.data;
     } catch (err) {
       // Nếu label đã tồn tại, trả về label hiện có
       if (err.code === 409 || err.message?.includes('already exists')) {
-        logger.log(`Label "${name}" already exists, fetching existing...`);
+        logger.debug(`Label "${name}" already exists, fetching existing...`);
         const labels = await this.listLabels(userId);
         const existing = labels.find(l => l.name === name);
         return existing;
@@ -131,7 +131,7 @@ export class GmailService {
       }
     }
 
-    logger.log(`✅ Initialized ${createdLabels.length} Kanban labels`);
+    logger.debug(`Initialized ${createdLabels.length} Kanban labels`);
     return createdLabels;
   }
 
@@ -154,18 +154,26 @@ export class GmailService {
   async listMessagesInLabel(userId: string, labelId: string, pageSize = 20, pageToken?: string) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
-    
+
+    // Special-case: our app uses a display-only pseudo-label `ARCHIVE`.
+    // Gmail doesn't have a label named ARCHIVE; archived messages are those
+    // without the INBOX label. Handle this here to avoid sending 'ARCHIVE'
+    // as a labelId to the Gmail API which would cause "Invalid label" errors.
+    if (labelId === 'ARCHIVE') {
+      return this.listArchivedMessages(userId, pageSize, pageToken);
+    }
+
     // CRITICAL: Verify label exists first to detect deleted labels
     // Gmail API messages.list doesn't throw error for non-existent labels, just returns []
     try {
       await gmail.users.labels.get({ userId: 'me', id: labelId });
-      logger.log(`✅ Label ${labelId} exists and is accessible`);
+      logger.debug(`Label ${labelId} exists and is accessible`);
     } catch (err) {
       // Label doesn't exist or is inaccessible
       logger.error(`❌ Label ${labelId} not found or inaccessible:`, err.message);
       throw new Error(`Gmail label '${labelId}' not found. It may have been deleted.`);
     }
-    
+
     // Lấy danh sách message IDs
     const res = await gmail.users.messages.list({ userId: 'me', labelIds: [labelId], maxResults: pageSize, pageToken });
     
@@ -658,10 +666,13 @@ export class GmailService {
         throw new Error(`Unknown action: ${action}`);
     }
 
+    // Filter out any display-only/internal labels that should not be sent to Gmail
+    const filterLabels = (arr: string[] = []) => arr.filter(id => id && id !== 'ARCHIVE');
+
     const res = await gmail.users.messages.modify({
       userId: 'me',
       id: messageId,
-      requestBody: { addLabelIds, removeLabelIds }
+      requestBody: { addLabelIds: filterLabels(addLabelIds), removeLabelIds: filterLabels(removeLabelIds) }
     });
 
     return res.data;
@@ -671,6 +682,8 @@ export class GmailService {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
 
+    const filterLabels = (arr: string[] = []) => arr.filter(id => id && id !== 'ARCHIVE');
+
     const addLabelIds = action === 'add' ? [labelId] : [];
     const removeLabelIds = action === 'remove' ? [labelId] : [];
 
@@ -678,8 +691,8 @@ export class GmailService {
       userId: 'me',
       requestBody: {
         ids: emailIds,
-        addLabelIds,
-        removeLabelIds
+        addLabelIds: filterLabels(addLabelIds),
+        removeLabelIds: filterLabels(removeLabelIds)
       }
     });
 
@@ -697,12 +710,14 @@ export class GmailService {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
 
+    const filterLabels = (arr: string[] = []) => arr.filter(id => id && id !== 'ARCHIVE');
+
     const res = await gmail.users.messages.modify({
       userId: 'me',
       id: emailId,
       requestBody: {
-        addLabelIds: labels.addLabelIds || [],
-        removeLabelIds: labels.removeLabelIds || []
+        addLabelIds: filterLabels(labels.addLabelIds || []),
+        removeLabelIds: filterLabels(labels.removeLabelIds || [])
       }
     });
 
@@ -759,9 +774,9 @@ export class GmailService {
     const addLabelIds = [toLabel.id];
     const removeLabelIds = fromLabel ? [fromLabel.id] : [];
 
-    logger.log(`Moving email ${messageId}: ${fromColumn || 'none'} → ${toColumn}`);
-    logger.log(`Remove labels: ${removeLabelIds.join(', ')}`);
-    logger.log(`Add labels: ${addLabelIds.join(', ')}`);
+    logger.debug(`Moving email ${messageId}: ${fromColumn || 'none'} → ${toColumn}`);
+    logger.debug(`Remove labels: ${removeLabelIds.join(', ')}`);
+    logger.debug(`Add labels: ${addLabelIds.join(', ')}`);
 
     const res = await gmail.users.messages.modify({
       userId: 'me',

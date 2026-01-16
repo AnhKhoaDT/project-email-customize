@@ -172,8 +172,10 @@ const KANBAN_CONFIGS = [
                 id: 'col_done',
                 name: 'Done',
                 order: 3,
-                gmailLabel: 'ARCHIVE',
+                // Use removeInboxLabel to represent archive behaviour instead of sending a non-existent 'ARCHIVE' label
+                gmailLabel: null,
                 gmailLabelName: 'Archive',
+                removeInboxLabel: true,
                 color: '#10B981',
                 isVisible: true,
             },

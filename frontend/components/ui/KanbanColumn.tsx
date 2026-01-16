@@ -646,7 +646,7 @@ const KanbanColumn = ({
 
   return (
     <div
-      className={`flex flex-col shrink-0 w-full h-screen bg-white dark:bg-[#121212] ${columnBorderClass} ${columnOpacity}`}
+      className={`flex flex-col flex-1 w-full bg-white dark:bg-[#121212] ${columnBorderClass} ${columnOpacity}`}
       style={{ borderTopColor: hasLabelError ? '#facc15' : color }}
     >
       <div style={{ color: hasLabelError ? '#facc15' : color }}>
@@ -677,7 +677,7 @@ const KanbanColumn = ({
               provided.innerRef(el);
               scrollContainerRef.current = el;
             }}
-            className={`flex-1 p-3 transition-colors overflow-y-auto mailbox-scrollbar ${
+            className={`flex-1 p-3 transition-colors min-h-0 ${
               snapshot.isDraggingOver ? dragOverClass : ""
               } ${(hasLabelError && !autoArchive) ? 'bg-yellow-50/30 dark:bg-yellow-900/5' : ''}`}
           >
@@ -738,7 +738,7 @@ const KanbanColumn = ({
 
             {/* Hiển thị thông báo nếu cột trống hoàn toàn */}
             {!isLoading && items.length === 0 && totalRawItems === 0 && !(hasLabelError && !autoArchive) && (
-              <div key="empty" className="text-center py-10 text-gray-300 dark:text-gray-600 text-sm border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-lg m-2">
+              <div key="empty" className="text-center flex-1 py-10 text-gray-300 dark:text-gray-600 text-sm border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-lg m-2">
                 Empty
               </div>
             )}
@@ -755,7 +755,7 @@ const KanbanColumn = ({
 
             {/* End of list indicator - No more emails */}
             {!isLoading && !hasMore && items.length > 0 && (
-              <div className="text-center text-gray-400 dark:text-gray-500 text-xs py-4 border-t border-gray-100 dark:border-gray-800 mt-2">
+              <div className="text-center flex-1 text-gray-400 dark:text-gray-500 text-xs py-4 border-t border-gray-100 dark:border-gray-800 mt-2">
                 No more emails to load
               </div>
             )}

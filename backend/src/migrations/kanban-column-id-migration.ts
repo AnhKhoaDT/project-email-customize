@@ -1,111 +1,71 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { EmailMetadata, EmailMetadataDocument } from '../mail/schemas/email-metadata.schema';
+import mongoose from 'mongoose';
+import * as dotenv from 'dotenv';
 
-@Injectable()
-export class KanbanColumnIdMigration {
-  private readonly logger = new Logger(KanbanColumnIdMigration.name);
+// 1. Load biến môi trường
+dotenv.config();
 
-  constructor(
-    @InjectModel(EmailMetadata.name)
-    private emailMetadataModel: Model<EmailMetadataDocument>,
-  ) {}
-
-  /**
-   * Migration: Convert from cachedColumnId to kanbanColumnId
-   * 
-   * OLD: cachedColumnId (derived from labelIds)
-   * NEW: kanbanColumnId (primary source of truth)
-   */
-  async migrate(): Promise<void> {
-    this.logger.log('🔄 Starting KanbanColumnId migration...');
-
-    try {
-      // Step 1: Find all documents with cachedColumnId (using raw query)
-      const documents = await this.emailMetadataModel.find({
-        $or: [
-          { cachedColumnId: { $exists: true, $ne: null } },
-          { cachedColumnId: { $exists: true, $ne: '' } }
-        ]
-      }).lean(); // Use lean() to get plain objects
-
-      this.logger.log(`📊 Found ${documents.length} documents to migrate`);
-
-      // Step 2: Update each document
-      for (const doc of documents as any[]) {
-        await this.emailMetadataModel.updateOne(
-          { _id: doc._id },
-          {
-            $set: {
-              kanbanColumnId: doc.cachedColumnId, // Migrate cachedColumnId to kanbanColumnId
-            },
-            $unset: {
-              cachedColumnId: 1 // Remove old field
-            }
-          }
-        );
-      }
-
-      this.logger.log(`✅ Successfully migrated ${documents.length} documents`);
-
-      // Step 3: Handle documents without kanbanColumnId (default to inbox)
-      const uncategorizedDocs = await this.emailMetadataModel.find({
-        kanbanColumnId: { $exists: false }
-      }).lean();
-
-      this.logger.log(`📊 Found ${uncategorizedDocs.length} uncategorized documents`);
-
-      for (const doc of uncategorizedDocs as any[]) {
-        await this.emailMetadataModel.updateOne(
-          { _id: doc._id },
-          {
-            $set: {
-              kanbanColumnId: 'inbox' // Default to inbox
-            }
-          }
-        );
-      }
-
-      this.logger.log(`✅ Successfully set default column for ${uncategorizedDocs.length} documents`);
-      this.logger.log('🎉 KanbanColumnId migration completed successfully!');
-
-    } catch (error) {
-      this.logger.error('❌ Migration failed:', error);
-      throw error;
-    }
+async function runMigration() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    console.error('❌ MONGODB_URI is missing in .env file');
+    process.exit(1);
   }
 
-  /**
-   * Rollback: Convert kanbanColumnId back to cachedColumnId
-   */
-  async rollback(): Promise<void> {
-    this.logger.log('🔄 Starting rollback...');
+  console.log('🔌 Connecting to MongoDB...');
+  
+  try {
+    // 2. Kết nối trực tiếp
+    await mongoose.connect(uri);
+    console.log('✅ Connected.');
 
-    try {
-      const documents = await this.emailMetadataModel.find({
-        kanbanColumnId: { $exists: true }
-      }).lean();
+    // 3. Lấy collection trực tiếp (Không cần Schema/Model của NestJS)
+    // ⚠️ LƯU Ý: Mongoose thường đặt tên collection là tên class viết thường + 's'
+    // Ví dụ: EmailMetadata -> emailmetadatas
+    // Hãy kiểm tra trong DB của bạn xem tên chính xác là gì.
+    const collectionName = 'emailmetadatas'; 
+    const collection = mongoose.connection.collection(collectionName);
 
-      for (const doc of documents as any[]) {
-        await this.emailMetadataModel.updateOne(
-          { _id: doc._id },
-          {
-            $set: {
-              cachedColumnId: doc.kanbanColumnId,
-            },
-            $unset: {
-              kanbanColumnId: 1
-            }
-          }
-        );
-      }
+    // =========================================================
+    // STEP 1: RENAME FIELD (cachedColumnId -> kanbanColumnId)
+    // =========================================================
+    console.log('🚀 Step 1: Renaming cachedColumnId -> kanbanColumnId...');
+    
+    // Sử dụng $rename của MongoDB (Nhanh hơn updateMany + set/unset)
+    const renameResult = await collection.updateMany(
+      { cachedColumnId: { $exists: true } }, // Chỉ rename những thằng có field cũ
+      { $rename: { 'cachedColumnId': 'kanbanColumnId' } }
+    );
 
-      this.logger.log(`✅ Rollback completed for ${documents.length} documents`);
+    console.log(`   👉 Renamed ${renameResult.modifiedCount} documents.`);
 
-    } catch (error) {
-      this.logger.error('❌ Rollback failed:', error);
-      throw error;
-    }
+    // =========================================================
+    // STEP 2: SET DEFAULT VALUE ('inbox')
+    // =========================================================
+    console.log("🚀 Step 2: Setting default 'inbox' for missing fields...");
+
+    const defaultResult = await collection.updateMany(
+      {
+        $or: [
+          { kanbanColumnId: { $exists: false } },
+          { kanbanColumnId: null },
+          { kanbanColumnId: '' }
+        ]
+      },
+      { $set: { kanbanColumnId: 'inbox' } }
+    );
+
+    console.log(`   👉 Updated ${defaultResult.modifiedCount} documents to 'inbox'.`);
+    
+    console.log('🎉 Migration completed successfully!');
+
+  } catch (error) {
+    console.error('❌ Migration failed:', error);
+  } finally {
+    // 4. Đóng kết nối
+    await mongoose.disconnect();
+    console.log('👋 Disconnected.');
+    process.exit(0);
   }
 }
+
+runMigration();

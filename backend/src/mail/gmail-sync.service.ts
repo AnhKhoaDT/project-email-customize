@@ -38,6 +38,8 @@ export interface SyncResult {
 @Injectable()
 export class GmailSyncService {
   private readonly logger = new Logger(GmailSyncService.name);
+  // Track in-flight syncs per user to prevent concurrent duplicate full-syncs
+  private ongoingSyncs: Map<string, Promise<SyncResult>> = new Map();
 
   constructor(
     @InjectModel(EmailMetadata.name) private emailMetadataModel: Model<EmailMetadata>,
@@ -53,65 +55,80 @@ export class GmailSyncService {
    */
   async syncEmails(options: SyncOptions): Promise<SyncResult> {
     const { userId, limit = 100, forceResync = false } = options;
-    
-    this.logger.log(`🔄 Starting Gmail sync for user ${userId} (limit: ${limit})`);
 
-    const result: SyncResult = {
-      totalFetched: 0,
-      newEmails: 0,
-      updatedEmails: 0,
-      failedEmails: 0,
-      errors: [],
-    };
-
-    try {
-      // STEP 1: Fetch ALL emails from Gmail (excluding trash, spam, drafts, sent)
-      this.logger.log(`📥 Fetching all emails from Gmail`);
-      const gmailData = await this.gmailService.listAllEmails(userId, limit);
-      
-      if (!gmailData?.messages || gmailData.messages.length === 0) {
-        this.logger.log(`📭 No emails found`);
-        return result;
-      }
-
-      result.totalFetched = gmailData.messages.length;
-      this.logger.log(`📬 Fetched ${result.totalFetched} emails from Gmail`);
-
-      // STEP 2: Process each email
-      const emailIds = gmailData.messages.map(msg => msg.id).filter(Boolean);
-      
-      for (const emailId of emailIds) {
-        try {
-          const syncResult = await this.processSingleEmail(userId, emailId, forceResync);
-          
-          if (syncResult.isNew) {
-            result.newEmails++;
-          } else if (syncResult.isUpdated) {
-            result.updatedEmails++;
-          }
-
-          // STEP 4: Queue for auto-indexing (always queue for new emails)
-          if (syncResult.isNew || syncResult.shouldReindex) {
-            await this.autoIndexingService.queueEmail(userId, emailId, 'normal');
-          }
-
-        } catch (err) {
-          result.failedEmails++;
-          const errorMsg = `Failed to process email ${emailId}: ${err.message}`;
-          result.errors.push(errorMsg);
-          this.logger.error(errorMsg);
-        }
-      }
-
-      this.logger.log(`✅ Gmail sync completed: ${result.newEmails} new, ${result.updatedEmails} updated, ${result.failedEmails} failed`);
-
-    } catch (err) {
-      const errorMsg = `Gmail sync failed: ${err.message}`;
-      result.errors.push(errorMsg);
-      this.logger.error(errorMsg);
+    // If a sync for this user is already running, return the existing promise
+    if (this.ongoingSyncs.has(userId)) {
+      this.logger.debug(`🔁 Sync already in progress for user ${userId}, reusing existing operation`);
+      return this.ongoingSyncs.get(userId) as Promise<SyncResult>;
     }
 
-    return result;
+    this.logger.log(`🔄 Starting Gmail sync for user ${userId} (limit: ${limit})`);
+
+    const syncPromise = (async (): Promise<SyncResult> => {
+      const result: SyncResult = {
+        totalFetched: 0,
+        newEmails: 0,
+        updatedEmails: 0,
+        failedEmails: 0,
+        errors: [],
+      };
+
+      try {
+        // STEP 1: Fetch ALL emails from Gmail (excluding trash, spam, drafts, sent)
+        this.logger.log(`📥 Fetching all emails from Gmail`);
+        const gmailData = await this.gmailService.listAllEmails(userId, limit);
+
+        if (!gmailData?.messages || gmailData.messages.length === 0) {
+          this.logger.log(`📭 No emails found`);
+          return result;
+        }
+
+        result.totalFetched = gmailData.messages.length;
+        this.logger.log(`📬 Fetched ${result.totalFetched} emails from Gmail`);
+
+        // STEP 2: Process each email
+        const emailIds = gmailData.messages.map(msg => msg.id).filter(Boolean);
+
+        for (const emailId of emailIds) {
+          try {
+            const syncResult = await this.processSingleEmail(userId, emailId, forceResync);
+
+            if (syncResult.isNew) {
+              result.newEmails++;
+            } else if (syncResult.isUpdated) {
+              result.updatedEmails++;
+            }
+
+            // STEP 4: Queue for auto-indexing (always queue for new emails)
+            if (syncResult.isNew || syncResult.shouldReindex) {
+              await this.autoIndexingService.queueEmail(userId, emailId, 'normal');
+            }
+
+          } catch (err) {
+            result.failedEmails++;
+            const errorMsg = `Failed to process email ${emailId}: ${err.message}`;
+            result.errors.push(errorMsg);
+            this.logger.error(errorMsg);
+          }
+        }
+
+        this.logger.log(`✅ Gmail sync completed: ${result.newEmails} new, ${result.updatedEmails} updated, ${result.failedEmails} failed`);
+
+        return result;
+
+      } catch (err) {
+        const errorMsg = `Gmail sync failed: ${err.message}`;
+        result.errors.push(errorMsg);
+        this.logger.error(errorMsg);
+        return result;
+      } finally {
+        // cleanup
+        this.ongoingSyncs.delete(userId);
+      }
+    })();
+
+    this.ongoingSyncs.set(userId, syncPromise);
+    return syncPromise;
   }
 
   /**
@@ -138,12 +155,13 @@ export class GmailSyncService {
     }
 
     // STEP 3: Determine initial kanban column
-    const kanbanColumnId = this.determineInitialKanbanColumn(emailData);
+    const kanbanColumnId = "inbox"
 
     // Prepare metadata object
     const metadata = {
       userId,
       emailId,
+      threadId: emailData.threadId || emailId,
       kanbanColumnId,
       cachedColumnName: this.getColumnName(kanbanColumnId),
       kanbanUpdatedAt: new Date(),
@@ -158,30 +176,41 @@ export class GmailSyncService {
     };
 
     if (existing) {
-      // Update existing record
-      await this.emailMetadataModel.updateOne(
-        { userId, emailId },
-        { 
-          ...metadata,
-          kanbanUpdatedAt: new Date(), // Always update timestamp
-        }
-      );
-      
-      this.logger.debug(`📝 Updated existing email: ${emailId}`);
-      return { 
-        isNew: false, 
-        isUpdated: true, 
-        shouldReindex: forceResync // Only reindex if forced
+      // Update existing record - use findOneAndUpdate to get explicit result
+      try {
+        const updated = await this.emailMetadataModel.findOneAndUpdate(
+          { userId, emailId },
+          {
+            ...metadata,
+            kanbanUpdatedAt: new Date(), // Always update timestamp
+          },
+          { new: true }
+        ).lean();
+
+      } catch (dbErr) {
+        this.logger.error(`❌ Failed to update email ${emailId}: ${dbErr?.message || dbErr}`);
+        throw dbErr;
+      }
+
+      return {
+        isNew: false,
+        isUpdated: true,
+        shouldReindex: forceResync, // Only reindex if forced
       };
     } else {
       // Create new record
-      await this.emailMetadataModel.create(metadata);
-      
-      this.logger.debug(`📝 Created new email: ${emailId}`);
-      return { 
-        isNew: true, 
-        isUpdated: false, 
-        shouldReindex: true // Always index new emails
+      try {
+        const created = await this.emailMetadataModel.create(metadata);
+        this.logger.debug(`📝 Created new email: ${emailId} (id: ${created._id})`);
+      } catch (dbErr) {
+        this.logger.error(`❌ Failed to create email ${emailId}: ${dbErr?.message || dbErr}`);
+        throw dbErr;
+      }
+
+      return {
+        isNew: true,
+        isUpdated: false,
+        shouldReindex: true, // Always index new emails
       };
     }
   }
@@ -189,25 +218,25 @@ export class GmailSyncService {
   /**
    * Determine initial kanban column based on Gmail labels
    */
-  private determineInitialKanbanColumn(emailData: any): string {
-    const labelIds = emailData.labelIds || [];
+  // private determineInitialKanbanColumn(emailData: any): string {
+  //   const labelIds = emailData.labelIds || [];
 
-    // Priority order: STARRED > IMPORTANT > INBOX
-    if (labelIds.includes('STARRED')) {
-      return 'todo'; // Map STARRED to To Do column
-    }
+  //   // Priority order: STARRED > IMPORTANT > INBOX
+  //   if (labelIds.includes('STARRED')) {
+  //     return 'todo'; // Map STARRED to To Do column
+  //   }
     
-    if (labelIds.includes('IMPORTANT')) {
-      return 'in_progress'; // Map IMPORTANT to In Progress column
-    }
+  //   if (labelIds.includes('IMPORTANT')) {
+  //     return 'in_progress'; // Map IMPORTANT to In Progress column
+  //   }
     
-    if (labelIds.includes('INBOX')) {
-      return 'inbox'; // Default to inbox
-    }
+  //   if (labelIds.includes('INBOX')) {
+  //     return 'inbox'; // Default to inbox
+  //   }
 
-    // Fallback for emails without system labels
-    return 'inbox';
-  }
+  //   // Fallback for emails without system labels
+  //   return 'inbox';
+  // }
 
   /**
    * Get human-readable column name
@@ -224,7 +253,7 @@ export class GmailSyncService {
   }
 
   /**
-   * Sync all emails for a user (using listAllEmails which already excludes spam/trash)
+   * Sync all emails for a user (using listAllEmails which already excludes spam/trash/draft/sent)
    */
   async syncAllLabels(userId: string, limit = 150): Promise<SyncResult> {
     this.logger.log(`🔄 Starting full sync for user ${userId} (limit: ${limit})`);

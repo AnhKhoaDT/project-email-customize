@@ -35,16 +35,152 @@ export class EmailMetadataService {
     );
   }
 
+  /**
+   * Move an email into a column at a specific position, adjusting
+   * positions of other emails in source and destination columns.
+   */
+  async moveEmailWithPosition(
+    userId: string,
+    emailId: string,
+    toColumnId: string,
+    destinationIndex?: number,
+    columnName?: string,
+  ) {
+    // Implementation using double/float positions with neighbor averaging.
+    // 1) Load destination items (lean for performance)
+    // 2) If moving within same column, remove the moved item from list
+    // 3) Normalize destinationIndex to [0, destItems.length]
+    // 4) Compute prev/next and calculate new position; reindex if gap too small
+    // 5) Persist with findOneAndUpdate
+
+    // run moveEmailWithPosition (quiet)
+    // Load current metadata for this email (lean)
+    const meta = await this.emailMetadataModel.findOne({ userId, emailId }).lean().exec();
+    const fromColumnId = meta?.kanbanColumnId || null;
+
+    // 1. Load destination items sorted ascending by position
+    let destItems: any[] = await this.emailMetadataModel
+      .find({ userId, kanbanColumnId: toColumnId })
+      .sort({ position: 1 })
+      .lean()
+      .exec();
+
+    // 2. If moving within same column, remove the moving item
+    if (fromColumnId === toColumnId) {
+      destItems = destItems.filter(d => d.emailId !== emailId);
+    }
+
+    // 3. Normalize destinationIndex
+    if (typeof destinationIndex !== 'number' || destinationIndex > destItems.length) {
+      destinationIndex = destItems.length;
+    }
+    if (destinationIndex < 0) {
+      destinationIndex = 0;
+    }
+
+    // 4. Neighbors
+    const prev = destinationIndex > 0 ? destItems[destinationIndex - 1] : null;
+    const next = destItems[destinationIndex] || null;
+
+    const MIN_GAP = 0.00001; // minimal gap resolution for floating positions
+
+    const calculatePos = (pPrev: number | null, pNext: number | null): number => {
+      if (pPrev === null && pNext === null) return 60000;
+      if (pPrev === null) return (pNext as number) / 2;
+      if (pNext === null) return (pPrev as number) + 60000;
+      return ((pPrev as number) + (pNext as number)) / 2;
+    };
+
+    let newPosition: number;
+    let finalPrev: number | null = prev ? Number(prev.position) : null;
+    let finalNext: number | null = next ? Number(next.position) : null;
+
+    if (finalPrev !== null && finalNext !== null && (finalNext - finalPrev) < MIN_GAP) {
+      // Gap too small -> reindex column, then recompute
+      const warnMsg = `Gap too small in column ${toColumnId}. Reindexing positions...`;
+      logger.warn(warnMsg);
+      console.warn(warnMsg);
+      await this.reindexColumnPositions(userId, toColumnId);
+
+      // Reload items and recompute neighbors
+      let refreshed = await this.emailMetadataModel
+        .find({ userId, kanbanColumnId: toColumnId })
+        .sort({ position: 1 })
+        .lean()
+        .exec();
+
+      if (fromColumnId === toColumnId) {
+        refreshed = refreshed.filter(d => d.emailId !== emailId);
+      }
+
+      const rPrev = destinationIndex > 0 ? refreshed[destinationIndex - 1] : null;
+      const rNext = refreshed[destinationIndex] || null;
+
+      finalPrev = rPrev ? Number(rPrev.position) : null;
+      finalNext = rNext ? Number(rNext.position) : null;
+      newPosition = calculatePos(finalPrev, finalNext);
+    } else {
+      newPosition = calculatePos(finalPrev, finalNext);
+    }
+
+    // 5. Persist update. Only set previousColumnId when column actually changes.
+    const updateObj: any = {
+      kanbanColumnId: toColumnId,
+      position: newPosition,
+      kanbanUpdatedAt: new Date(),
+    };
+    if (fromColumnId && fromColumnId !== toColumnId) {
+      updateObj.previousColumnId = fromColumnId;
+    }
+
+    return this.emailMetadataModel.findOneAndUpdate(
+      { userId, emailId },
+      { $set: updateObj },
+      { upsert: true, new: true }
+    ).exec();
+  }
+
   async getKanbanColumn(userId: string, emailId: string) {
     const metadata = await this.emailMetadataModel.findOne({ userId, emailId });
     return metadata?.kanbanColumnId;
   }
 
   async getEmailsByKanbanColumn(userId: string, kanbanColumnId: string, limit: number = 50) {
+    // Return items ordered by `position` (ascending). Fallback to kanbanUpdatedAt
     return this.emailMetadataModel
       .find({ userId, kanbanColumnId })
-      .sort({ kanbanUpdatedAt: -1 })
+      .sort({ position: 1, kanbanUpdatedAt: -1 })
       .limit(limit);
+  }
+
+  /**
+   * Reindex column positions with a large gap to make room for inserts.
+   * Assigns positions: 0, gap, 2*gap, ...
+   */
+  async reindexColumnPositions(userId: string, columnId: string, gap: number = 60000) { // 1. Tăng gap mặc định lên 60000
+    const docs = await this.emailMetadataModel
+      .find({ userId, kanbanColumnId: columnId })
+      .sort({ position: 1, kanbanUpdatedAt: -1 }) // Giữ nguyên thứ tự hiện tại
+      .select('_id') // 2. Chỉ lấy _id để tối ưu băng thông (quan trọng khi list dài)
+      .exec();
+
+    if (!docs || docs.length === 0) return true;
+
+    const ops = docs.map((doc: any, idx: number) => ({
+      updateOne: {
+        filter: { _id: doc._id },
+        update: {
+          // 3. QUAN TRỌNG: (idx + 1) để tránh giá trị 0
+          $set: { position: (idx + 1) * gap }
+        }
+      }
+    }));
+
+    if (ops.length > 0) {
+      await this.emailMetadataModel.bulkWrite(ops);
+    }
+
+    return true;
   }
 
   async getMetadataMap(userId: string): Promise<Map<string, EmailMetadata>> {
@@ -89,6 +225,7 @@ export class EmailMetadataService {
     userId: string;
     emailId: string;
     cachedColumnId?: string;
+    threadId?: string;
     subject?: string;
     from?: string;
     snippet?: string;
@@ -132,15 +269,15 @@ export class EmailMetadataService {
   async getAllEmails(userId: string, limit: number = 300) {
     // System labels to exclude
     const EXCLUDED_LABELS = ['TRASH', 'SPAM', 'DRAFT', 'SENT'];
-    
+
     return this.emailMetadataModel
       .find({
         userId,
         // Exclude emails that have any of the excluded labels
-        labelIds: { 
-          $not: { 
-            $elemMatch: { $in: EXCLUDED_LABELS } 
-          } 
+        labelIds: {
+          $not: {
+            $elemMatch: { $in: EXCLUDED_LABELS }
+          }
         }
       })
       .sort({ receivedDate: -1 })  // Sort by date, newest first

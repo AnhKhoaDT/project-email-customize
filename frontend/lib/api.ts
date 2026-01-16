@@ -278,7 +278,7 @@ export const fetchKanbanColumnEmails = async (
 };
 
 /**
- * Fetch inbox emails from Gmail
+ * Fetch inbox emails from Database
  */
 export const fetchInboxEmails = async (limit: number = 50) => {
   const response = await api.get(`/mailboxes/inbox/kanban-emails`, {
@@ -313,12 +313,14 @@ export const fetchSnoozedEmails = async () => {
 export const moveEmail = async (
   emailId: string,
   fromColumnId: string,
-  toColumnId: string
+  toColumnId: string,
+  destinationIndex?: number
 ) => {
   const response = await api.post('/kanban/move', {
     emailId,
     fromColumnId,
     toColumnId,
+    destinationIndex,
     optimistic: true
   });
   return response.data;

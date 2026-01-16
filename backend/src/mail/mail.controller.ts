@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { GmailService } from './gmail.service';
@@ -36,6 +36,7 @@ function readJSON(p: string) {
 
 @Controller()
 export class MailController {
+  private readonly logger = new Logger('MailController');
   private dataDir = path.join(__dirname, 'data');
 
   // Rate limiting: Track summarize requests per user
@@ -192,7 +193,7 @@ export class MailController {
         return res;
       } catch (gmailError) {
         // Fallback to MongoDB seed data if Gmail fails (no token, etc.)
-        console.log(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
+        this.logger.warn(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
 
         // Get emails from MongoDB (exclude system labels)
         const dbEmails = await this.emailMetadataService.getAllEmails(req.user.id, pageSize);
@@ -246,7 +247,7 @@ export class MailController {
         return res;
       } catch (gmailError) {
         // Fallback to MongoDB seed data if Gmail fails (no token, etc.)
-        console.log(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
+        this.logger.warn(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
 
         // Get emails from MongoDB by label
         const dbEmails = await this.emailMetadataService.getEmailsByLabel(req.user.id, id, pageSize);

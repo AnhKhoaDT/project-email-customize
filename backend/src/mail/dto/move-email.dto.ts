@@ -20,6 +20,9 @@ export class MoveEmailDto {
   @IsOptional()
   @IsBoolean()
   optimistic?: boolean; // Default true: Update DB first, sync later
+
+  @IsOptional()
+  destinationIndex?: number; // Optional index within destination column for ordering
 }
 
 /**

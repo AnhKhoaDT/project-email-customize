@@ -53,6 +53,13 @@ export class EmailMetadata {
   kanbanUpdatedAt?: Date;
 
   /**
+   * Position inside the kanban column to preserve user ordering
+   * Lower numbers mean higher on the column (index 0 = top)
+   */
+  @Prop({ type: Number })
+  position?: number;
+
+  /**
    * Column trước đó - Dùng cho undo operation
    */
   @Prop()
@@ -109,6 +116,9 @@ export class EmailMetadata {
   from?: string;
 
   @Prop()
+  threadId?: string;
+
+  @Prop()
   snippet?: string; // Preview text
 
   @Prop()
@@ -149,8 +159,14 @@ EmailMetadataSchema.index({ userId: 1, summary: 1 });
 // Compound index cho Kanban queries by kanbanColumnId (NEW PRIMARY)
 EmailMetadataSchema.index({ userId: 1, kanbanColumnId: 1 });
 
+// Index to support ordering queries within a column
+EmailMetadataSchema.index({ userId: 1, kanbanColumnId: 1, position: 1 });
+
 // Index cho label-based queries (SYNCED DATA)
 EmailMetadataSchema.index({ userId: 1, labelIds: 1 });
+
+// Index for thread lookup
+EmailMetadataSchema.index({ userId: 1, threadId: 1 });
 
 // Index cho pending sync operations
 EmailMetadataSchema.index({ 'syncStatus.state': 1, 'syncStatus.retryCount': 1 });

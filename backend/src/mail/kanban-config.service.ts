@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -7,6 +7,8 @@ import { GmailService } from './gmail.service';
 import { EmailMetadataService } from './email-metadata.service';
 import { MoveEmailDto, EmailMovedEvent } from './dto/move-email.dto';
 import { EmailMetadata } from './schemas/email-metadata.schema';
+
+const logger = new Logger('KanbanConfigService');
 
 /**
  * Kanban Configuration Service - Week 4 Feature III
@@ -36,20 +38,15 @@ export class KanbanConfigService {
    */
   async getConfig(userId: string): Promise<any> {
     try {
-      console.log(`🔍 Getting Kanban config for user: ${userId}`);
-      
+      logger.debug(`Getting Kanban config for user: ${userId}`);
+
       let config = await this.kanbanConfigModel.findOne({ userId });
-      
+
       if (!config) {
-        console.log('📝 No config found, creating default config...');
+        logger.debug('No config found, creating default config...');
         config = await this.createDefaultConfig(userId);
       } else {
-        console.log('📋 Found existing config with columns:', config.columns.map(c => ({
-          id: c.id,
-          name: c.name,
-          gmailLabel: c.gmailLabel,
-          order: c.order
-        })));
+        logger.debug(`Found existing config for user ${userId} (${config.columns.length} columns)`);
       }
 
       // Validate for duplicate Gmail labels
@@ -72,7 +69,7 @@ export class KanbanConfigService {
    * ⚠️ WARNING: Default columns use system labels (STARRED, IMPORTANT)
    * User-created columns should NOT reuse these labels to avoid conflicts
    */
-  
+
   private async createDefaultConfig(userId: string): Promise<any> {
     const defaultColumns: KanbanColumn[] = [
       {
@@ -107,11 +104,7 @@ export class KanbanConfigService {
       },
     ];
 
-    console.log('🏗️ Creating default Kanban config with columns:', defaultColumns.map(c => ({
-      id: c.id,
-      name: c.name,
-      gmailLabel: c.gmailLabel
-    })));
+    logger.debug('Creating default Kanban config');
 
     const config = await this.kanbanConfigModel.create({
       userId,
@@ -121,7 +114,7 @@ export class KanbanConfigService {
       lastModified: new Date(),
     });
 
-    console.log('✅ Default Kanban config created successfully for user:', userId);
+    logger.debug(`Default Kanban config created for user: ${userId}`);
     return config.toObject();
   }
 
@@ -165,14 +158,10 @@ export class KanbanConfigService {
 
       // If createNewLabel is true, create the label on Gmail first
       if (columnData.createNewLabel && finalGmailLabel) {
-        console.log(`🏷️ Creating new Gmail label: "${finalGmailLabel}" for user ${userId}`);
+        logger.debug(`Creating new Gmail label: "${finalGmailLabel}" for user ${userId}`);
         try {
           const labelCreated = await this.gmailService.createLabel(userId, finalGmailLabel);
-          console.log(`✅ Gmail label created successfully:`, {
-            name: labelCreated.name,
-            id: labelCreated.id,
-            visibility: labelCreated.labelListVisibility
-          });
+          logger.debug(`Gmail label created: id=${labelCreated.id} name=${labelCreated.name}`);
 
           // IMPORTANT: Use label ID instead of name for Gmail operations
           finalGmailLabel = labelCreated.id;
@@ -180,7 +169,7 @@ export class KanbanConfigService {
           console.error(`❌ Error creating Gmail label "${finalGmailLabel}":`, err);
           // If label already exists, Gmail API returns 409, which is fine
           if (err?.response?.status === 409 || err?.code === 409) {
-            console.log(`ℹ️ Gmail label "${finalGmailLabel}" already exists - getting existing label ID`);
+            logger.debug(`Gmail label "${finalGmailLabel}" already exists - getting existing label ID`);
             // Get existing label ID
             try {
               const allLabels = await this.gmailService.listLabels(userId);
@@ -189,7 +178,7 @@ export class KanbanConfigService {
               );
               if (existingLabel) {
                 finalGmailLabel = existingLabel.id;
-                console.log(`🔗 Using existing label ID: ${finalGmailLabel}`);
+                logger.debug(`Using existing label ID: ${finalGmailLabel}`);
               }
             } catch (listErr) {
               console.error('Failed to get existing label ID:', listErr);
@@ -200,7 +189,7 @@ export class KanbanConfigService {
           }
         }
       } else if (!columnData.createNewLabel && finalGmailLabel) {
-        console.log(`🔗 Mapping column to existing Gmail label: "${finalGmailLabel}"`);
+        logger.debug(`Mapping column to existing Gmail label: "${finalGmailLabel}"`);
 
         // IMPORTANT: Convert label name to label ID for existing labels
         // Gmail system labels have UPPERCASE IDs (IMPORTANT, STARRED, SENT, etc.)
@@ -220,13 +209,13 @@ export class KanbanConfigService {
             existingLabel = allLabels.find(label => label.id === systemLabelId);
 
             if (existingLabel) {
-              console.log(`🔍 Found system label by ID: ${systemLabelId}`);
+              logger.debug(`Found system label by ID: ${systemLabelId}`);
             }
           }
 
           if (existingLabel) {
             finalGmailLabel = existingLabel.id;
-            console.log(`🔗 Using existing label ID: ${finalGmailLabel} (name: "${existingLabel.name}")`);
+            logger.debug(`Using existing label ID: ${finalGmailLabel} (name: "${existingLabel.name}")`);
           } else {
             throw new Error(`Gmail label "${finalGmailLabel}" not found`);
           }
@@ -305,21 +294,21 @@ export class KanbanConfigService {
       let emails = [];
       if (finalGmailLabel && !columnData.createNewLabel) {
         try {
-          console.log(`📧 Fetching emails for new column "${columnData.name}" with existing label ID: ${finalGmailLabel}`);
+          logger.debug(`Fetching emails for new column "${columnData.name}" with label ${finalGmailLabel}`);
           const emailsResult = await this.gmailService.listMessagesInLabel(
             userId,
             finalGmailLabel,
             50 // Default limit
           );
           emails = emailsResult.messages || [];
-          console.log(`✅ Fetched ${emails.length} emails for new column`);
+          logger.debug(`Fetched ${emails.length} emails for new column`);
         } catch (err) {
           console.error(`⚠️ Failed to fetch emails for new column:`, err);
           // Don't fail column creation if email fetch fails
           // Emails will be loaded when user opens the column
         }
       } else if (columnData.createNewLabel) {
-        console.log(`ℹ️ Skipping email fetch - new label created, no emails to fetch yet`);
+        logger.debug('Skipping email fetch - new label created, no emails to fetch yet');
       }
 
       return {
@@ -618,7 +607,7 @@ export class KanbanConfigService {
     options: { limit?: number; sortBy?: string; filterUnread?: boolean; filterAttachment?: boolean } = {}
   ): Promise<any> {
     try {
-      console.log(`📬 getColumnEmails called - userId: ${userId}, columnId: ${columnId}`);
+      // Removed verbose entry log to reduce noise
 
       const config = await this.kanbanConfigModel.findOne({ userId });
 
@@ -634,11 +623,11 @@ export class KanbanConfigService {
         throw new Error('Column not found');
       }
 
-      console.log(`📋 Column found - name: "${column.name}", gmailLabel: "${column.gmailLabel}"`);
+      logger.debug(`Column found: ${column.name}`);
 
       // Primary: Fetch from EmailMetadata by kanbanColumnId
-      console.log(`💾 Fetching emails from EmailMetadata by kanbanColumnId: ${columnId}, limit: ${options.limit || 50}`);
-      
+      // Fetching emails from EmailMetadata (quiet)
+
       let dbEmails;
       if (columnId === 'inbox') {
         // Special handling for inbox: get emails that are not in other kanban columns
@@ -648,7 +637,7 @@ export class KanbanConfigService {
         dbEmails = await this.emailMetadataService.getEmailsByKanbanColumn(userId, columnId, options.limit || 50);
       }
 
-      console.log(`✅ Successfully fetched ${dbEmails.length} emails for column "${column.name}" from EmailMetadata`);
+      logger.debug(`Fetched ${dbEmails.length} emails for column "${column.name}"`);
 
       // Format to match Gmail API response
       let formattedEmails = dbEmails.map(email => ({
@@ -714,120 +703,121 @@ export class KanbanConfigService {
    * - cachedColumnId là derived data
    * - EventEmitter2 thay vì BullMQ (gọn nhẹ hơn)
    */
-  async moveEmail(userId: string, dto: MoveEmailDto): Promise<any> {
-    try {
-      // ============================================
-      // STEP 1: Validate & Load Config
-      // ============================================
-      const config = await this.kanbanConfigModel.findOne({ userId });
-      if (!config) {
-        throw new Error('Kanban configuration not found');
-      }
+async moveEmail(userId: string, dto: MoveEmailDto): Promise<any> {
+  try {
+    // ============================================
+    // STEP 1: Validate & Load Config
+    // ============================================
+    const config = await this.kanbanConfigModel.findOne({ userId });
+    if (!config) throw new Error('Kanban configuration not found');
 
-      const fromColumn = config.columns.find(c => c.id === dto.fromColumnId);
-      const toColumn = config.columns.find(c => c.id === dto.toColumnId);
+    const fromColumn = config.columns.find(c => c.id === dto.fromColumnId);
+    const toColumn = config.columns.find(c => c.id === dto.toColumnId);
 
-      if (!toColumn) {
-        throw new Error('Destination column not found');
-      }
+    // Lưu ý: toColumn BẮT BUỘC phải có (kể cả là Inbox thì trong DB cũng nên có config cho cột inbox)
+    // Nếu thiết kế của bạn 'inbox' không nằm trong config.columns thì cần handle riêng case này.
+    // Ở đây giả sử toColumn tìm thấy hoặc dto.toColumnId === 'inbox' được xử lý thủ công.
+    
+    if (!toColumn && dto.toColumnId !== 'inbox') {
+       throw new Error('Destination column not found');
+    }
 
-      // fromColumn có thể null nếu source là 'inbox'
-      if (!fromColumn && dto.fromColumnId !== 'inbox') {
-        throw new Error('Source column not found');
-      }
+    // ============================================
+    // STEP 2: Determine Gmail Label Operations
+    // ============================================
+    const labelsToAdd: string[] = [];
+    const labelsToRemove: string[] = [];
 
-      // ============================================
-      // STEP 2: Determine Gmail Label Operations
-      // ============================================
-      const labelsToAdd: string[] = [];
-      const labelsToRemove: string[] = [];
-
-      // 🔥 REFINEMENT: Logic phân biệt INBOX vs Custom Column
-      if (dto.fromColumnId === 'inbox') {
-        // Moving FROM Inbox: Remove INBOX label
+    // --- 1. XỬ LÝ CỘT ĐÍCH (TO) ---
+    if (dto.toColumnId === 'inbox') {
+      // ✅ FIX: Auto Archive -> Inbox: Phải thêm lại label INBOX
+      labelsToAdd.push('INBOX');
+    } else if (toColumn?.gmailLabel) {
+      // Treat display-only ARCHIVE label as archive action (remove INBOX)
+      if (toColumn.gmailLabel === 'ARCHIVE') {
+        // Do not send 'ARCHIVE' to Gmail; archive == remove INBOX
         labelsToRemove.push('INBOX');
-      } else if (fromColumn?.gmailLabel) {
-        // Moving FROM Custom Column: Remove old label
-        labelsToRemove.push(fromColumn.gmailLabel);
-      }
-
-      if (toColumn.gmailLabel) {
-        // Moving TO Column with label: Add label
+      } else {
+        // Các cột khác: Thêm label tương ứng
         labelsToAdd.push(toColumn.gmailLabel);
       }
+    }
 
-      // Special handling: Auto-archive
-      if (toColumn.autoArchive) {
-        labelsToRemove.push('INBOX');
-        // Gmail không có ARCHIVED label, chỉ cần remove INBOX
+    // --- 2. XỬ LÝ CỘT NGUỒN (FROM) ---
+    if (fromColumn?.gmailLabel) {
+      // ✅ FIX: Chỉ xoá label cũ nếu nó KHÔNG phải là INBOX
+      // (Để tránh việc kéo từ Inbox đi đâu cũng bị archive)
+      if (fromColumn.gmailLabel !== 'INBOX') {
+        labelsToRemove.push(fromColumn.gmailLabel);
       }
+    }
 
-      // Special handling: Remove INBOX label
-      if (toColumn.removeInboxLabel) {
+    // --- 3. XỬ LÝ AUTO ARCHIVE ---
+    // ✅ Logic này đúng: Chỉ xoá INBOX khi cột đích yêu cầu
+    if (toColumn?.autoArchive || toColumn?.removeInboxLabel) {
+      // Đảm bảo không xoá INBOX nếu vừa mới thêm nó vào (trường hợp config sai)
+      if (!labelsToAdd.includes('INBOX')) {
         labelsToRemove.push('INBOX');
       }
+    }
 
-      // Remove duplicates
-      const uniqueLabelsToAdd = [...new Set(labelsToAdd)];
-      const uniqueLabelsToRemove = [...new Set(labelsToRemove)];
+    const uniqueLabelsToAdd = [...new Set(labelsToAdd)];
+    // Loại bỏ những label vừa thêm vừa xoá (để tránh lỗi API)
+    const uniqueLabelsToRemove = [...new Set(labelsToRemove)].filter(l => !uniqueLabelsToAdd.includes(l));
 
-      // ============================================
-      // STEP 3: UPDATE KANBAN COLUMN ID (PRIMARY SOURCE OF TRUTH)
-      // ============================================
-      const currentMetadata = await this.emailMetadataModel.findOne({
-        userId,
-        emailId: dto.emailId,
-      });
+    // ============================================
+    // STEP 3: UPDATE KANBAN COLUMN ID (PRIMARY SOURCE)
+    // ============================================
+    // Persist kanban column and ordering (if provided)
+    await this.emailMetadataService.moveEmailWithPosition(
+      userId,
+      dto.emailId,
+      dto.toColumnId,
+      dto.destinationIndex,
+      toColumn?.name || 'Inbox'
+    );
 
-      // Update kanbanColumnId (PRIMARY) and derived fields
-      await this.emailMetadataService.updateKanbanColumn(
-        userId,
-        dto.emailId,
-        dto.toColumnId,
-        toColumn.name
-      );
-
-      // ============================================
-      // STEP 4: SYNC GMAIL LABELS (DERIVED FROM KANBAN)
-      // ============================================
+    // ============================================
+    // STEP 4: SYNC GMAIL LABELS (SAFE MODIFY)
+    // ============================================
+    // If the move is within the same column, skip Gmail label operations entirely
+    // to avoid unnecessary label churn. Only perform Gmail sync when column actually changes.
+    if (dto.fromColumnId !== dto.toColumnId) {
       try {
-        // Build Gmail modify action based on label changes
-        let gmailAction = '';
-        if (uniqueLabelsToAdd.length > 0 && uniqueLabelsToRemove.length === 0) {
-          gmailAction = `addLabels:${uniqueLabelsToAdd.join(',')}`;
-        } else if (uniqueLabelsToRemove.length > 0 && uniqueLabelsToAdd.length === 0) {
-          gmailAction = `removeLabels:${uniqueLabelsToRemove.join(',')}`;
-        } else if (uniqueLabelsToAdd.length > 0 && uniqueLabelsToRemove.length > 0) {
-          gmailAction = `setLabels:${uniqueLabelsToAdd.join(',')}`;
-        }
+        // ✅ Send structured add/remove lists to GmailService.modifyEmailLabels
+        if (uniqueLabelsToAdd.length > 0 || uniqueLabelsToRemove.length > 0) {
+          await this.gmailService.modifyEmailLabels(userId, dto.emailId, {
+            addLabelIds: uniqueLabelsToAdd,
+            removeLabelIds: uniqueLabelsToRemove
+          });
 
-        if (gmailAction) {
-          await this.gmailService.modifyMessage(userId, dto.emailId, gmailAction);
-          console.log(`✅ Gmail labels synced: ${gmailAction}`);
+          console.log(`✅ Gmail synced: +[${uniqueLabelsToAdd}] -[${uniqueLabelsToRemove}]`);
         }
       } catch (err) {
-        console.error(`Failed to sync Gmail labels: ${err.message}`);
-        // Don't throw - allow move to continue even if label sync fails
+        console.error(`⚠️ Gmail sync failed (Non-blocking): ${err.message}`);
       }
-
-      // ============================================
-      // STEP 5: RETURN IMMEDIATELY (OPTIMISTIC)
-      // ============================================
-      return {
-        status: 200,
-        message: 'Email moved successfully',
-        data: {
-          emailId: dto.emailId,
-          fromColumnId: dto.fromColumnId,
-          toColumnId: dto.toColumnId,
-          toColumnName: toColumn.name,
-          kanbanColumnId: dto.toColumnId, // PRIMARY
-        },
-      };
-    } catch (err) {
-      throw new Error(`Failed to move email: ${err.message}`);
+    } else {
+      console.log('ℹ️ Move within same column detected - skipping Gmail label sync');
     }
+
+    // ============================================
+    // STEP 5: RETURN
+    // ============================================
+    return {
+      status: 200,
+      message: 'Email moved successfully',
+      data: {
+        emailId: dto.emailId,
+        fromColumnId: dto.fromColumnId,
+        toColumnId: dto.toColumnId,
+        toColumnName: toColumn?.name || 'Inbox',
+        kanbanColumnId: dto.toColumnId,
+      },
+    };
+  } catch (err) {
+    throw new Error(`Failed to move email: ${err.message}`);
   }
+}
 
   /**
    * Helper: Check if error is Gmail label not found
@@ -993,19 +983,12 @@ export class KanbanConfigService {
     options: { limit?: number; sortBy?: string; filterUnread?: boolean; filterAttachment?: boolean } = {}
   ): Promise<any> {
     try {
-      console.log(`📬 getKanbanEmails called - userId: ${userId}, kanbanColumnId: ${kanbanColumnId}`);
-
-      // OPTIMIZED: Query directly from EmailMetadata using kanbanColumnId
-      console.log(`💾 Fetching emails directly from EmailMetadata for column: ${kanbanColumnId}`);
-      
       // Step 1: Get emails directly from metadata by kanbanColumnId
       const metadataEmails = await this.emailMetadataService.getEmailsByKanbanColumn(
-        userId, 
-        kanbanColumnId, 
+        userId,
+        kanbanColumnId,
         options.limit || 50
       );
-      
-      console.log(`✅ Found ${metadataEmails.length} emails in metadata for column "${kanbanColumnId}"`);
 
       // Step 2: Fetch full Gmail data only for these specific emails
       if (metadataEmails.length === 0) {
@@ -1022,7 +1005,7 @@ export class KanbanConfigService {
 
       // Get Gmail message IDs to fetch
       const emailIds = metadataEmails.map(email => email.emailId);
-      console.log(`📧 Fetching Gmail data for ${emailIds.length} specific emails`);
+      logger.debug(`Fetching Gmail data for ${emailIds.length} specific emails`);
 
       // Fetch full Gmail data for these emails
       const gmailMessages = await Promise.all(
@@ -1032,6 +1015,20 @@ export class KanbanConfigService {
             return message;
           } catch (err) {
             console.warn(`Failed to fetch Gmail message ${emailId}:`, err);
+            // Fallback: construct a minimal message from metadata so UI still shows the email
+            const meta = metadataEmails.find(m => m.emailId === emailId);
+            if (meta) {
+              return {
+                id: meta.emailId,
+                threadId: meta.threadId || meta.emailId,
+                from: meta.from || 'Unknown',
+                subject: meta.subject || '(No Subject)',
+                snippet: meta.snippet || '',
+                labelIds: meta.labelIds || [],
+                // Indicate this is a fallback object (helps frontend if needed)
+                __fallbackFromMetadata: true,
+              } as any;
+            }
             return null;
           }
         })
@@ -1042,7 +1039,7 @@ export class KanbanConfigService {
         .filter(msg => msg !== null)
         .map(message => {
           const metadata = metadataEmails.find(meta => meta.emailId === message.id);
-          
+
           return {
             ...message,  // Gmail data (id, from, subject, etc.)
             kanbanColumnId: metadata?.kanbanColumnId || kanbanColumnId,  // PRIMARY - User's decision
@@ -1059,7 +1056,7 @@ export class KanbanConfigService {
           };
         });
 
-      console.log(`📊 Merged ${mergedEmails.length} emails with metadata`);
+      logger.debug(`Merged ${mergedEmails.length} emails with metadata`);
 
       // Step 3: Apply filters
       let filteredEmails = mergedEmails;

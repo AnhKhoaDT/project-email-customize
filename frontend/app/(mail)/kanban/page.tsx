@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import KanbanColumn from "@/components/ui/KanbanColumn"; // Đảm bảo đường dẫn đúng
 import RecoverLabelModal from "@/components/ui/RecoverLabelModal";
-import MailContent from "@/components/ui/MailContent"; // Import MailContent
 import {
   DragDropContext,
   Droppable, // Cần import Droppable nếu muốn kéo thả CỘT (Level 2)
@@ -105,7 +104,7 @@ const formatDate = (dateStr: string) => {
   }
 };
 
-// --- COMPONENT: MAIL READING MODAL (Using MailContent) ---
+// --- COMPONENT: MAIL READING MODAL (User Provided Logic) ---
 const MailReadingModal = ({
   isOpen,
   mail,
@@ -115,94 +114,267 @@ const MailReadingModal = ({
   mail: KanbanEmail | null;
   onClose: () => void;
 }) => {
-  const [emailDetail, setEmailDetail] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isReplying, setIsReplying] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Fetch email detail when modal opens
+  // Reset state when mail changes
   useEffect(() => {
-    if (!isOpen || !mail) {
-      setEmailDetail(null);
-      return;
+    setIsReplying(false);
+    setReplyBody("");
+  }, [mail]);
+
+  useEffect(() => {
+    if (isReplying && replyTextareaRef.current) {
+      replyTextareaRef.current.focus();
+      replyTextareaRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
     }
-
-    const fetchEmailDetail = async () => {
-      setIsLoading(true);
-      try {
-        const token = typeof window !== "undefined" ? window.__accessToken : null;
-        if (!token) return;
-        
-        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-        const response = await fetch(`${apiURL}/emails/${mail.id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        if (!response.ok) throw new Error("Failed to fetch email detail");
-        const data = await response.json();
-        setEmailDetail(data);
-      } catch (err) {
-        console.error("Error fetching email detail:", err);
-        // Fallback to using the original mail data if API fails
-        setEmailDetail(mail);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchEmailDetail();
-  }, [isOpen, mail]);
+  }, [isReplying]);
 
   if (!isOpen) return null;
+
+  // Render Placeholder if no mail
   if (!mail) return null;
 
-  // Show loading state
-  if (isLoading) {
-    return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-        <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const senderName = getSenderName(mail.from);
+  const senderEmail = getSenderEmail(mail.from);
 
-  // Use fetched email detail or fallback to original mail data
-  const emailData = emailDetail || mail;
+  const handleReplyClick = () => {
+    setIsReplying(true);
+  };
 
-  // Transform KanbanEmail to EmailData format expected by MailContent
-  const transformedEmailData = {
-    ...emailData,
-    cc: emailData.cc || '',
-    bcc: emailData.bcc || '',
-    messageId: emailData.messageId || '',
-    attachments: emailData.attachments || [],
-    sizeEstimate: emailData.sizeEstimate || 0,
-    historyId: emailData.historyId || '',
-    internalDate: emailData.date,
-    raw: {
-      id: emailData.id,
-      threadId: emailData.threadId,
-      labelIds: emailData.labelIds || [],
-      snippet: emailData.snippet,
-      payload: {
-        partId: '',
-        mimeType: 'text/html',
-        filename: '',
-        headers: [],
-        body: { size: 0 }
-      }
-    }
+  const handleSendReply = async () => {
+    if (!replyBody.trim()) return;
+    setIsSending(true);
+    // Simulate API Call
+    setTimeout(() => {
+      alert(`Reply sent to ${senderEmail}: \n${replyBody}`);
+      setIsSending(false);
+      setIsReplying(false);
+      setReplyBody("");
+    }, 1000);
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       {/* Main Content Container */}
       <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
-        <MailContent
-          mail={transformedEmailData}
-          onBack={onClose}
-        />
+        {/* --- TOP ACTION BAR --- */}
+        <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background dark:bg-[#1e1e1e]">
+          <div className="flex items-center gap-4 text-secondary dark:text-gray-400">
+            <button
+              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+              onClick={onClose}
+            >
+              <IoMdClose size={24} />
+            </button>
+            <div className="h-4 w-px bg-divider dark:bg-white/20 mx-1"></div>
+            <button
+              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
+              onClick={onClose}
+            >
+              <IoMdArrowBack size={20} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 text-secondary dark:text-gray-400">
+            <button
+              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors cursor-pointer"
+              title="Archive"
+            >
+              <BsArchive size={18} />
+            </button>
+            <button
+              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors hover:text-red-400 cursor-pointer"
+              title="Delete"
+            >
+              <BsTrash3 size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* --- SCROLLABLE CONTENT AREA --- */}
+        <div className="flex-1 overflow-y-auto mailbox-scrollbar pb-20">
+          {/* Subject and Sender Info - Unified Section */}
+          <div className="px-6 pt-6 pb-4 bg-background dark:bg-[#121212] border-b border-divider dark:border-gray-800">
+            {/* Subject Header */}
+            <div className="mb-4">
+              <div className="flex flex-row justify-between items-start gap-4">
+                <h1 className="text-xl md:text-2xl font-semibold text-foreground dark:text-white flex-1">
+                  {mail.subject || "(No Subject)"}
+                </h1>
+                <div className="flex gap-2 shrink-0">
+                  {mail.labelIds?.includes("SENT") && (
+                    <span className="bg-muted dark:bg-gray-700 text-xs px-2 py-1 rounded text-secondary dark:text-gray-300">
+                      Sent Mail
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Sender Info Row */}
+            <div className="flex flex-row justify-between items-start">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
+                  {senderName.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-foreground dark:text-white">
+                      {senderName}
+                    </span>
+                    <span className="text-xs text-secondary dark:text-gray-400">
+                      &lt;{senderEmail}&gt;
+                    </span>
+                  </div>
+                  <span className="text-xs text-secondary dark:text-gray-500">
+                    To: {mail.to}
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-secondary dark:text-gray-400 text-sm">
+                <span>{formatDate(mail.date)}</span>
+                <button className="p-1 hover:bg-muted dark:hover:bg-white/10 rounded hover:text-foreground dark:hover:text-white cursor-pointer">
+                  <IoMdMore size={20} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Mail Body with Iframe */}
+          <div className="px-6 py-6">
+            <div className="w-full bg-white dark:bg-[#1a1a1a] rounded-lg overflow-hidden border border-divider dark:border-gray-800 shadow-sm">
+              <iframe
+                ref={(iframe) => {
+                  if (iframe) {
+                    iframe.onload = () => {
+                      try {
+                        const iframeDoc =
+                          iframe.contentDocument ||
+                          iframe.contentWindow?.document;
+                        if (iframeDoc) {
+                          const height = iframeDoc.documentElement.scrollHeight;
+                          iframe.style.height =
+                            Math.max(height + 20, 200) + "px";
+                        }
+                      } catch (e) {
+                        // Cross-origin restriction - fallback to min height
+                        iframe.style.height = "500px";
+                      }
+                    };
+                  }
+                }}
+                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                className="w-full border-0"
+                style={{ height: "200px" }}
+                srcDoc={`
+                  <!DOCTYPE html>
+                  <html>
+                    <head>
+                      <meta charset="utf-8">
+                      <base target="_blank">
+                      <style>
+                        body {
+                          margin: 0;
+                          padding: 2rem;
+                          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                          font-size: 15px;
+                          line-height: 1.7;
+                          color: #475569;
+                          background-color: transparent;
+                          overflow: hidden;
+                        }
+                        a { 
+                          color: #2563eb; 
+                          text-decoration: underline;
+                          cursor: pointer;
+                        }
+                        a:hover { text-decoration: none; }
+                        * { max-width: 100%; }
+                        img { max-width: 100%; height: auto; }
+                        pre { white-space: pre-wrap; word-wrap: break-word; }
+                      </style>
+                    </head>
+                    <body>
+                      ${mail.htmlBody ||
+                  mail.textBody ||
+                  mail.snippet ||
+                  '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
+                  }
+                    </body>
+                  </html>
+                `}
+              />
+            </div>
+          </div>
+
+          {/* --- REPLY EDITOR AREA --- */}
+          {isReplying && (
+            <div className="px-6 pb-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+              <div className="flex items-center gap-2 text-sm text-secondary dark:text-gray-400 mb-1">
+                <FaReply /> Replying to{" "}
+                <span className="text-foreground dark:text-white font-medium">
+                  {senderName}
+                </span>
+              </div>
+              <textarea
+                ref={replyTextareaRef}
+                autoFocus
+                className="w-full bg-background dark:bg-[#1e1e1e] border border-divider dark:border-gray-700 rounded-md p-4 text-foreground dark:text-gray-200 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
+                placeholder="Type your reply here..."
+                value={replyBody}
+                onChange={(e) => setReplyBody(e.target.value)}
+                disabled={isSending}
+              />
+
+              <div className="flex gap-3 mt-2">
+                <button
+                  onClick={handleSendReply}
+                  disabled={isSending || !replyBody.trim()}
+                  className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition-colors cursor-pointer font-medium"
+                >
+                  {isSending ? (
+                    "Sending..."
+                  ) : (
+                    <>
+                      <IoMdSend /> Send
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setIsReplying(false)}
+                  disabled={isSending}
+                  className="px-4 py-2 hover:bg-muted dark:hover:bg-white/10 text-secondary dark:text-gray-400 hover:text-foreground dark:hover:text-white text-sm rounded transition-colors cursor-pointer"
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* --- BOTTOM ACTION BAR --- */}
+        {!isReplying && (
+          <div className="border-t border-divider dark:border-gray-800 p-4 flex flex-row gap-3 bg-background dark:bg-[#121212]">
+            <button
+              onClick={handleReplyClick}
+              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded transition-colors cursor-pointer"
+            >
+              <FaReply /> Reply
+            </button>
+            <button
+              onClick={() => alert("Forward clicked")}
+              className="flex items-center gap-2 px-4 py-2 bg-muted dark:bg-[#2c2c2c] hover:bg-muted/80 dark:hover:bg-[#383838] text-foreground dark:text-gray-200 text-sm rounded transition-colors cursor-pointer"
+            >
+              <FaShare /> Forward
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -388,7 +560,7 @@ export default function KanbanPage() {
     fetchColumnData, // <-- Hàm fetch emails cho một cột
     columnLoadingStates, // <-- Loading states cho từng cột
     refreshData, // <-- Thêm refreshData để reload sau khi tạo column
-                  } = useKanbanData();
+  } = useKanbanData();
 
   const { showToast } = useToast();
   const [enabled, setEnabled] = useState(false);
@@ -404,7 +576,7 @@ export default function KanbanPage() {
 
     const container = scrollContainerRef.current;
     let animationFrameId: number;
-    
+
     // Mouse position tracking
     let currentMouseX = 0;
     let currentMouseY = 0;
@@ -420,11 +592,11 @@ export default function KanbanPage() {
       const EDGE_SIZE = 80; // Hotzone: 80px from edge
       const MAX_SCROLL_SPEED = 25; // Max pixels per frame
       const MIN_SCROLL_SPEED = 5; // Min pixels per frame
-      
+
       // Get CURRENT container bounds (updates as container scrolls/moves)
       // This is necessary for accurate edge detection
       const containerRect = container.getBoundingClientRect();
-      
+
       // Calculate distance from edges using CURRENT viewport position
       const distanceFromLeft = currentMouseX - containerRect.left;
       const distanceFromRight = containerRect.right - currentMouseX;
@@ -459,24 +631,10 @@ export default function KanbanPage() {
 
       // Apply scroll using scrollBy (smoother than direct scrollLeft assignment)
       if (scrollX !== 0 || scrollY !== 0) {
-        // Fix scroll offset by adjusting for current scroll position
-        const currentScrollLeft = container.scrollLeft;
-        const currentScrollTop = container.scrollTop;
-        
         container.scrollBy({
           left: scrollX,
           top: scrollY,
           behavior: 'auto' // Use 'auto' for instant scroll during drag
-        });
-        
-        // Log scroll info for debugging
-        console.log('🔄 Auto-scroll:', {
-          scrollX,
-          scrollY,
-          currentScrollLeft,
-          currentScrollTop,
-          newScrollLeft: container.scrollLeft,
-          newScrollTop: container.scrollTop
         });
       }
 
@@ -504,6 +662,11 @@ export default function KanbanPage() {
   const [recoveryColumnId, setRecoveryColumnId] = useState("");
   const [recoveryColumnName, setRecoveryColumnName] = useState("");
   const [recoveryOriginalLabel, setRecoveryOriginalLabel] = useState("");
+  
+  // Transient per-column notifications (shown inline on the column)
+  const [columnNotifications, setColumnNotifications] = useState<Record<string, string>>({});
+
+  // (No auto-open behavior: recovery modal opens only when user clicks "Click me to fix")
 
   // Add Column Inline Form State (Trello-style)
   const [isCreatingCol, setIsCreatingCol] = useState(false);
@@ -647,20 +810,20 @@ export default function KanbanPage() {
       // Sort: Date
       // ⚠️ IMPORTANT: Preserve manual ordering during drag & drop
       // Only auto-sort when NOT dragging to respect user's manual positioning
-      if (!isDragging) {
-        items.sort((a, b) => {
-          const dateA = new Date(a.date || "").getTime();
-          const dateB = new Date(b.date || "").getTime();
-          return config.sort === "newest" ? dateB - dateA : dateA - dateB;
-        });
-      }
+      // if (!isDragging) {
+      //   items.sort((a, b) => {
+      //     const dateA = new Date(a.date || "").getTime();
+      //     const dateB = new Date(b.date || "").getTime();
+      //     return config.sort === "newest" ? dateB - dateA : dateA - dateB;
+      //   });
+      // }
 
       return {
         ...col,
         items, // Trả về column với items đã được xử lý
       };
     });
-  }, [columns, columnConfigs, isDragging]);
+  }, [columns, columnConfigs]);
 
   // --- HANDLERS ---
   // Edit column name handler
@@ -782,7 +945,7 @@ export default function KanbanPage() {
 
   const onDragEnd = async (result: DropResult) => {
     setIsDragging(false);
-    
+
     const { source, destination, draggableId } = result;
     if (!destination) return;
 
@@ -800,9 +963,16 @@ export default function KanbanPage() {
       setColumns(newColumns);
 
       try {
-        const order = newColumns.map(c => c.id);
-        await reorderKanbanColumns(order);
-        showToast('Columns reordered successfully', 'success');
+        // Only send non-system columns (exclude "inbox" which is not in database)
+        const order = newColumns
+          .filter(c => !c.isSystem) // Exclude system columns like "inbox"
+          .map(c => c.id);
+
+        // Only call API if there are non-system columns to reorder
+        if (order.length > 0) {
+          await reorderKanbanColumns(order);
+          showToast('Columns reordered successfully', 'success');
+        }
       } catch (err: any) {
         console.error('Failed to persist column order', err);
         showToast('Failed to reorder columns. Reverting.', 'error');
@@ -824,22 +994,45 @@ export default function KanbanPage() {
       const movedEmail = sourceCol?.items.find((e: any) => e.id === draggableId);
 
       if (movedEmail) {
+        // Optimistic UI: immediately update `columns` to reflect the move,
+        // then call API. On error, rollback to previous state.
+        const backup = JSON.parse(JSON.stringify(columns));
+
+        // Build a new columns array with shallow copied items arrays
+        const optimistic = columns.map((c: any) => ({ ...c, items: Array.isArray(c.items) ? [...c.items] : [] }));
+
+        const src = optimistic.find((c: any) => c.id === source.droppableId);
+        const dst = optimistic.find((c: any) => c.id === destination.droppableId);
+
+        if (src && dst) {
+          const emailIndex = src.items.findIndex((e: any) => e.id === draggableId);
+          if (emailIndex !== -1) {
+            const [moved] = src.items.splice(emailIndex, 1);
+            if (destination.index !== undefined) dst.items.splice(destination.index, 0, moved);
+            else dst.items.push(moved);
+
+            // Apply optimistic state
+            setColumns(optimistic);
+          }
+        }
+
         try {
-          // Pass destinationIndex to preserve exact drop position
+          // Call hook's moveEmail which persists on server
           await moveEmail(
             movedEmail.id,
             movedEmail.threadId,
             source.droppableId,
             destination.droppableId,
-            destination.index  // ✅ Đảm bảo email được đặt đúng vị trí
+            destination.index
           );
-          
-          // Show success toast with truncated subject
+
+          // Success toast
           const emailSubject = (movedEmail.subject || 'Email').substring(0, 50);
           const destColumnTitle = destCol?.title || 'column';
           showToast(`"${emailSubject}${movedEmail.subject?.length > 50 ? '...' : ''}" moved to ${destColumnTitle}`, "success");
         } catch (err: any) {
-          // Error handling with rollback (automatic in moveEmail hook)
+          // Rollback optimistic state on error
+          setColumns(backup);
           const errorMsg = err?.response?.data?.message || err.message || "Failed to move email";
           showToast(errorMsg, "error");
           console.error('Move email error:', err);
@@ -847,8 +1040,6 @@ export default function KanbanPage() {
       }
     }
 
-    // TODO: Kéo thả COLUMN (Nếu bạn muốn sắp xếp cột)
-    // if (result.type === "COLUMN") { ... logic reorder columns ... }
   };
 
   // Helper chọn icon dựa trên ID hoặc Title
@@ -867,14 +1058,7 @@ export default function KanbanPage() {
   };
 
   if (!enabled) return null;
-  if (isLoading) return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-        <p className="text-sm text-muted-foreground">Loading Kanban...</p>
-      </div>
-    </div>
-  );
+  if (isLoading) return <div className="p-10 text-center">Loading...</div>;
   if (error) return <div className="p-10 text-center text-red-500">{error}</div>;
 
   return (
@@ -893,8 +1077,7 @@ export default function KanbanPage() {
                   scrollContainerRef.current = el;
                 }}
                 {...provided.droppableProps}
-                className="flex flex-row h-full overflow-x-auto overflow-y-hidden items-start scroll-smooth" // CSS cho container ngang + smooth scroll
-                style={{ overflowX: 'auto', overflowY: 'hidden' }} // Ensure only horizontal scroll
+                className="flex flex-row overflow-x-auto overflow-y-auto"
               >
                 {processedColumns.map((col, index) => {
                   const originalCol = columns.find((c: any) => c.id === col.id);
@@ -907,7 +1090,7 @@ export default function KanbanPage() {
                           ref={providedDrag.innerRef}
                           {...providedDrag.draggableProps}
                           {...providedDrag.dragHandleProps} // Gắn drag handle vào div bao ngoài
-                          className={`flex flex-col shrink-0 w-[350px] h-screen bg-white dark:bg-[#121212]
+                          className={`flex flex-col shrink-0 w-[350px] min-h-screen md:w-2/7 bg-white dark:bg-[#121212]
                           ${snapshot.isDragging ? "opacity-100 z-50 rotate-2 shadow-2xl ring-1 ring-blue-500/50" : ""}
                         `}
                         >
@@ -916,9 +1099,6 @@ export default function KanbanPage() {
                             id={col.id}
                             title={col.title}
                             color={col.color}
-                            gmailLabel={originalCol?.gmailLabel}
-                            gmailLabelName={originalCol?.gmailLabelName}
-                            autoArchive={originalCol?.autoArchive}
                             icon={getColumnIcon(col)}
                             items={col.items}
                             totalRawItems={originalCol?.items.length || 0}
@@ -933,16 +1113,34 @@ export default function KanbanPage() {
                             }}
                             onRegenerateSummary={generateSummary}
                             dragOverClass={getDragOverClass(col)}
+                            gmailLabel={originalCol?.gmailLabel}
+                            gmailLabelName={originalCol?.gmailLabelName}
+                            autoArchive={originalCol?.autoArchive}
                             hasLabelError={originalCol?.hasLabelError}
-                            labelErrorMessage={originalCol?.labelErrorMessage}
+                            labelErrorMessage={originalCol?.labelErrorMessage || columnNotifications[col.id]}
                             isSystemColumn={originalCol?.isSystem}
                             isLoading={isColumnLoading}
                             onEditTitle={!originalCol?.isSystem ? (newTitle) => handleEditColumnTitle(col.id, newTitle) : undefined}
                             onRecoverLabel={() => {
-                              setRecoveryColumnId(col.id);
-                              setRecoveryColumnName(col.title);
-                              setRecoveryOriginalLabel(originalCol?.gmailLabel || "");
-                              setRecoveryModalOpen(true);
+                              // Only open recovery modal when the backend marked this column as a label-mapping error
+                              if (originalCol?.hasLabelError) {
+                                setRecoveryColumnId(col.id);
+                                setRecoveryColumnName(col.title);
+                                setRecoveryOriginalLabel(originalCol?.gmailLabel || "");
+                                setRecoveryModalOpen(true);
+                                return;
+                              }
+
+                              // Otherwise, show a simple inline notification on the column (transient)
+                              const msg = error || "Temporary backend error. Please try again later.";
+                              setColumnNotifications(prev => ({ ...prev, [col.id]: msg }));
+                              window.setTimeout(() => {
+                                setColumnNotifications(prev => {
+                                  const copy = { ...prev };
+                                  delete copy[col.id];
+                                  return copy;
+                                });
+                              }, 5000);
                             }}
                             onDeleteColumn={!originalCol?.isSystem ? async () => {
                               try {
@@ -953,10 +1151,6 @@ export default function KanbanPage() {
                                 showToast(errorMsg, "error");
                               }
                             } : undefined}
-                            // Infinite scroll props
-                            hasMore={originalCol?.hasMore}
-                            isLoadingMore={originalCol?.isLoadingMore}
-                            onLoadMore={() => fetchColumnData(col.id)}
                           />
                         </div>
                       )}
@@ -969,7 +1163,7 @@ export default function KanbanPage() {
                 {provided.placeholder}
 
                 {/* 2. ADD COLUMN AREA (Trello-style inline form) */}
-                <div className="shrink-0 w-80 p-4 h-screen flex flex-col justify-start">
+                <div className="shrink-0 w-80 p-4 h-full flex flex-col justify-start">
                   {!isCreatingCol ? (
                     <button
                       onClick={() => setIsCreatingCol(true)}
@@ -1094,12 +1288,21 @@ export default function KanbanPage() {
                                     {gmailLabels.filter(l => l.type === "system").length > 0 && (
                                       <optgroup label="System Labels" className="bg-white dark:bg-gray-900">
                                         {gmailLabels
-                                          .filter((label) => label.type === "system")
-                                          .map((label) => (
-                                            <option key={label.id} value={label.name} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-                                              {label.name}
-                                            </option>
-                                          ))}
+                                            .filter((label) => label.type === "system")
+                                            .map((label) => {
+                                              const mappedCol = columns.find((col: any) =>
+                                                col.id && (
+                                                  (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
+                                                  (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
+                                                )
+                                              );
+                                              const mapped = !!mappedCol;
+                                              return (
+                                                <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
+                                                  {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                                                </option>
+                                              );
+                                            })}
                                       </optgroup>
                                     )}
 
@@ -1108,11 +1311,31 @@ export default function KanbanPage() {
                                       <optgroup label="Custom Labels" className="bg-white dark:bg-gray-900">
                                         {gmailLabels
                                           .filter((label) => label.type === "user")
-                                          .map((label) => (
-                                            <option key={label.id} value={label.name} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-                                              {label.name}
-                                            </option>
-                                          ))}
+                                          .map((label) => {
+                                            const mappedCol = columns.find((col: any) => {
+                                              const colLabel = (col.gmailLabel || "").toString();
+                                              const colLabelName = (col.gmailLabelName || "").toString();
+                                              const colTitle = (col.title || col.name || "").toString();
+                                              const labelName = (label.name || "").toString();
+                                              const labelId = (label.id || "").toString();
+
+                                              return (
+                                                // direct id match
+                                                colLabel === labelId ||
+                                                colLabel.toLowerCase() === labelId.toLowerCase() ||
+                                                // label name matches stored label or title
+                                                colLabel.toLowerCase() === labelName.toLowerCase() ||
+                                                colLabelName.toLowerCase() === labelName.toLowerCase() ||
+                                                colTitle.toLowerCase() === labelName.toLowerCase()
+                                              );
+                                            });
+                                            const mapped = !!mappedCol;
+                                            return (
+                                              <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
+                                                {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                                              </option>
+                                            );
+                                          })}
                                       </optgroup>
                                     )}
                                   </select>
