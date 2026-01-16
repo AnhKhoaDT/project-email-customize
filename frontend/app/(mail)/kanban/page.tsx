@@ -29,6 +29,7 @@ import {
 import {
   FaRegCircle,
   FaRegCheckCircle,
+  FaAdjust,
   FaInbox,
   FaReply,
   FaShare,
@@ -207,7 +208,7 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
           <h3 className="font-bold text-lg text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <TbClock className="text-blue-500" /> Snooze until...
           </h3>
-          <button onClick={onClose}>
+          <button onClick={onClose} className="cursor-pointer hover:bg-gray-800 hover:text-primary rounded-lg p-2 ">
             <X size={20} />
           </button>
         </div>
@@ -215,19 +216,19 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
         <div className="flex flex-col gap-2">
           <button
             onClick={() => onConfirm(5000)}
-            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm cursor-pointer"
           >
             Later today (5 seconds )
           </button>
           <button
             onClick={() => onConfirm(10000)}
-            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm cursor-pointer"
           >
             Tomorrow (10 seconds )
           </button>
           <button
             onClick={() => onConfirm(60000)}
-            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm cursor-pointer"
           >
             Next Week (1 minute )
           </button>
@@ -890,6 +891,7 @@ export default function KanbanPage() {
   // Helper chọn icon dựa trên ID hoặc Title
   const getColumnIcon = (col: any) => {
     if (col.id === "inbox") return <FaInbox className="text-blue-500" />;
+    if (col.id === "in_progress" || col.title.toLowerCase().includes("progress")) return <FaAdjust className = "text-yellow-500"></FaAdjust>
     if (col.id === "done" || col.title.toLowerCase() === "done") return <FaRegCheckCircle className="text-green-500" />;
     if (col.id === "todo" || col.title.toLowerCase().includes("todo")) return <FaRegCircle className="text-orange-500" />;
     return <FaRegCircle />; // Default icon
@@ -899,6 +901,7 @@ export default function KanbanPage() {
   const getDragOverClass = (col: any) => {
     if (col.id === "inbox") return "bg-blue-50/50 dark:bg-blue-900/20";
     if (col.id === "done") return "bg-green-50/50 dark:bg-green-900/20";
+    if (col.id === "in_progress") return "bg-yellow-50/50 dark:bg-yellow-900/20";
     return "bg-gray-50/50 dark:bg-gray-800/50";
   };
 
@@ -1040,7 +1043,7 @@ export default function KanbanPage() {
                             setSelectedExistingLabel("");
                             setNewLabelName("");
                           }}
-                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors cursor-pointer"
                         >
                           <X size={18} />
                         </button>

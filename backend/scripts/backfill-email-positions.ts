@@ -15,7 +15,7 @@ import * as path from 'path';
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/emailcustomize';
-const GAP = Number(process.env.BACKFILL_POSITION_GAP) || 1000;
+const GAP = Number(process.env.BACKFILL_POSITION_GAP) || 60000;
 
 async function main() {
   const client = new MongoClient(MONGODB_URI, { maxPoolSize: 10 });
@@ -65,6 +65,7 @@ async function main() {
     }
 
     console.log(`\n🎯 Backfill complete. Total updated: ${totalUpdated}`);
+    
     process.exit(0);
   } catch (err) {
     console.error('❌ Migration failed:', err);

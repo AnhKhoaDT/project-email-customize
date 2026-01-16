@@ -67,6 +67,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         localStorage.setItem('isAuthenticated', 'true');
       } else {
         localStorage.removeItem('isAuthenticated');
+        // reset per-session sync guard on logout
+        setHasSyncedOnLogin(false);
       }
     }
   };
@@ -186,6 +188,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Auto-sync Gmail emails after login using axios `api` client
   useEffect(() => {
     if (isAuthenticated && user && !hasSyncedOnLogin) {
+      const key = `lastLoginSync_${user.id}`;
+      const lastTs = typeof window !== 'undefined' ? parseInt(localStorage.getItem(key) || '0', 10) : 0;
+      const now = Date.now();
+      const FIVE_MIN = 5 * 60 * 1000;
+
+      if (now - lastTs < FIVE_MIN) {
+        console.log('[AuthContext] 🔕 Recent sync already triggered for this user, skipping (within 5min)');
+        setHasSyncedOnLogin(true); // treat as already triggered for this session
+        return;
+      }
+
       const syncEmails = async () => {
         try {
           console.log('[AuthContext] 🔔 Triggering backend Gmail sync for user:', user.id);
@@ -194,12 +207,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.log('[AuthContext] ✅ Gmail sync response:', res.data);
           // Mark as synced so we don't trigger again in this session
           setHasSyncedOnLogin(true);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(key, String(Date.now()));
+          }
         } catch (err: any) {
           console.warn('[AuthContext] ⚠️ Gmail sync request failed:', err?.response?.status, err?.response?.data || err.message);
         }
       };
 
-      // Fire-and-forget but attempt once on login
+      // Fire-and-forget but attempt once on login (with persistence to avoid repeats on reload)
       syncEmails();
     }
   }, [isAuthenticated, user, hasSyncedOnLogin]);

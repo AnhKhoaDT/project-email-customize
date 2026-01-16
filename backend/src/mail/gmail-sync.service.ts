@@ -132,6 +132,33 @@ export class GmailSyncService {
   }
 
   /**
+   * Check whether a sync for the given user is already in progress
+   */
+  isSyncInProgress(userId: string): boolean {
+    return this.ongoingSyncs.has(userId);
+  }
+
+  /**
+   * Sync a single email by ID. Uses the existing processSingleEmail logic
+   * but exposes it publicly for history-based incremental syncs.
+   */
+  async syncSingleEmail(userId: string, emailId: string, forceResync = true) {
+    // Do not reuse the ongoing full-sync promise for single-email syncs
+    try {
+      const res = await this.processSingleEmail(userId, emailId, forceResync);
+
+      if (res.isNew || res.shouldReindex) {
+        await this.autoIndexingService.queueEmail(userId, emailId, 'normal');
+      }
+
+      return res;
+    } catch (err) {
+      this.logger.error(`syncSingleEmail failed for ${emailId}: ${err.message}`);
+      throw err;
+    }
+  }
+
+  /**
    * Process a single email
    */
   private async processSingleEmail(

@@ -20,6 +20,7 @@ import { SearchSuggestionCache, SearchSuggestionCacheSchema } from './schemas/se
 import { GmailSyncState, GmailSyncStateSchema } from './schemas/gmail-sync-state.schema';
 import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
+import { User, UserSchema } from '../users/schemas/user.schema';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AiModule } from '../ai/ai.module';
     AiModule,
     EventEmitterModule.forRoot(), // Enable EventEmitter2 for async events
     MongooseModule.forFeature([
+      { name: User.name, schema: UserSchema },
       { name: EmailMetadata.name, schema: EmailMetadataSchema },
       { name: KanbanConfig.name, schema: KanbanConfigSchema },
       { name: SearchSuggestionCache.name, schema: SearchSuggestionCacheSchema },
@@ -58,6 +60,7 @@ import { AiModule } from '../ai/ai.module';
     SearchSuggestionsService,
     KanbanConfigService,
     AutoIndexingService,
+    GmailHistorySyncService,
   ],
 })
 export class MailModule {}

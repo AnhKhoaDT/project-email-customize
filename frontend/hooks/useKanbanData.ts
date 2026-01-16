@@ -125,6 +125,42 @@ export const useKanbanData = () => {
     };
   };
 
+  // --- ACTION: GENERATE SUMMARY ---
+  const generateSummary = useCallback(async (emailId: string, forceRegenerate = false) => {
+    try {
+      const result = await generateEmailSummary(emailId, forceRegenerate, false);
+
+      // Normalize summary location: backend may return { data: { summary } } or { summary }
+      const summary = result?.data?.summary ?? result?.summary ?? null;
+
+      // If backend uses a 429 HTTP status, axios will throw and we'll hit the catch below.
+      // But if backend encodes rate-limit in payload, handle it defensively.
+      if (result?.status === 429 || result?.code === 429) return null;
+
+      // Update state deeply within columns
+      if (summary !== null) {
+        setColumns((prev) =>
+          prev.map(col => ({
+            ...col,
+            items: col.items.map(email =>
+              email.id === emailId
+                ? { ...email, summary: summary || email.summary }
+                : email
+            )
+          }))
+        );
+      }
+
+      return summary;
+    } catch (err: any) {
+      // Rate limiting returns HTTP 429 from server; axios surfaces it on err.response.status
+      if (err?.response?.status === 429) return null;
+      console.error("Failed to generate summary:", err);
+      return null;
+    }
+  }, [setColumns]);
+
+
   // --- FETCH DATA ---
   const fetchData = useCallback(async () => {
     try {
@@ -135,7 +171,7 @@ export const useKanbanData = () => {
       const configRes = await fetchKanbanConfig();
       // `fetchKanbanConfig()` returns the response data (the config object), not an axios wrapper.
       const backendColumns = configRes?.columns || [];
-      
+
       console.log('🔍 Backend columns received:', backendColumns);
       console.log('📊 Total columns:', backendColumns.length);
       backendColumns.forEach((col: any) => {
@@ -222,7 +258,7 @@ export const useKanbanData = () => {
       let finalColumns: Column[];
       if (!backendColumns || backendColumns.length === 0) {
         console.log('🏗️ No backend columns found - creating defaults...');
-        
+
         // Create default columns in backend
         try {
           // To Do → STARRED (system label, widely used)
@@ -232,7 +268,15 @@ export const useKanbanData = () => {
             gmailLabel: 'STARRED',
             createNewLabel: false // STARRED already exists
           });
-          
+
+          // In progress -> IMPORTANT
+          const progressRes = await api.post('/kanban/columns', {
+            name: 'In Progress',
+            color: '#eab308', // Yellow (Amber-500)
+            gmailLabel: 'IMPORTANT',
+            createNewLabel: false
+          });
+
           // Done → Archive (special system label)
           const doneRes = await api.post('/kanban/columns', {
             name: 'Done',
@@ -240,10 +284,10 @@ export const useKanbanData = () => {
             gmailLabel: 'ARCHIVE', // Use special Archive label
             createNewLabel: false // ARCHIVE already exists as system label
           });
-          
+
           const todoData = todoRes?.data?.data || todoRes?.data;
           const doneData = doneRes?.data?.data || doneRes?.data;
-          
+
           const defaultTodo: Column = {
             id: todoData?.id || 'todo',
             title: 'To Do',
@@ -252,7 +296,17 @@ export const useKanbanData = () => {
             gmailLabel: 'STARRED',
             items: []
           };
-          
+
+          const defaultProgress: Column = {
+            id: progressData?.id || 'in_progress',
+            title: 'In Progress',
+            isSystem: false,
+            color: '#eab308',
+            gmailLabel: progressData?.newLabelId || 'IN_PROGRESS',
+            gmailLabelName: 'IN_PROGRESS',
+            items: []
+          };
+
           const defaultDone: Column = {
             id: doneData?.id || 'done',
             title: 'Done',
@@ -262,7 +316,7 @@ export const useKanbanData = () => {
             gmailLabelName: 'Done',
             items: []
           };
-          
+
           finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
           console.log('✅ Default columns created in backend');
         } catch (err: any) {
@@ -319,8 +373,8 @@ export const useKanbanData = () => {
           const status = err?.response?.status;
           const isLabelNotFound = status === 404 || err?.response?.data?.code === 'LABEL_NOT_FOUND';
           if (isLabelNotFound) {
-            setColumns(prev => prev.map(column => 
-              column.id === col.id 
+            setColumns(prev => prev.map(column =>
+              column.id === col.id
                 ? { ...column, hasLabelError: true, labelErrorMessage: err?.response?.data?.message || err?.message || "Label not found" }
                 : column
             ));
@@ -342,17 +396,35 @@ export const useKanbanData = () => {
         colEmailMap[r.colId] = r.raw || [];
       });
 
+      // Transform and assign emails to columns
       setColumns(prev => prev.map(col => ({
         ...col,
         items: (colEmailMap[col.id] || []).map(transformEmail)
       })));
+
+      // After assigning inbox items, trigger summary generation for first 5 inbox emails
+      try {
+        const inboxRaw = colEmailMap['inbox'] || [];
+        const inboxTransformed: KanbanEmail[] = inboxRaw.map(transformEmail);
+        const firstFive = inboxTransformed.slice(0, 5);
+        firstFive.forEach((email) => {
+          if (!email.summary || email.summary === 'No summary available') {
+            // Fire-and-forget; generateSummary will update state when ready
+            generateSummary(email.id, false).catch(err => {
+              console.debug('generateSummary (inbox preload) failed for', email.id, err?.message || err);
+            });
+          }
+        });
+      } catch (e) {
+        console.debug('Failed to trigger inbox preload summaries', e);
+      }
 
     } catch (err: any) {
       console.error("Failed to fetch Kanban data:", err);
       setError(err?.response?.data?.message || "Failed to load emails");
       setIsLoading(false);
     }
-  }, []);
+  }, [generateSummary]);
 
   // --- FETCH COLUMN DATA (Individual Column) ---
   const fetchColumnData = useCallback(async (columnId: string, limit: number = 50) => {
@@ -372,20 +444,36 @@ export const useKanbanData = () => {
         const inboxRes = await fetchInboxEmails(limit);
         const inboxRaw = inboxRes?.messages || inboxRes?.data?.messages || [];
 
+        // Transform first so we can both assign and act on the items
+        const transformed: KanbanEmail[] = inboxRaw.map(transformEmail);
+
         // Assign inbox items directly; we rely on kanbanColumnId from backend.
-        setColumns(prev => prev.map(col => 
-          col.id === columnId 
-            ? { ...col, items: inboxRaw.map(transformEmail) }
+        setColumns(prev => prev.map(col =>
+          col.id === columnId
+            ? { ...col, items: transformed }
             : col
         ));
+
+        // Trigger summary generation for first 5 inbox emails if missing
+        try {
+          transformed.slice(0, 5).forEach(email => {
+            if (!email.summary || email.summary === 'No summary available') {
+              generateSummary(email.id, false).catch(err => {
+                console.debug('generateSummary (inbox column) failed for', email.id, err?.message || err);
+              });
+            }
+          });
+        } catch (e) {
+          console.debug('Failed to trigger inbox column summaries', e);
+        }
       } else {
         // Fetch emails for specific column
         const res = await fetchColumnEmails(columnId, { limit });
         const emails = res?.data?.messages || [];
-        
+
         // Update column with fetched emails
-        setColumns(prev => prev.map(col => 
-          col.id === columnId 
+        setColumns(prev => prev.map(col =>
+          col.id === columnId
             ? { ...col, items: emails.map(transformEmail) }
             : col
         ));
@@ -395,8 +483,8 @@ export const useKanbanData = () => {
       const status = err?.response?.status;
       const isLabelNotFound = status === 404 || err?.response?.data?.code === 'LABEL_NOT_FOUND';
       if (isLabelNotFound) {
-        setColumns(prev => prev.map(col => 
-          col.id === columnId 
+        setColumns(prev => prev.map(col =>
+          col.id === columnId
             ? { ...col, hasLabelError: true, labelErrorMessage: err?.response?.data?.message || err?.message || "Label not found" }
             : col
         ));
@@ -407,13 +495,13 @@ export const useKanbanData = () => {
       columnLoadingRef.current = { ...columnLoadingRef.current, [columnId]: false };
       setColumnLoadingStates(prev => ({ ...prev, [columnId]: false }));
     }
-  }, []);
+  }, [generateSummary]);
 
   // --- ACTION: ADD COLUMN ---
   const addColumn = useCallback(async (
-    title: string, 
-    color: string, 
-    gmailLabel?: string, 
+    title: string,
+    color: string,
+    gmailLabel?: string,
     createNewLabel?: boolean
   ) => {
     const tempId = `temp-${Date.now()}`;
@@ -430,8 +518,8 @@ export const useKanbanData = () => {
 
     try {
       // Gọi API tạo cột với gmailLabel và createNewLabel
-      const res = await api.post('/kanban/columns', { 
-        name: title, 
+      const res = await api.post('/kanban/columns', {
+        name: title,
         color,
         gmailLabel,
         createNewLabel
@@ -441,12 +529,12 @@ export const useKanbanData = () => {
       const responseData = res?.data?.data || res?.data;
       const newId = responseData?.id || tempId;
       const emails = responseData?.emails || []; // Emails từ backend
-      
+
       // Transform emails using the same logic
       const transformedEmails = emails.map(transformEmail);
-      
-      setColumns(prev => prev.map(c => 
-        c.id === tempId 
+
+      setColumns(prev => prev.map(c =>
+        c.id === tempId
           ? { ...c, id: newId, items: transformedEmails } // Cập nhật với emails
           : c
       ));
@@ -503,7 +591,7 @@ export const useKanbanData = () => {
     const backupColumns = [...columns];
 
     // Optimistic Update: Update column title immediately
-    setColumns(prev => prev.map(c => 
+    setColumns(prev => prev.map(c =>
       c.id === columnId ? { ...c, title: newTitle } : c
     ));
 
@@ -542,7 +630,7 @@ export const useKanbanData = () => {
     try {
       // 🔥 WEEK 4: Use new dynamic moveEmail API (forward destination index)
       await moveEmail(emailId, fromColumnId, toColumnId, destinationIndex);
-      
+
       // NOW update state after API succeeds
       setColumns((prev) => {
         const newColumns = prev.map(col => ({ ...col, items: [...col.items] }));
@@ -567,46 +655,19 @@ export const useKanbanData = () => {
 
         return newColumns;
       });
-      
-      // Generate summary if needed (call API directly to avoid dependency)
-      if (shouldGenerateSummary) {
-        generateEmailSummary(emailId, false).catch(err => {
-          console.error("Failed to generate summary:", err);
-        });
-      }
+
+      // NOTE: Auto-generation of summaries on move was removed.
+      // Summary generation is left to explicit user action (Regenerate) or background processes.
     } catch (err: any) {
       console.error("Failed to move email:", err);
-      
+
       // Rollback by fetching fresh data
       await fetchData();
-      
+
       throw err;
     }
   }, [columns, fetchData, moveEmail]);
 
-  // --- ACTION: GENERATE SUMMARY ---
-  const generateSummary = useCallback(async (emailId: string, forceRegenerate = false) => {
-    try {
-      const result = await generateEmailSummary(emailId, forceRegenerate, false);
-      if (result.status === 429) return null;
-
-      // Update state sâu trong mảng columns
-      setColumns((prev) =>
-        prev.map(col => ({
-          ...col,
-          items: col.items.map(email =>
-            email.id === emailId
-              ? { ...email, summary: result.data?.summary || email.summary }
-              : email
-          )
-        }))
-      );
-      return result.data?.summary;
-    } catch (err) {
-      console.error("Failed to generate summary:", err);
-      return null;
-    }
-  }, []);
 
   // --- ACTION: SNOOZE ---
   const snoozeEmail = useCallback(async (

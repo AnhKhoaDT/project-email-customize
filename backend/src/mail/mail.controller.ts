@@ -1162,8 +1162,13 @@ export class MailController {
     @Body() body: { label?: string; limit?: number; forceResync?: boolean }
   ) {
     try {
+      const userId = req.user.id;
+      if (this.gmailSyncService.isSyncInProgress(userId)) {
+        return { status: 202, message: 'Sync already in progress. The existing sync will continue.' };
+      }
+
       const result = await this.gmailSyncService.syncEmails({
-        userId: req.user.id,
+        userId,
         limit: body.limit || 100,
         forceResync: body.forceResync || false,
       });
@@ -1235,24 +1240,24 @@ export class MailController {
    * 
    * POST /api/sync/history
    */
-  @UseGuards(JwtAuthGuard)
-  @Post('sync/history')
-  async triggerHistorySync(@Req() req: any) {
-    try {
-      // Trigger history sync in background
-      const userId = req.user.id;
-      this.gmailHistorySyncService.triggerHistorySync(userId).catch(err => {
-        console.error(`[Mail] History sync failed for user ${userId}:`, err.message);
-      });
+  // @UseGuards(JwtAuthGuard)
+  // @Post('sync/history')
+  // async triggerHistorySync(@Req() req: any) {
+  //   try {
+  //     // Trigger history sync in background
+  //     const userId = req.user.id;
+  //     this.gmailHistorySyncService.triggerHistorySync(userId).catch(err => {
+  //       console.error(`[Mail] History sync failed for user ${userId}:`, err.message);
+  //     });
 
-      return {
-        status: 200,
-        message: 'History sync triggered successfully. Check /api/sync/stats for progress.',
-      };
-    } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to trigger history sync' };
-    }
-  }
+  //     return {
+  //       status: 200,
+  //       message: 'History sync triggered successfully. Check /api/sync/stats for progress.',
+  //     };
+  //   } catch (err) {
+  //     return { status: 500, message: err?.message || 'Failed to trigger history sync' };
+  //   }
+  // }
 
   /**
    * Get sync statistics

@@ -9,12 +9,14 @@ import { Session, SessionSchema } from '../sessions/sessions.schema';
 import { SessionsService } from '../sessions/sessions.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { MailModule } from '../mail/mail.module';
+import { EmailMetadata, EmailMetadataSchema } from '../mail/schemas/email-metadata.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: User.name, schema: UserSchema }, 
-      { name: Session.name, schema: SessionSchema }
+      { name: Session.name, schema: SessionSchema },
+      { name: EmailMetadata.name, schema: EmailMetadataSchema }
     ]),
     forwardRef(() => MailModule), // Import MailModule for SemanticSearchService
   ],

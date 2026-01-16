@@ -255,7 +255,7 @@ const ColumnHeader = ({
               onMouseEnter={() => setShowErrorTooltip(true)}
               onMouseLeave={() => setShowErrorTooltip(false)}
               onClick={onRecoverLabel}
-              className="text-yellow-500 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-300 transition-colors"
+              className="text-yellow-500 hover:text-yellow-600 dark:text-yellow-400 dark:hover:text-yellow-300 transition-colors cursor-pointer"
               title="Gmail label error - click to fix"
             >
               ⚠️
@@ -310,8 +310,8 @@ const ColumnHeader = ({
                 <button
                   onClick={() => onConfigChange({ ...config, sort: "newest" })}
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "newest"
-                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 cursor-pointer"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -322,8 +322,8 @@ const ColumnHeader = ({
                 <button
                   onClick={() => onConfigChange({ ...config, sort: "oldest" })}
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "oldest"
-                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 cursor-pointer"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -348,8 +348,8 @@ const ColumnHeader = ({
                         onConfigChange({ ...config, filterRead: status })
                       }
                       className={`flex-1 text-xs py-1 rounded capitalize transition-all ${config.filterRead === status
-                        ? "bg-white dark:bg-[#2c2c2c] shadow text-gray-900 dark:text-white font-medium"
-                        : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
+                        ? "bg-white dark:bg-[#2c2c2c] shadow text-gray-900 dark:text-white font-medium cursor-pointer"
+                        : "text-gray-500 dark:text-gray-400 hover:text-gray-700 hover:bg-gray-700 cursor-pointer"
                         }`}
                     >
                       {status}
@@ -366,8 +366,8 @@ const ColumnHeader = ({
                     })
                   }
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between transition-colors ${config.filterAttachment
-                    ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                    ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400 cursor-pointer"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -385,8 +385,8 @@ const ColumnHeader = ({
           <button
             onClick={() => setShowOptionsMenu(!showOptionsMenu)}
             className={`p-1.5 rounded transition-colors ${showOptionsMenu
-              ? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
-              : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              ? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 cursor-pointer"
+              : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
               }`}
           >
             <BsThreeDots size={18} />
@@ -418,7 +418,7 @@ const ColumnHeader = ({
                       setShowOptionsMenu(false);
                     }
                   }}
-                  className="w-full text-left px-3 py-2 text-sm rounded flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  className="w-full text-left px-3 py-2 text-sm rounded flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
                 >
                   <BsTrash3 size={14} /> Delete Column
                 </button>
@@ -534,7 +534,7 @@ const MailCard = ({
                 <button
                   onClick={handleRegenerate}
                   disabled={isRegenerating}
-                  className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   title="Regenerate summary (10/min limit)"
                 >
                   <IoMdRefresh

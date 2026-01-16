@@ -26,6 +26,13 @@ export class User {
   @Prop()
   googleRefreshToken?: string;
 
+  /**
+   * Gmail History API anchor for incremental syncs
+   * Stored as string (Gmail historyId)
+   */
+  @Prop()
+  lastHistoryId?: string;
+
   // Semantic Search: Track if user's emails have been indexed
   @Prop({ default: false })
   isSemanticSearchIndexed?: boolean;
