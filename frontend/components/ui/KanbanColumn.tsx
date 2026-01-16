@@ -219,8 +219,10 @@ const ColumnHeader = ({
 
   return (
     <div className="p-4 border-b dark:border-gray-800 flex justify-between items-center shrink-0 sticky top-0 bg-white dark:bg-[#121212] z-20">
-      <div className="flex items-center gap-2 font-bold text-sm" style={{ color: color }}>
-        {icon}
+      <div className="flex items-center gap-2 font-bold text-sm">
+        <span style={{ color: color }} className="flex items-center">
+          {icon}
+        </span>
         {isEditingTitle ? (
           <input
             type="text"
@@ -228,14 +230,14 @@ const ColumnHeader = ({
             onChange={(e) => setEditTitle(e.target.value)}
             onKeyDown={handleTitleKeyDown}
             onBlur={handleTitleSave}
-            className="bg-transparent border-b border-current focus:outline-none uppercase text-sm font-bold"
-            style={{ color: color, minWidth: '80px' }}
+            className="bg-transparent border-b border-current focus:outline-none uppercase text-sm font-bold text-slate-800 dark:text-gray-100"
+            style={{ minWidth: '80px' }}
             autoFocus
             maxLength={100}
           />
         ) : (
           <span
-            className={`uppercase ${!isSystemColumn && onEditTitle ? 'cursor-pointer hover:opacity-70' : ''}`}
+            className={`uppercase text-slate-800 dark:text-gray-100 ${!isSystemColumn && onEditTitle ? 'cursor-pointer hover:opacity-70' : ''}`}
             onClick={handleTitleEdit}
             title={!isSystemColumn && onEditTitle ? 'Click to edit' : ''}
           >

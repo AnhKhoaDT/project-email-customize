@@ -174,7 +174,7 @@ export const useKanbanData = () => {
         gmailLabelName: col.gmailLabelName, // Add gmailLabelName mapping
         hasLabelError: col.hasLabelError,
         labelErrorMessage: col.labelErrorMessage,
-        autoArchive: col.autoArchive || false, // Add autoArchive mapping
+        autoArchive: col.autoArchive || (String(col.gmailLabel || '').toUpperCase() === 'ARCHIVE') || false, // Treat ARCHIVE as autoArchive
         isVisible: col.isVisible !== undefined ? col.isVisible : true, // Add isVisible mapping
         items: [] // Will be fetched separately
       }));
@@ -187,8 +187,10 @@ export const useKanbanData = () => {
 
         mappedBackendColumns.forEach((col) => {
           if (!col.gmailLabel) return;
-          const labelKey = String(col.gmailLabel || "").toLowerCase();
+          // Do not validate the special 'ARCHIVE' display label (it's handled as autoArchive)
+          if (String(col.gmailLabel || '').toUpperCase() === 'ARCHIVE') return;
 
+          const labelKey = String(col.gmailLabel || "").toLowerCase();
           const existsById = gmailIds.has(col.gmailLabel);
           const existsByName = gmailNames.has(labelKey);
           if (!existsById && !existsByName) {
