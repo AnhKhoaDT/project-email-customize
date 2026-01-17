@@ -56,6 +56,8 @@ export default function Home() {
   // Counters to trigger mark read/unread in MailContent (when detail open)
   const [triggerMarkRead, setTriggerMarkRead] = useState(0);
   const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
+  // Counter to trigger toggle read/unread (keyboard 'm') in MailContent
+  const [triggerToggle, setTriggerToggle] = useState(0);
   // Counter for automatic mark-read when opening a mail (no toast)
   const [triggerMarkReadAuto, setTriggerMarkReadAuto] = useState(0);
 
@@ -227,6 +229,38 @@ export default function Home() {
             setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
           } catch (err) {
             console.error('Mark unread failed', err);
+          }
+        })();
+      }
+    },
+    onToggleRead: () => {
+      if (selectedMail) {
+        // Let MailContent handle the toggle when detail is open
+        setTriggerToggle((t) => t + 1);
+        // reset shortly to avoid stale triggers
+        setTimeout(() => setTriggerToggle(0), 80);
+      } else if (mails[focusedIndex]) {
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
+            const action = isUnread ? 'markRead' : 'markUnread';
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action }),
+            });
+            if (!res.ok) throw new Error('Failed to toggle read');
+            if (isUnread) {
+              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            } else {
+              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            }
+          } catch (err) {
+            console.error('Toggle read failed', err);
           }
         })();
       }
@@ -530,6 +564,7 @@ export default function Home() {
           triggerMarkRead={triggerMarkRead}
           triggerMarkReadAuto={triggerMarkReadAuto}
           triggerMarkUnread={triggerMarkUnread}
+          triggerToggleRead={triggerToggle}
           onMarkRead={(mailId: string) => {
             setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: (m.labelIds||[]).filter(l => l !== 'UNREAD'), isUnread: false } : m));
             setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: (prev.labelIds||[]).filter(l => l !== 'UNREAD') } : prev);

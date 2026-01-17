@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useKeyboardNavigation, KeyboardShortcutsModal } from "@/hooks/useKeyboardNavigation";
 import KanbanColumn from "@/components/ui/KanbanColumn"; // Đảm bảo đường dẫn đúng
 import MailContent from "@/components/ui/MailContent";
 import RecoverLabelModal from "@/components/ui/RecoverLabelModal";
@@ -113,10 +114,22 @@ const MailReadingModal = ({
   isOpen,
   mail,
   onClose,
+  triggerStar,
+  triggerArchive,
+  triggerDelete,
+  triggerMarkRead,
+  triggerMarkUnread,
+  triggerToggleRead,
 }: {
   isOpen: boolean;
   mail: KanbanEmail | null;
   onClose: () => void;
+  triggerStar?: number;
+  triggerArchive?: number;
+  triggerDelete?: number;
+  triggerMarkRead?: number;
+  triggerMarkUnread?: number;
+  triggerToggleRead?: number;
 }) => {
   const { showToast } = useToast();
   const [isForwardOpen, setIsForwardOpen] = useState(false);
@@ -185,6 +198,12 @@ const MailReadingModal = ({
           onDelete={() => onClose()}
           onArchive={() => onClose()}
           triggerReply={0}
+          triggerStar={triggerStar}
+          triggerArchive={triggerArchive}
+          triggerDelete={triggerDelete}
+          triggerMarkRead={triggerMarkRead}
+          triggerMarkUnread={triggerMarkUnread}
+          triggerToggleRead={triggerToggleRead}
         />
         <ForwardModal
           isOpen={isForwardOpen}
@@ -502,6 +521,68 @@ export default function KanbanPage() {
   const [isSnoozeModalOpen, setSnoozeModalOpen] = useState(false);
   const [selectedItemToSnooze, setSelectedItemToSnooze] = useState<any>(null);
   const [openedMail, setOpenedMail] = useState<any | null>(null);
+  const [triggerStar, setTriggerStar] = useState(0);
+  const [triggerArchive, setTriggerArchive] = useState(0);
+  const [triggerDelete, setTriggerDelete] = useState(0);
+  const [triggerMarkRead, setTriggerMarkRead] = useState(0);
+  const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
+  const [triggerToggle, setTriggerToggle] = useState(0);
+
+  // Keyboard shortcuts (Kanban) — enable MailContent actions when reading modal is open
+  const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
+    isKanbanMode: true,
+    isEmailOpen: !!openedMail,
+    onMarkRead: () => {
+      setTriggerMarkRead((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerMarkRead(0), 150);
+        return v;
+      });
+    },
+    onMarkUnread: () => {
+      setTriggerMarkUnread((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerMarkUnread(0), 150);
+        return v;
+      });
+    },
+    onArchive: () => {
+      setTriggerArchive((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerArchive(0), 150);
+        return v;
+      });
+    },
+    onStar: () => {
+      // Trigger MailContent's internal star handler via trigger counter
+      setTriggerStar((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerStar(0), 150);
+        return v;
+      });
+    },
+    onDelete: () => {
+      setTriggerDelete((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerDelete(0), 150);
+        return v;
+      });
+    },
+    onToggleRead: () => {
+      setTriggerToggle((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerToggle(0), 150);
+        return v;
+      });
+    },
+    onOpenInGmail: () => {
+      if (!openedMail) return;
+      const threadId = openedMail.threadId || openedMail.id;
+      if (!threadId) return;
+      window.open(`https://mail.google.com/mail/u/0/#all/${threadId}`, '_blank', 'noopener,noreferrer');
+    },
+    onCloseEmail: () => setOpenedMail(null),
+  });
 
   // Recovery Modal State
   const [isRecoveryModalOpen, setRecoveryModalOpen] = useState(false);
@@ -966,6 +1047,12 @@ export default function KanbanPage() {
                             onOpenClick={async (item) => {
                               try {
                                 const detailed = await fetchEmailById(item.id);
+                                // Reset any outstanding keyboard triggers before opening
+                                setTriggerStar(0);
+                                setTriggerArchive(0);
+                                setTriggerDelete(0);
+                                setTriggerMarkRead(0);
+                                setTriggerMarkUnread(0);
                                 // fetchEmailById returns response.data shape; set opened mail to detailed object
                                 setOpenedMail(detailed?.data || detailed || item);
                               } catch (err) {
@@ -1346,8 +1433,25 @@ export default function KanbanPage() {
       <MailReadingModal
         isOpen={!!openedMail}
         mail={openedMail}
-        onClose={() => setOpenedMail(null)}
+        onClose={() => {
+          setOpenedMail(null);
+          setTriggerStar(0);
+          setTriggerArchive(0);
+          setTriggerDelete(0);
+          setTriggerMarkRead(0);
+          setTriggerMarkUnread(0);
+          setTriggerToggle(0);
+        }}
+        triggerStar={triggerStar}
+        triggerArchive={triggerArchive}
+        triggerDelete={triggerDelete}
+        triggerMarkRead={triggerMarkRead}
+        triggerMarkUnread={triggerMarkUnread}
+        triggerToggleRead={triggerToggle}
       />
+
+      {/* Keyboard Shortcuts Modal (Kanban) */}
+      <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
       {/* Snooze Modal */}
       <SnoozeModal

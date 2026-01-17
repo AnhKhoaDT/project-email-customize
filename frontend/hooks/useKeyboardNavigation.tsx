@@ -18,6 +18,7 @@ interface KeyboardNavigationOptions {
     onSelectToggle?: () => void;
     onMarkRead?: () => void;
     onMarkUnread?: () => void;
+    onToggleRead?: () => void;
     onNextColumn?: () => void;
     onPreviousColumn?: () => void;
     onJumpToColumn?: (columnIndex: number) => void;
@@ -59,6 +60,13 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
             return;
         }
 
+        // Always allow Shift+? to open the shortcuts modal, even when typing in inputs
+        if (e.shiftKey && e.key === '?') {
+            setShowShortcuts(prev => !prev);
+            e.preventDefault();
+            return;
+        }
+
         // If the search input is focused, allow Escape to unfocus (blur) it
         const isSearchInput = target instanceof HTMLElement && target.classList.contains?.('mailbox-search-input');
         if (isSearchInput && e.key === 'Escape') {
@@ -72,19 +80,16 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
         }
 
         // Don't handle other shortcuts when typing in input/textarea/contentEditable
-        if (
-            target.tagName === 'INPUT' ||
-            target.tagName === 'TEXTAREA' ||
-            target.isContentEditable ||
-            options.disabled
-        ) {
+        // Exception: when an email detail is open, allow shortcuts to work even if focus is inside the modal
+        const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        if ((isTextInput && !options.isEmailOpen) || options.disabled) {
             return;
         }
 
         // Ngăn hành động mặc định cho các phím tắt
         const preventDefaultKeys = [
             'j', 'k', 'x', 'e', 'y', 's', 'r', 'c', 'f', 'g', 'd', '#', 'v', 'l', 'z', 'n', 'p',
-            'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab', '/', '?'
+            'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab', '/', '?', 'm'
         ];
 
         if (preventDefaultKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
@@ -114,6 +119,41 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
                 options.onJumpToColumn?.(columnIndex);
                 return;
             }
+            // If Kanban shows an open mail detail, allow MailContent shortcuts too
+            if (options.isEmailOpen) {
+                // Handle shift+I / shift+U explicitly
+                if (e.shiftKey && e.key.toLowerCase() === 'i') {
+                    options.onMarkRead?.();
+                    return;
+                }
+                if (e.shiftKey && e.key.toLowerCase() === 'u') {
+                    options.onMarkUnread?.();
+                    return;
+                }
+
+                switch (e.key.toLowerCase()) {
+                    case 'e':
+                    case 'y':
+                        options.onArchive?.();
+                        return;
+                    case 's':
+                        options.onStar?.();
+                        return;
+                    case 'r':
+                        options.onReply?.();
+                        return;
+                    case 'f':
+                        options.onForward?.();
+                        return;
+                    case 'g':
+                        options.onOpenInGmail?.();
+                        return;
+                    case 'd':
+                    case '#':
+                        options.onDelete?.();
+                        return;
+                }
+            }
         }
 
         // Xử lý phím tắt trong chế độ Compose/Forward
@@ -136,6 +176,9 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
             switch (e.key.toLowerCase()) {
                 case 'esc':
                     options.onCloseEmail?.();
+                    break;
+                case 'm':
+                    options.onToggleRead?.();
                     break;
                 case 'e':
                 case 'y': // 'y' là phím tắt archive trong Gmail
@@ -168,6 +211,12 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
         }
         if (e.shiftKey && e.key.toLowerCase() === 'u') {
             options.onMarkUnread?.();
+            return;
+        }
+
+        // Toggle read/unread with 'm'
+        if (e.key.toLowerCase() === 'm') {
+            options.onToggleRead?.();
             return;
         }
 
@@ -274,12 +323,11 @@ export const KEYBOARD_SHORTCUTS = [
     {
         category: 'Actions',
         items: [
-            { keys: ['e'], description: 'Archive' },
-            { keys: ['s'], description: 'Star' },
             { keys: ['g'], description: 'Open in Gmail' },
+            { keys: ['s'], description: 'Star' },
+            { keys: ['e'], description: 'Archive' },
+            { keys: ['m'], description: 'Mark as read / unread' },
             { keys: ['#'], description: 'Delete' },
-            { keys: ['Shift', 'i'], description: 'Mark as read' },
-            { keys: ['Shift', 'u'], description: 'Mark as unread' },
         ],
     },
 

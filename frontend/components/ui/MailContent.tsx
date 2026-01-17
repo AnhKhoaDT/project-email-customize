@@ -97,6 +97,7 @@ const MailContent = ({
   const [isSending, setIsSending] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [isMarking, setIsMarking] = useState(false);
   const [isStarring, setIsStarring] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -473,7 +474,7 @@ const MailContent = ({
   // --- MARK READ ---
   const handleMarkRead = async (showToastFlag: boolean = true) => {
     if (!mail?.id) return;
-    setIsArchiving(true);
+    setIsMarking(true);
     try {
       const token = typeof window !== "undefined" ? window.__accessToken : null;
       if (!token) throw new Error("Not authenticated");
@@ -502,14 +503,14 @@ const MailContent = ({
       console.error("Mark read failed", error);
       showToast(`Failed to mark read: ${error.message}`, "error");
     } finally {
-      setIsArchiving(false);
+      setIsMarking(false);
     }
   };
 
   // --- MARK UNREAD ---
   const handleMarkUnread = async (showToastFlag: boolean = true) => {
     if (!mail?.id) return;
-    setIsArchiving(true);
+    setIsMarking(true);
     try {
       const token = typeof window !== "undefined" ? window.__accessToken : null;
       if (!token) throw new Error("Not authenticated");
@@ -538,7 +539,7 @@ const MailContent = ({
       console.error("Mark unread failed", error);
       showToast(`Failed to mark unread: ${error.message}`, "error");
     } finally {
-      setIsArchiving(false);
+      setIsMarking(false);
     }
   };
 
@@ -671,7 +672,8 @@ const MailContent = ({
           )}
           <button
             onClick={handleToggleRead}
-            className="p-2 hover:bg-muted hover:text-primary rounded-md transition-colors cursor-pointer"
+            disabled={isMarking}
+            className="p-2 hover:bg-muted hover:text-primary rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             title={isUnread ? "Mark as read" : "Mark as unread"}
             aria-label={isUnread ? "Mark as read" : "Mark as unread"}
           >

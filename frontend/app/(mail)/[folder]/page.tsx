@@ -118,6 +118,8 @@ export default function FolderPage() {
   const [triggerMarkRead, setTriggerMarkRead] = useState(0);
   const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
   const [triggerMarkReadAuto, setTriggerMarkReadAuto] = useState(0);
+  // Counter to trigger toggle read/unread (keyboard 'm') in MailContent
+  const [triggerToggle, setTriggerToggle] = useState(0);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -291,6 +293,36 @@ export default function FolderPage() {
         })();
       }
     },
+    onToggleRead: () => {
+      if (selectedMail) {
+        setTriggerToggle((t) => t + 1);
+        setTimeout(() => setTriggerToggle(0), 80);
+      } else if (mails[focusedIndex]) {
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
+            const action = isUnread ? 'markRead' : 'markUnread';
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action }),
+            });
+            if (!res.ok) throw new Error('Failed to toggle read');
+            if (isUnread) {
+              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            } else {
+              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            }
+          } catch (err) {
+            console.error('Toggle read failed', err);
+          }
+        })();
+      }
+    },
     onArchive: () => {
       if (selectedMail) {
         setTriggerArchive((t) => t + 1);
@@ -454,6 +486,7 @@ export default function FolderPage() {
           triggerArchive={triggerArchive}
           triggerReply={replyTrigger}
           triggerMarkRead={triggerMarkRead}
+          triggerToggleRead={triggerToggle}
           triggerMarkReadAuto={triggerMarkReadAuto}
           triggerMarkUnread={triggerMarkUnread}
           onMarkRead={(mailId: string) => {

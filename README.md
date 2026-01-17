@@ -109,8 +109,7 @@ Common keyboard shortcuts available across folder views (Inbox, Starred, Archive
   - `s`: Toggle star
   - `g`: Open in Gmail (opens thread in Gmail web)
   - `#` / `d`: Delete (move to Trash)
-  - `Shift+i`: Mark as read
-  - `Shift+u`: Mark as unread
+  - `m`: Mark as read / unread
 
 - Compose / Reply / Forward
   - `c`: Compose new email
