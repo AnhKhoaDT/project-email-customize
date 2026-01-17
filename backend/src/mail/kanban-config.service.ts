@@ -73,9 +73,19 @@ export class KanbanConfigService {
   private async createDefaultConfig(userId: string): Promise<any> {
     const defaultColumns: KanbanColumn[] = [
       {
+        id: 'inbox',
+        name: 'Inbox',
+        order: 0,
+        gmailLabel: 'INBOX',
+        mappingType: 'label',
+        color: '#3b82f6',
+        isVisible: true,
+        emailCount: 0,
+      },
+      {
         id: 'todo',
         name: 'To Do',
-        order: 0,
+        order: 1,
         gmailLabel: 'STARRED',
         mappingType: 'label',
         color: '#FFA500',
@@ -85,7 +95,7 @@ export class KanbanConfigService {
       {
         id: 'in_progress',
         name: 'In Progress',
-        order: 1,
+        order: 2,
         gmailLabel: 'IMPORTANT',
         mappingType: 'label',
         color: '#4169E1',
@@ -95,7 +105,7 @@ export class KanbanConfigService {
       {
         id: 'done',
         name: 'Done',
-        order: 2,
+        order: 3,
         gmailLabel: null,
         mappingType: 'label',
         color: '#32CD32',
@@ -104,7 +114,7 @@ export class KanbanConfigService {
       },
     ];
 
-    logger.debug('Creating default Kanban config');
+    logger.debug('Creating default Kanban config with columns:', defaultColumns.map(c => c.id));
 
     const config = await this.kanbanConfigModel.create({
       userId,
