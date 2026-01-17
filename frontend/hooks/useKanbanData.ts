@@ -106,7 +106,7 @@ export const useKanbanData = () => {
       sender: getSenderName(email.from),
       subject: email.subject || "(No Subject)",
       snippet: email.snippet || "",
-      summary: email.summary || "",
+      summary: email.summary || email.snippet || "No summary available",
       from: email.from,
       date: email.date,
       time: formatTime(email.date),
@@ -178,7 +178,9 @@ export const useKanbanData = () => {
       setSnoozedItems(snoozedRaw.map(transformEmail));
 
       // 3. Build initial columns structure (empty items, will be loaded separately)
-      const fixedInboxColumn: Column = {
+      // If backend already includes an `inbox` column, don't insert a fixed one to avoid duplication.
+      const backendHasInbox = backendColumns.some((c: any) => c.id === 'inbox');
+      const fixedInboxColumn: Column | null = backendHasInbox ? null : {
         id: "inbox",
         title: "Inbox",
         isSystem: true,
@@ -312,7 +314,7 @@ export const useKanbanData = () => {
             items: []
           };
 
-          finalColumns = [fixedInboxColumn, defaultTodo, defaultDone, defaultProgress];
+          finalColumns = [(fixedInboxColumn || { id: 'inbox', title: 'Inbox', isSystem: true, color: '#3b82f6', gmailLabel: 'INBOX', items: [] }), defaultTodo, defaultDone, defaultProgress];
           console.log('✅ Default columns created in backend');
         } catch (err: any) {
           console.error('❌ Failed to create default columns:', err);
@@ -320,12 +322,12 @@ export const useKanbanData = () => {
           const defaultTodo: Column = { id: "todo", title: "To Do", isSystem: false, color: "#f97316", gmailLabel: "STARRED", items: [] };
           const defaultDone: Column = { id: "done", title: "Done", isSystem: false, color: "#22c55e", gmailLabel: "ARCHIVE", items: [] };
           const defaultProgress: Column = { id: "in_progress", title: "In Progress", isSystem: false, color: "#eab308", gmailLabel: "IMPORTANT", items: [] };
-          finalColumns = [fixedInboxColumn, defaultTodo, defaultDone];
+          finalColumns = [(fixedInboxColumn || { id: 'inbox', title: 'Inbox', isSystem: true, color: '#3b82f6', gmailLabel: 'INBOX', items: [] }), defaultTodo, defaultDone];
         }
       } else {
         // Filter out invisible columns and maintain order from database
         const visibleColumns = mappedBackendColumns.filter(col => col.isVisible !== false);
-        finalColumns = [fixedInboxColumn, ...visibleColumns];
+        finalColumns = fixedInboxColumn ? [fixedInboxColumn, ...visibleColumns] : visibleColumns;
       }
       setColumns(finalColumns);
 
@@ -387,12 +389,6 @@ export const useKanbanData = () => {
         colEmailMap[r.colId] = r.raw || [];
       });
 
-      // Transform and assign emails to columns
-      setColumns(prev => prev.map(col => ({
-        ...col,
-        items: (colEmailMap[col.id] || []).map(transformEmail)
-      })));
-
       // After assigning inbox items, trigger summary generation for first 5 inbox emails
       try {
         setColumns(prev => prev.map(col => ({
@@ -402,7 +398,16 @@ export const useKanbanData = () => {
 
         const inboxRaw = colEmailMap['inbox'] || [];
         const inboxTransformed: KanbanEmail[] = inboxRaw.map(transformEmail);
-        const emailsToGenerate = inboxTransformed.slice(0, 5).filter(email => !email.summary || email.summary === "");
+        const emailsToGenerate = inboxTransformed.slice(0, 5).filter(
+          email => !email.summary ||
+            email.summary === email.snippet ||
+            email.summary === "No summary available");
+
+        // Transform and assign emails to columns
+        setColumns(prev => prev.map(col => ({
+          ...col,
+          items: (colEmailMap[col.id] || []).map(transformEmail)
+        })));
 
         setTimeout(() => {
           emailsToGenerate.forEach((email) => {

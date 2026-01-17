@@ -59,11 +59,28 @@ export class EmailMetadataService {
     const fromColumnId = meta?.kanbanColumnId || null;
 
     // 1. Load destination items sorted ascending by position
-    let destItems: any[] = await this.emailMetadataModel
-      .find({ userId, kanbanColumnId: toColumnId })
-      .sort({ position: 1 })
-      .lean()
-      .exec();
+    let destItems: any[];
+    if (toColumnId === 'inbox') {
+      // Inbox is special: include emails explicitly assigned to 'inbox' AND those without any kanbanColumnId
+      destItems = await this.emailMetadataModel
+        .find({
+          userId,
+          $or: [
+            { kanbanColumnId: 'inbox' },
+            { kanbanColumnId: { $exists: false } },
+            { kanbanColumnId: null }
+          ]
+        })
+        .sort({ position: 1, kanbanUpdatedAt: -1 })
+        .lean()
+        .exec();
+    } else {
+      destItems = await this.emailMetadataModel
+        .find({ userId, kanbanColumnId: toColumnId })
+        .sort({ position: 1 })
+        .lean()
+        .exec();
+    }
 
     // 2. If moving within same column, remove the moving item
     if (fromColumnId === toColumnId) {
@@ -92,8 +109,59 @@ export class EmailMetadataService {
     };
 
     let newPosition: number;
-    let finalPrev: number | null = prev ? Number(prev.position) : null;
-    let finalNext: number | null = next ? Number(next.position) : null;
+    const toNumberOrNull = (v: any): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    let finalPrev: number | null = prev ? toNumberOrNull(prev.position) : null;
+    let finalNext: number | null = next ? toNumberOrNull(next.position) : null;
+
+    // If some destination items lack numeric positions (common for newly synced inbox items),
+    // fill in synthetic positions preserving current order so neighbor averaging works.
+    const GAP = 60000;
+    const ensureNumericPositions = (items: any[]) => {
+      let lastPos: number | null = null;
+      for (let i = 0; i < items.length; i++) {
+        const n = toNumberOrNull(items[i].position);
+        if (n === null) {
+          // derive position: if next item has numeric pos, place halfway; else increment by GAP
+          const nextNum = toNumberOrNull(items[i + 1]?.position);
+          if (lastPos === null && nextNum !== null) {
+            items[i].position = Math.floor(nextNum / 2);
+          } else if (lastPos !== null) {
+            items[i].position = lastPos + GAP;
+          } else if (nextNum !== null) {
+            items[i].position = Math.floor(nextNum / 2);
+          } else {
+            items[i].position = (i + 1) * GAP;
+          }
+        } else {
+          items[i].position = n;
+        }
+        lastPos = Number(items[i].position);
+      }
+    };
+
+    ensureNumericPositions(destItems);
+
+    // Recompute neighbors after filling positions
+    const recomputeNeighbor = (index: number) => {
+      const p = index > 0 ? destItems[index - 1] : null;
+      const nx = destItems[index] || null;
+      return { prev: p ? Number(p.position) : null, next: nx ? Number(nx.position) : null };
+    };
+
+    if (fromColumnId === toColumnId) {
+      // if moving within same column, we already removed the moving item earlier
+    }
+
+    // If prev/next were null earlier, try to recompute from destItems using destinationIndex
+    if (finalPrev === null || finalNext === null) {
+      const nb = recomputeNeighbor(destinationIndex as number);
+      finalPrev = finalPrev ?? nb.prev;
+      finalNext = finalNext ?? nb.next;
+    }
 
     if (finalPrev !== null && finalNext !== null && (finalNext - finalPrev) < MIN_GAP) {
       // Gap too small -> reindex column, then recompute
@@ -116,8 +184,8 @@ export class EmailMetadataService {
       const rPrev = destinationIndex > 0 ? refreshed[destinationIndex - 1] : null;
       const rNext = refreshed[destinationIndex] || null;
 
-      finalPrev = rPrev ? Number(rPrev.position) : null;
-      finalNext = rNext ? Number(rNext.position) : null;
+      finalPrev = rPrev ? toNumberOrNull(rPrev.position) : null;
+      finalNext = rNext ? toNumberOrNull(rNext.position) : null;
       newPosition = calculatePos(finalPrev, finalNext);
     } else {
       newPosition = calculatePos(finalPrev, finalNext);
@@ -133,11 +201,13 @@ export class EmailMetadataService {
       updateObj.previousColumnId = fromColumnId;
     }
 
-    return this.emailMetadataModel.findOneAndUpdate(
+    const result = await this.emailMetadataModel.findOneAndUpdate(
       { userId, emailId },
       { $set: updateObj },
       { upsert: true, new: true }
     ).exec();
+
+    return result;
   }
 
   async getKanbanColumn(userId: string, emailId: string) {
