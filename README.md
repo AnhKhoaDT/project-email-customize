@@ -92,6 +92,41 @@ This project demonstrates a production-ready React application with:
 - [x] **Visual Feedback**: Real-time drag-over effects and status updates
 - [x] **Dark/Light Theme**: Full theme support across all components
 
+## ⌨️ Keyboard Shortcuts
+
+Common keyboard shortcuts available across folder views (Inbox, Starred, Archive, etc.):
+
+- Navigation
+  - `j` / `↓`: Next email
+  - `k` / `↑`: Previous email
+  - `Enter`: Open selected email
+  - `Esc`: Close open email
+  - `Tab`: Next column (Kanban)
+  - `Shift+Tab`: Previous column (Kanban)
+
+- Actions
+  - `e` / `y`: Archive email
+  - `s`: Toggle star
+  - `g`: Open in Gmail (opens thread in Gmail web)
+  - `#` / `d`: Delete (move to Trash)
+  - `Shift+i`: Mark as read
+  - `Shift+u`: Mark as unread
+
+- Compose / Reply / Forward
+  - `c`: Compose new email
+  - `r`: Reply
+  - `f`: Forward
+  - `Ctrl+Enter`: Send (when composing)
+
+- Other
+  - `/`: Focus search input
+  - `Ctrl+/`: Clear search
+  - `?`: Toggle keyboard shortcuts modal
+
+Notes:
+- Shortcuts are disabled when typing in inputs or content-editable areas.
+- The canonical keymap is defined in `frontend/hooks/useKeyboardNavigation.tsx` and shown in the in-app Shortcuts modal.
+
 ## 🛠️ Tech Stack
 
 ### Frontend

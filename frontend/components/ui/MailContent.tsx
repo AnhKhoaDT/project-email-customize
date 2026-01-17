@@ -25,6 +25,7 @@ interface MailContentProps {
   onDelete?: (mailId: string) => void;
   onArchive?: (mailId: string) => void;
   triggerArchive?: number;
+  triggerDelete?: number;
   triggerReply?: number;
   triggerStar?: number;
 }
@@ -74,6 +75,7 @@ const MailContent = ({
   triggerArchive,
   triggerReply,
   triggerStar,
+  triggerDelete,
 }: MailContentProps) => {
   const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
@@ -103,10 +105,24 @@ const MailContent = ({
   // Trigger archive from parent (keyboard shortcut)
   useEffect(() => {
     if (typeof (triggerArchive) === 'number' && triggerArchive > 0) {
-      handleArchive();
+      // If the mail is currently in INBOX, archive it; otherwise (it's archived), move it back to INBOX
+      const isInInbox = Array.isArray(mail?.labelIds) && mail?.labelIds.includes("INBOX");
+      if (isInInbox) {
+        handleArchive();
+      } else {
+        handleMoveToInbox();
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerArchive]);
+
+  // Trigger delete from parent (keyboard shortcut)
+  useEffect(() => {
+    if (typeof (triggerDelete) === 'number' && triggerDelete > 0) {
+      handleDelete();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerDelete]);
 
   // Focus and scroll to reply textarea when reply mode is activated
   useEffect(() => {

@@ -51,6 +51,8 @@ export default function Home() {
   const [replyTrigger, setReplyTrigger] = useState(0);
   // Counter to trigger archive in MailContent (used when an email is open)
   const [triggerArchive, setTriggerArchive] = useState(0);
+  // Counter to trigger delete in MailContent (used when an email is open)
+  const [triggerDelete, setTriggerDelete] = useState(0);
 
   // Fetch inbox mails function (reusable) - Define BEFORE useSearch
   const fetchInboxMails = useCallback(async () => {
@@ -162,7 +164,13 @@ export default function Home() {
     onNextEmail: () => setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
     onPreviousEmail: () => setFocusedIndex((i) => Math.max(i - 1, 0)),
     onOpenEmail: () => mails[focusedIndex] && handleSelectMail(mails[focusedIndex]),
-    onDelete: () => mails[focusedIndex] && handleDeleteEmail(mails[focusedIndex].id),
+    onDelete: () => {
+      if (selectedMail) {
+        setTriggerDelete((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        handleDeleteEmail(mails[focusedIndex].id);
+      }
+    },
     onArchive: () => {
       if (selectedMail) {
         // Let MailContent handle the archive when detail is open
@@ -229,6 +237,7 @@ export default function Home() {
       const input = document.querySelector('.mailbox-search-input') as HTMLInputElement | null;
       input?.focus();
     },
+    onClearSearch: onClearSearch,
     isEmailOpen: !!selectedMail,
     onCompose: () => setComposeOpen(true),
     isComposing: Boolean(isComposeOpen || isForwardOpen),
@@ -455,6 +464,7 @@ export default function Home() {
           onForwardClick={() => selectedMail && setIsForwardOpen(true)}
           onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
           onDelete={handleDeleteEmail}
+          triggerDelete={triggerDelete}
           onArchive={handleArchiveEmail}
           triggerArchive={triggerArchive}
           triggerReply={replyTrigger}
