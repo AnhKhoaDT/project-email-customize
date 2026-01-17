@@ -205,6 +205,8 @@ const SideBar = ({
           {/* Settings - Example Link */}
           <Link
             href="/settings"
+            onClick={(e) => e.preventDefault()}
+            aria-disabled="true"
             className={`cursor-pointer flex flex-row items-center rounded-sm px-2 hover:bg-muted/50
              ${
                isExpanded ? "justify-start gap-2" : "justify-center"

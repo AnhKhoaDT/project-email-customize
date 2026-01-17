@@ -357,21 +357,55 @@ const RecoverLabelModal: React.FC<RecoverLabelModalProps> = ({
                     
                     {systemLabels.length > 0 && (
                       <optgroup label="System Labels">
-                        {systemLabels.map((label) => (
-                          <option key={label.id} value={label.name}>
-                            {label.name}
-                          </option>
-                        ))}
+                        {systemLabels.map((label) => {
+                          const mappedCol = existingColumns.find((col: any) => {
+                            if (col.id === columnId) return false;
+                            const colLabel = (col.gmailLabel || "").toString();
+                            const colLabelName = (col.gmailLabelName || "").toString();
+                            const colTitle = (col.title || col.name || "").toString();
+
+                            const labelName = (label.name || "").toString();
+                            const labelId = (label.id || "").toString();
+
+                            return (
+                              // direct id match (gmail system ids like INBOX)
+                              colLabel === labelId ||
+                              // stored id case-insensitive
+                              colLabel.toLowerCase() === labelId.toLowerCase() ||
+                              // stored label equals friendly name
+                              colLabel.toLowerCase() === labelName.toLowerCase() ||
+                              // explicit stored gmailLabelName
+                              colLabelName.toLowerCase() === labelName.toLowerCase() ||
+                              // column title matches label name (fallback)
+                              colTitle.toLowerCase() === labelName.toLowerCase()
+                            );
+                          });
+                          const mapped = !!mappedCol;
+                          return (
+                            <option key={label.id} value={label.id} disabled={mapped}>
+                              {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                            </option>
+                          );
+                        })}
                       </optgroup>
                     )}
-                    
+
                     {userLabels.length > 0 && (
                       <optgroup label="Custom Labels">
-                        {userLabels.map((label) => (
-                          <option key={label.id} value={label.name}>
-                            {label.name}
-                          </option>
-                        ))}
+                        {userLabels.map((label) => {
+                          const mappedCol = existingColumns.find((col: any) =>
+                            col.id !== columnId && (
+                              (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
+                              (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
+                            )
+                          );
+                          const mapped = !!mappedCol;
+                          return (
+                            <option key={label.id} value={label.id} disabled={mapped}>
+                              {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                            </option>
+                          );
+                        })}
                       </optgroup>
                     )}
                   </select>

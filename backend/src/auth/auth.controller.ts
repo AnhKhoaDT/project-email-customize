@@ -1,13 +1,19 @@
 import { Body, Controller, Post, Req, UnauthorizedException, BadRequestException, Get, Query, Res } from '@nestjs/common';
 import { Response, Request } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto } from './dto/login.dto';
 import { UsersService } from '../users/users.service';
+import { GmailSyncService } from '../mail/gmail-sync.service';
+import { GmailHistorySyncService } from '../mail/gmail-history-sync.service';
+import { LoginDto } from './dto/login.dto';
 import { google } from 'googleapis';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService, private usersService: UsersService) {}
+  constructor(
+    private authService: AuthService, 
+    private usersService: UsersService,
+    private gmailHistorySyncService: GmailHistorySyncService,
+  ) {}
 
   @Post('login')
   async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
@@ -25,6 +31,13 @@ export class AuthController {
     res.cookie('refreshToken', result.refreshToken, cookieOptions);
     
     // Return access token + user (omit refreshToken from body since it's in cookie)
+    // Start per-user incremental scheduler from login time
+    try {
+      this.gmailHistorySyncService.startUserScheduler(result.user.id);
+    } catch (e) {
+      console.error(`[Auth] Failed to start scheduler for ${result.user.id}:`, e?.message || e);
+    }
+
     return {
       accessToken: result.accessToken,
       user: { id: result.user.id, email: result.user.email, name: result.user.name },
@@ -166,6 +179,16 @@ export class AuthController {
     };
     if (res) {
       res.cookie('refreshToken', session.refreshToken, cookieOptions);
+      // Initialize historyId and start per-user scheduler
+      const uid = user._id.toString();
+      this.gmailHistorySyncService.initializeUserHistory(uid).catch(err => {
+        console.error(`[Auth] Failed to initialize Gmail historyId for ${uid}:`, err.message);
+      });
+      try {
+        this.gmailHistorySyncService.startUserScheduler(uid);
+      } catch (e) {
+        console.error(`[Auth] Failed to start scheduler for ${uid}:`, e?.message || e);
+      }
       // Optionally the frontend can then call POST /auth/refresh to get an access token.
       return res.redirect(target + '?auth=success');
     }
@@ -207,6 +230,20 @@ export class AuthController {
     // create app session tokens
     const session = this.authService.createSessionForUser({ id: user._id.toString(), email: user.email });
 
+    // Initialize Gmail historyId for the user now that we have a refresh token.
+    // This sets up incremental history sync; heavy full syncs should be performed
+    // by background cron/interval (GmailHistorySyncService) rather than here.
+    const userId = user._id.toString();
+    this.gmailHistorySyncService.initializeUserHistory(userId).catch(err => {
+      console.error(`[Auth] Failed to initialize Gmail historyId for ${userId}:`, err.message);
+    });
+    // Start per-user incremental scheduler
+    try {
+      this.gmailHistorySyncService.startUserScheduler(userId);
+    } catch (e) {
+      console.error(`[Auth] Failed to start scheduler for ${userId}:`, e?.message || e);
+    }
+
     return {
       user: { id: user._id.toString(), email: user.email, name: user.name },
       tokens: session,
@@ -242,6 +279,12 @@ export class AuthController {
       // Revoke Google OAuth refresh token if exists
       if (userId) {
         await this.authService.revokeGoogleRefreshToken(userId);
+        // Stop per-user incremental scheduler on logout
+        try {
+          this.gmailHistorySyncService.stopUserScheduler(userId);
+        } catch (e) {
+          console.error(`[Auth] Failed to stop scheduler for ${userId}:`, e?.message || e);
+        }
       }
     }
     

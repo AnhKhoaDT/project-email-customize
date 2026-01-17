@@ -6,6 +6,8 @@ import {
   IoMdClose,
   IoMdMore,
   IoMdSend,
+  IoMdMailOpen,
+  IoMdMailUnread,
 } from "react-icons/io";
 import { BsArchive, BsTrash3, BsInboxFill } from "react-icons/bs";
 import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt, FaStar, FaRegStar } from "react-icons/fa";
@@ -24,10 +26,25 @@ interface MailContentProps {
   onReplyClick?: () => void;
   onDelete?: (mailId: string) => void;
   onArchive?: (mailId: string) => void;
+  triggerArchive?: number;
+  triggerDelete?: number;
+  triggerMarkRead?: number;
+  triggerMarkReadAuto?: number;
+  triggerMarkUnread?: number;
+  triggerToggleRead?: number;
   triggerReply?: number;
+  triggerStar?: number;
+  onMarkRead?: (mailId: string) => void;
+  onMarkUnread?: (mailId: string) => void;
+  // When true, include deleteMetadata:true in modify API calls for delete action
+  deleteMetadataOnModify?: boolean;
+  // When true, suppress MailContent's own success toast on delete (parent will show one)
+  suppressDeleteToast?: boolean;
+  // When false, do not perform the server-side delete here; parent will handle it.
+  performServerDelete?: boolean;
 }
 
-// ... (Giữ nguyên các hàm Helper: getSenderName, getSenderEmail, formatDate) ...
+// Helper functions
 const getSenderName = (fromStr: string) => {
   if (!fromStr) return "Unknown";
   const parts = fromStr.split("<");
@@ -69,7 +86,19 @@ const MailContent = ({
   onReplyClick,
   onDelete,
   onArchive,
+  triggerArchive,
   triggerReply,
+  triggerStar,
+  triggerDelete,
+  triggerMarkRead,
+  triggerMarkUnread,
+  triggerToggleRead,
+  triggerMarkReadAuto,
+  onMarkRead,
+  onMarkUnread,
+  deleteMetadataOnModify,
+  suppressDeleteToast,
+  performServerDelete = true,
 }: MailContentProps) => {
   const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
@@ -77,6 +106,7 @@ const MailContent = ({
   const [isSending, setIsSending] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [isMarking, setIsMarking] = useState(false);
   const [isStarring, setIsStarring] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -87,6 +117,70 @@ const MailContent = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerReply]);
+
+  // Trigger star toggle from parent (keyboard shortcut)
+  useEffect(() => {
+    if (typeof (triggerStar) === 'number' && triggerStar > 0) {
+      handleToggleStar();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerStar]);
+
+  // Trigger archive from parent (keyboard shortcut)
+  useEffect(() => {
+    if (typeof (triggerArchive) === 'number' && triggerArchive > 0) {
+      // If the mail is currently in INBOX, archive it; otherwise (it's archived), move it back to INBOX
+      const isInInbox = Array.isArray(mail?.labelIds) && mail?.labelIds.includes("INBOX");
+      if (isInInbox) {
+        handleArchive();
+      } else {
+        handleMoveToInbox();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerArchive]);
+
+  // Trigger mark read from parent
+  useEffect(() => {
+    if (typeof (triggerMarkRead) === 'number' && triggerMarkRead > 0) {
+      // User-initiated trigger (keyboard) — show toast
+      handleMarkRead();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerMarkRead]);
+
+  // Trigger mark read from parent for automatic mark-on-open (suppress toast)
+  useEffect(() => {
+    if (typeof (triggerMarkReadAuto) === 'number' && triggerMarkReadAuto > 0) {
+      // Automatic mark (when user opens a mail) — do not show toast
+      handleMarkRead(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerMarkReadAuto]);
+
+  // Trigger mark unread from parent
+  useEffect(() => {
+    if (typeof (triggerMarkUnread) === 'number' && triggerMarkUnread > 0) {
+      handleMarkUnread();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerMarkUnread]);
+
+  // Trigger toggle read/unread from parent
+  useEffect(() => {
+    if (typeof (triggerToggleRead) === 'number' && triggerToggleRead > 0) {
+      handleToggleRead();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerToggleRead]);
+
+  // Trigger delete from parent (keyboard shortcut)
+  useEffect(() => {
+    if (typeof (triggerDelete) === 'number' && triggerDelete > 0) {
+      handleDelete();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerDelete]);
 
   // Focus and scroll to reply textarea when reply mode is activated
   useEffect(() => {
@@ -112,6 +206,7 @@ const MailContent = ({
 
   const senderName = getSenderName(mail.from);
   const senderEmail = getSenderEmail(mail.from);
+  const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
 
   const handleReplyClick = () => {
     setIsReplying(true);
@@ -171,28 +266,27 @@ const MailContent = ({
   // --- ARCHIVE EMAIL FUNCTION ---
   const handleArchive = async () => {
     if (!mail?.id) return;
-
+    // Optimistic update: call parent callback and show toast immediately
     setIsArchiving(true);
-
     try {
-      // Get Token
+      if (onArchive) {
+        onArchive(mail.id);
+      }
+      showToast("Email archived successfully", "success");
+
+      // Perform API call in background; if it fails, notify user (no automatic revert)
       const token = typeof window !== "undefined" ? window.__accessToken : null;
       if (!token) {
-        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
-        setIsArchiving(false);
-        return;
+        throw new Error("Not authenticated");
       }
 
-      // Call API
       const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          action: "archive",
-        }),
+        body: JSON.stringify({ action: "archive" }),
       });
 
       if (!response.ok) {
@@ -200,14 +294,7 @@ const MailContent = ({
         throw new Error(errorData.message || "Failed to archive email");
       }
 
-      // Success - call parent callback
-      if (onArchive) {
-        onArchive(mail.id);
-      }
-
-      showToast("Email archived successfully", "success");
-
-      // Go back to list
+      // Successful server confirmation - nothing more to do (already optimistic)
       if (onBack) {
         onBack();
       }
@@ -216,6 +303,18 @@ const MailContent = ({
       showToast(`Failed to archive: ${error.message}`, "error");
     } finally {
       setIsArchiving(false);
+    }
+  };
+
+  // Open in Gmail handler (only opens Gmail)
+  const handleOpenInGmail = (e?: React.MouseEvent) => {
+    try {
+      const url = `https://mail.google.com/mail/u/0/#all/${mail.threadId}`;
+      // If called from an anchor, prevent duplicate navigation
+      if (e) e.preventDefault();
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.error('Open in Gmail failed', err);
     }
   };
 
@@ -329,6 +428,18 @@ const MailContent = ({
   const handleDelete = async () => {
     if (!mail?.id) return;
 
+    // If parent is responsible for server delete, delegate confirmation and server call to parent
+    if (!performServerDelete) {
+      if (onDelete) {
+        try {
+          onDelete(mail.id);
+        } catch (e) {
+          console.error('onDelete callback error (delegated):', e);
+        }
+      }
+      return;
+    }
+
     const confirmed = window.confirm(
       "Are you sure you want to delete this email? It will be moved to Trash."
     );
@@ -337,47 +448,131 @@ const MailContent = ({
     setIsDeleting(true);
 
     try {
-      // Get Token
-      const token = typeof window !== "undefined" ? window.__accessToken : null;
-      if (!token) {
-        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
-        setIsDeleting(false);
-        return;
-      }
-
-      // Call API
-      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          action: "delete",
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to delete email");
-      }
-
-      // Success - call parent callback
+      // Optimistic: notify parent immediately so UI can remove the item
       if (onDelete) {
-        onDelete(mail.id);
+        try {
+          onDelete(mail.id);
+        } catch (e) {
+          // Parent callback should not throw; log just in case
+          console.error('onDelete callback error (optimistic):', e);
+        }
       }
 
-      showToast("Email moved to trash", "success");
+      // Show toast immediately unless parent requested suppression
+      if (!suppressDeleteToast) {
+        showToast("Email moved to trash", "success");
+      }
 
-      // Go back to list
-      if (onBack) {
-        onBack();
+      // Perform server-side move-to-trash in background if this component is responsible for it
+      if (performServerDelete) {
+        const token = typeof window !== "undefined" ? window.__accessToken : null;
+        if (!token) {
+          throw new Error("Not authenticated");
+        }
+
+        const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            action: "delete",
+            ...(typeof deleteMetadataOnModify !== 'undefined' && deleteMetadataOnModify ? { deleteMetadata: true } : {}),
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || "Failed to delete email");
+        }
       }
     } catch (error: any) {
       console.error("Error deleting email:", error);
       showToast(`Failed to delete: ${error.message}`, "error");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  // --- MARK READ ---
+  const handleMarkRead = async (showToastFlag: boolean = true) => {
+    if (!mail?.id) return;
+    setIsMarking(true);
+    try {
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "markRead" }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to mark read");
+      }
+      // Optimistic update: remove UNREAD label if present
+      if (mail.labelIds) {
+        mail.labelIds = mail.labelIds.filter((l) => l !== "UNREAD");
+      }
+      if (typeof showToastFlag === 'undefined' || showToastFlag) {
+        showToast("Marked as read", "success");
+        // Notify parent only for user-initiated actions
+        if (onMarkRead) onMarkRead(mail.id as string);
+      }
+    } catch (error: any) {
+      console.error("Mark read failed", error);
+      showToast(`Failed to mark read: ${error.message}`, "error");
+    } finally {
+      setIsMarking(false);
+    }
+  };
+
+  // --- MARK UNREAD ---
+  const handleMarkUnread = async (showToastFlag: boolean = true) => {
+    if (!mail?.id) return;
+    setIsMarking(true);
+    try {
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "markUnread" }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to mark unread");
+      }
+      // Optimistic update: add UNREAD label if missing
+      if (mail.labelIds && !mail.labelIds.includes("UNREAD")) {
+        mail.labelIds.push("UNREAD");
+      }
+      if (typeof showToastFlag === 'undefined' || showToastFlag) {
+        showToast("Marked as unread", "success");
+        // Notify parent only for user-initiated actions
+        if (onMarkUnread) onMarkUnread(mail.id as string);
+      }
+    } catch (error: any) {
+      console.error("Mark unread failed", error);
+      showToast(`Failed to mark unread: ${error.message}`, "error");
+    } finally {
+      setIsMarking(false);
+    }
+  };
+
+  const handleToggleRead = () => {
+    const isUnread = Array.isArray(mail?.labelIds) && mail?.labelIds.includes("UNREAD");
+    if (isUnread) {
+      handleMarkRead();
+    } else {
+      handleMarkUnread();
     }
   };
 
@@ -442,12 +637,12 @@ const MailContent = ({
       <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background">
         <div className="flex items-center gap-4 text-secondary">
           <button
-            className="hover:text-foreground transition-colors cursor-pointer"
+            className="hover:text-primary  hover:bg-muted rounded-md p-2 transition-colors cursor-pointer"
             onClick={onBack}
           >
             <IoMdClose size={20} />
           </button>
-          <div className="h-4 w-px bg-divider dark:bg-gray-700 mx-1"></div>
+          <div className="h-4 w-px mx-2"></div>
 
           <button
             className="hover:text-foreground transition-colors md:hidden cursor-pointer"
@@ -457,21 +652,17 @@ const MailContent = ({
             <IoMdArrowBack size={20} />
           </button>
 
-          <button className="hover:text-foreground transition-colors cursor-pointer">
-            <IoMdArrowForward size={20} />
-          </button>
         </div>
 
         <div className="flex items-center gap-2 text-secondary">
-          <a
-            href={`https://mail.google.com/mail/u/0/#all/${mail.threadId}`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={(e) => handleOpenInGmail(e)}
             className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-500 cursor-pointer"
             title="Open in Gmail"
+            aria-label="Open in Gmail"
           >
             <SiGmail size={18} />
-          </a>
+          </button>
           <button
             onClick={handleToggleStar}
             disabled={isStarring}
@@ -503,6 +694,19 @@ const MailContent = ({
               <BsInboxFill size={18} />
             </button>
           )}
+          <button
+            onClick={handleToggleRead}
+            disabled={isMarking}
+            className="p-2 hover:bg-muted hover:text-primary rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            title={isUnread ? "Mark as read" : "Mark as unread"}
+            aria-label={isUnread ? "Mark as read" : "Mark as unread"}
+          >
+            {isUnread ? (
+              <IoMdMailUnread size={18} />
+            ) : (
+              <IoMdMailOpen size={18} />
+            )}
+          </button>
           <button
             onClick={handleDelete}
             disabled={isDeleting}
@@ -537,7 +741,7 @@ const MailContent = ({
           {/* Sender Info Row */}
           <div className="flex flex-row justify-between items-start">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
+              <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
                 {senderName.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col">
@@ -553,16 +757,15 @@ const MailContent = ({
               </div>
             </div>
             <div className="flex items-center gap-3 text-secondary text-sm">
-              <a
-                href={`https://mail.google.com/mail/u/0/#all/${mail.threadId}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                onClick={(e) => handleOpenInGmail(e)}
                 className="hidden md:flex items-center gap-1.5 hover:text-foreground hover:bg-muted px-2 py-1 rounded transition-colors text-xs font-medium"
                 title="Open in Gmail"
+                aria-label="Open in Gmail"
               >
                 <SiGmail size={14} />
                 Open in Gmail
-              </a>
+              </button>
               <span>{formatDate(mail.date)}</span>
               <button className="p-1 hover:bg-muted rounded hover:text-foreground cursor-pointer">
                 <IoMdMore size={20} />
@@ -680,7 +883,7 @@ const MailContent = ({
                           attachment.filename
                         )
                       }
-                      className="flex items-center gap-2 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md transition-colors text-sm font-medium shrink-0"
+                      className="flex items-center gap-2 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md transition-colors text-sm font-medium shrink-0 cursor-pointer"
                       title={`Download ${attachment.filename}`}
                     >
                       <FaDownload size={14} />
@@ -707,6 +910,12 @@ const MailContent = ({
               placeholder="Type your reply here..."
               value={replyBody}
               onChange={(e) => setReplyBody(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  handleSendReply();
+                }
+              }}
               disabled={isSending}
             />
             {/* Note: Nếu muốn thêm tính năng attach file, bạn cần thêm <input type="file"> ở đây và xử lý state attachments */}

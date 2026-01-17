@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 const Fuse = require('fuse.js')
 import { EmailMetadata, EmailMetadataDocument } from './schemas/email-metadata.schema';
 import { SearchEmailDto, SearchEmailResult, SearchEmailResponse } from './dto/search-email.dto';
 import { GmailService } from './gmail.service';
+
+const logger = new Logger('FuzzySearchService');
 
 /**
  * Fuzzy Search Service - MongoDB + Fuse.js Implementation
@@ -55,13 +57,13 @@ export class FuzzySearchService {
       // ============================================
       // STEP 1: Fetch emails from Gmail API
       // ============================================
-      console.log(`[FuzzySearch] Searching for: "${q}"`);
+      logger.debug(`[FuzzySearch] Searching for: "${q}"`);
 
       // Fetch recent emails from inbox (max 200 for performance)
       const inboxData = await this.gmailService.listMessagesInLabel(userId, 'INBOX', 200);
 
       if (!inboxData?.messages || inboxData.messages.length === 0) {
-        console.log('[FuzzySearch] No emails found in inbox');
+        logger.debug('[FuzzySearch] No emails found in inbox');
         return {
           hits: [],
           query: q,
@@ -72,7 +74,7 @@ export class FuzzySearchService {
         };
       }
 
-      console.log(`[FuzzySearch] Found ${inboxData.messages.length} emails in inbox`);
+      logger.debug(`[FuzzySearch] Found ${inboxData.messages.length} emails in inbox`);
 
       // ============================================
       // STEP 2: Fuzzy search with Fuse.js
@@ -99,12 +101,12 @@ export class FuzzySearchService {
       // Perform fuzzy search
       const fuseResults = fuse.search(q);
 
-      console.log(`[FuzzySearch] Fuse.js found ${fuseResults.length} matches`);
+      logger.debug(`[FuzzySearch] Fuse.js found ${fuseResults.length} matches`);
 
       // Filter by sender if specified (exact match from contact suggestion)
       let filteredResults = fuseResults;
       if (from) {
-        console.log(`[FuzzySearch] Filtering by sender: ${from}`);
+        logger.debug(`[FuzzySearch] Filtering by sender: ${from}`);
         filteredResults = fuseResults.filter(result => {
           const emailFrom = result.item.from || '';
           // Match email address (extract from "Name <email>" format)
@@ -112,7 +114,7 @@ export class FuzzySearchService {
           const senderEmail = emailMatch ? emailMatch[1] : emailFrom;
           return senderEmail.toLowerCase().includes(from.toLowerCase());
         });
-        console.log(`[FuzzySearch] After sender filter: ${filteredResults.length} matches`);
+        logger.debug(`[FuzzySearch] After sender filter: ${filteredResults.length} matches`);
       }
 
       // ============================================

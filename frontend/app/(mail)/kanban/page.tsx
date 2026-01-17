@@ -1,8 +1,11 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { useKeyboardNavigation, KeyboardShortcutsModal } from "@/hooks/useKeyboardNavigation";
 import KanbanColumn from "@/components/ui/KanbanColumn"; // Đảm bảo đường dẫn đúng
+import MailContent from "@/components/ui/MailContent";
 import RecoverLabelModal from "@/components/ui/RecoverLabelModal";
+import ForwardModal from "@/components/ui/ForwardModal";
 import {
   DragDropContext,
   Droppable, // Cần import Droppable nếu muốn kéo thả CỘT (Level 2)
@@ -10,7 +13,8 @@ import {
   DropResult,
 } from "@hello-pangea/dnd";
 import { useKanbanData, KanbanEmail } from "@/hooks/useKanbanData";
-import api, { fetchGmailLabels, createKanbanColumn, reorderKanbanColumns } from "@/lib/api";
+import useSseEvents from '@/hooks/useSseEvents';
+import api, { fetchGmailLabels, fetchEmailById, createKanbanColumn, reorderKanbanColumns, deleteEmailMetadata } from "@/lib/api";
 import { useToast } from "@/contexts/toast-context";
 
 // Icons
@@ -26,6 +30,7 @@ import {
 import {
   FaRegCircle,
   FaRegCheckCircle,
+  FaAdjust,
   FaInbox,
   FaReply,
   FaShare,
@@ -109,11 +114,53 @@ const MailReadingModal = ({
   isOpen,
   mail,
   onClose,
+  triggerStar,
+  triggerArchive,
+  triggerDelete,
+  triggerMarkRead,
+  triggerMarkUnread,
+  triggerToggleRead,
+  onDeleteFromModal,
 }: {
   isOpen: boolean;
   mail: KanbanEmail | null;
   onClose: () => void;
+  triggerStar?: number;
+  triggerArchive?: number;
+  triggerDelete?: number;
+  triggerMarkRead?: number;
+  triggerMarkUnread?: number;
+  triggerToggleRead?: number;
+  onDeleteFromModal?: (mailId: string) => Promise<void>;
 }) => {
+  const { showToast } = useToast();
+  const [isForwardOpen, setIsForwardOpen] = useState(false);
+  const [forwardOriginalMail, setForwardOriginalMail] = useState<any>(null);
+
+  const handleForwardEmail = async (emailData: any) => {
+    try {
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) throw new Error("Not authenticated");
+      const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+      const response = await fetch(`${apiURL}/emails/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(emailData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to send");
+      }
+
+      showToast("Email forwarded successfully", "success");
+      setIsForwardOpen(false);
+    } catch (err: any) {
+      console.error("[Kanban] Failed to forward email:", err);
+      showToast(err?.message || "Failed to forward email", "error");
+      throw err;
+    }
+  };
   const [isReplying, setIsReplying] = useState(false);
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -136,245 +183,47 @@ const MailReadingModal = ({
   }, [isReplying]);
 
   if (!isOpen) return null;
-
-  // Render Placeholder if no mail
   if (!mail) return null;
 
-  const senderName = getSenderName(mail.from);
-  const senderEmail = getSenderEmail(mail.from);
-
-  const handleReplyClick = () => {
-    setIsReplying(true);
-  };
-
-  const handleSendReply = async () => {
-    if (!replyBody.trim()) return;
-    setIsSending(true);
-    // Simulate API Call
-    setTimeout(() => {
-      alert(`Reply sent to ${senderEmail}: \n${replyBody}`);
-      setIsSending(false);
-      setIsReplying(false);
-      setReplyBody("");
-    }, 1000);
-  };
-
+  // Reuse centralized MailContent component for full feature parity with Inbox
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-      {/* Main Content Container */}
       <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
-        {/* --- TOP ACTION BAR --- */}
-        <div className="flex flex-row justify-between items-center p-3 border-b border-divider dark:border-gray-800 shrink-0 bg-background dark:bg-[#1e1e1e]">
-          <div className="flex items-center gap-4 text-secondary dark:text-gray-400">
-            <button
-              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
-              onClick={onClose}
-            >
-              <IoMdClose size={24} />
-            </button>
-            <div className="h-4 w-px bg-divider dark:bg-white/20 mx-1"></div>
-            <button
-              className="hover:text-foreground dark:hover:text-white transition-colors cursor-pointer"
-              onClick={onClose}
-            >
-              <IoMdArrowBack size={20} />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 text-secondary dark:text-gray-400">
-            <button
-              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors cursor-pointer"
-              title="Archive"
-            >
-              <BsArchive size={18} />
-            </button>
-            <button
-              className="p-2 hover:bg-muted dark:hover:bg-white/10 rounded-md transition-colors hover:text-red-400 cursor-pointer"
-              title="Delete"
-            >
-              <BsTrash3 size={18} />
-            </button>
-          </div>
-        </div>
-
-        {/* --- SCROLLABLE CONTENT AREA --- */}
-        <div className="flex-1 overflow-y-auto mailbox-scrollbar pb-20">
-          {/* Subject and Sender Info - Unified Section */}
-          <div className="px-6 pt-6 pb-4 bg-background dark:bg-[#121212] border-b border-divider dark:border-gray-800">
-            {/* Subject Header */}
-            <div className="mb-4">
-              <div className="flex flex-row justify-between items-start gap-4">
-                <h1 className="text-xl md:text-2xl font-semibold text-foreground dark:text-white flex-1">
-                  {mail.subject || "(No Subject)"}
-                </h1>
-                <div className="flex gap-2 shrink-0">
-                  {mail.labelIds?.includes("SENT") && (
-                    <span className="bg-muted dark:bg-gray-700 text-xs px-2 py-1 rounded text-secondary dark:text-gray-300">
-                      Sent Mail
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Sender Info Row */}
-            <div className="flex flex-row justify-between items-start">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
-                  {senderName.charAt(0).toUpperCase()}
-                </div>
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-foreground dark:text-white">
-                      {senderName}
-                    </span>
-                    <span className="text-xs text-secondary dark:text-gray-400">
-                      &lt;{senderEmail}&gt;
-                    </span>
-                  </div>
-                  <span className="text-xs text-secondary dark:text-gray-500">
-                    To: {mail.to}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-secondary dark:text-gray-400 text-sm">
-                <span>{formatDate(mail.date)}</span>
-                <button className="p-1 hover:bg-muted dark:hover:bg-white/10 rounded hover:text-foreground dark:hover:text-white cursor-pointer">
-                  <IoMdMore size={20} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Mail Body with Iframe */}
-          <div className="px-6 py-6">
-            <div className="w-full bg-white dark:bg-[#1a1a1a] rounded-lg overflow-hidden border border-divider dark:border-gray-800 shadow-sm">
-              <iframe
-                ref={(iframe) => {
-                  if (iframe) {
-                    iframe.onload = () => {
-                      try {
-                        const iframeDoc =
-                          iframe.contentDocument ||
-                          iframe.contentWindow?.document;
-                        if (iframeDoc) {
-                          const height = iframeDoc.documentElement.scrollHeight;
-                          iframe.style.height =
-                            Math.max(height + 20, 200) + "px";
-                        }
-                      } catch (e) {
-                        // Cross-origin restriction - fallback to min height
-                        iframe.style.height = "500px";
-                      }
-                    };
-                  }
-                }}
-                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-                className="w-full border-0"
-                style={{ height: "200px" }}
-                srcDoc={`
-                  <!DOCTYPE html>
-                  <html>
-                    <head>
-                      <meta charset="utf-8">
-                      <base target="_blank">
-                      <style>
-                        body {
-                          margin: 0;
-                          padding: 2rem;
-                          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                          font-size: 15px;
-                          line-height: 1.7;
-                          color: #475569;
-                          background-color: transparent;
-                          overflow: hidden;
-                        }
-                        a { 
-                          color: #2563eb; 
-                          text-decoration: underline;
-                          cursor: pointer;
-                        }
-                        a:hover { text-decoration: none; }
-                        * { max-width: 100%; }
-                        img { max-width: 100%; height: auto; }
-                        pre { white-space: pre-wrap; word-wrap: break-word; }
-                      </style>
-                    </head>
-                    <body>
-                      ${mail.htmlBody ||
-                  mail.textBody ||
-                  mail.snippet ||
-                  '<p style="text-align: center; font-style: italic; color: #94a3b8; margin-top: 2.5rem;">(No content available)</p>'
-                  }
-                    </body>
-                  </html>
-                `}
-              />
-            </div>
-          </div>
-
-          {/* --- REPLY EDITOR AREA --- */}
-          {isReplying && (
-            <div className="px-6 pb-6 flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
-              <div className="flex items-center gap-2 text-sm text-secondary dark:text-gray-400 mb-1">
-                <FaReply /> Replying to{" "}
-                <span className="text-foreground dark:text-white font-medium">
-                  {senderName}
-                </span>
-              </div>
-              <textarea
-                ref={replyTextareaRef}
-                autoFocus
-                className="w-full bg-background dark:bg-[#1e1e1e] border border-divider dark:border-gray-700 rounded-md p-4 text-foreground dark:text-gray-200 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
-                placeholder="Type your reply here..."
-                value={replyBody}
-                onChange={(e) => setReplyBody(e.target.value)}
-                disabled={isSending}
-              />
-
-              <div className="flex gap-3 mt-2">
-                <button
-                  onClick={handleSendReply}
-                  disabled={isSending || !replyBody.trim()}
-                  className="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded transition-colors cursor-pointer font-medium"
-                >
-                  {isSending ? (
-                    "Sending..."
-                  ) : (
-                    <>
-                      <IoMdSend /> Send
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={() => setIsReplying(false)}
-                  disabled={isSending}
-                  className="px-4 py-2 hover:bg-muted dark:hover:bg-white/10 text-secondary dark:text-gray-400 hover:text-foreground dark:hover:text-white text-sm rounded transition-colors cursor-pointer"
-                >
-                  Discard
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* --- BOTTOM ACTION BAR --- */}
-        {!isReplying && (
-          <div className="border-t border-divider dark:border-gray-800 p-4 flex flex-row gap-3 bg-background dark:bg-[#121212]">
-            <button
-              onClick={handleReplyClick}
-              className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-white text-sm rounded transition-colors cursor-pointer"
-            >
-              <FaReply /> Reply
-            </button>
-            <button
-              onClick={() => alert("Forward clicked")}
-              className="flex items-center gap-2 px-4 py-2 bg-muted dark:bg-[#2c2c2c] hover:bg-muted/80 dark:hover:bg-[#383838] text-foreground dark:text-gray-200 text-sm rounded transition-colors cursor-pointer"
-            >
-              <FaShare /> Forward
-            </button>
-          </div>
-        )}
+        <MailContent
+          mail={mail as any}
+          onBack={onClose}
+          onForwardClick={() => {
+            setForwardOriginalMail(mail);
+            setIsForwardOpen(true);
+          }}
+          onReplyClick={() => {}}
+          onDelete={async (mailId?: string) => {
+            const id = mailId || (mail as any)?.id;
+            if (typeof onDeleteFromModal === 'function') {
+              await onDeleteFromModal(id as string);
+            } else {
+              onClose();
+            }
+          }}
+          // Tell MailContent to include deleteMetadata when it calls modify
+          deleteMetadataOnModify={true}
+          // Parent (Kanban) will show a single toast for deletes — suppress MailContent's toast
+          suppressDeleteToast={true}
+          onArchive={() => onClose()}
+          triggerReply={0}
+          triggerStar={triggerStar}
+          triggerArchive={triggerArchive}
+          triggerDelete={triggerDelete}
+          triggerMarkRead={triggerMarkRead}
+          triggerMarkUnread={triggerMarkUnread}
+          triggerToggleRead={triggerToggleRead}
+        />
+        <ForwardModal
+          isOpen={isForwardOpen}
+          onClose={() => setIsForwardOpen(false)}
+          onSend={handleForwardEmail}
+          originalMail={(forwardOriginalMail || mail) as any}
+        />
       </div>
     </div>
   );
@@ -391,7 +240,7 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
           <h3 className="font-bold text-lg text-gray-800 dark:text-gray-100 flex items-center gap-2">
             <TbClock className="text-blue-500" /> Snooze until...
           </h3>
-          <button onClick={onClose}>
+          <button onClick={onClose} className="cursor-pointer hover:bg-gray-800 hover:text-primary rounded-lg p-2 ">
             <X size={20} />
           </button>
         </div>
@@ -399,19 +248,19 @@ const SnoozeModal = ({ isOpen, onClose, onConfirm }: any) => {
         <div className="flex flex-col gap-2">
           <button
             onClick={() => onConfirm(5000)}
-            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm cursor-pointer"
           >
             Later today (5 seconds )
           </button>
           <button
             onClick={() => onConfirm(10000)}
-            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm cursor-pointer"
           >
             Tomorrow (10 seconds )
           </button>
           <button
             onClick={() => onConfirm(60000)}
-            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm"
+            className="p-3 text-left hover:bg-blue-50 dark:hover:bg-gray-800 rounded border dark:border-gray-700 dark:text-gray-200 transition-colors text-sm cursor-pointer"
           >
             Next Week (1 minute )
           </button>
@@ -562,19 +411,224 @@ export default function KanbanPage() {
     refreshData, // <-- Thêm refreshData để reload sau khi tạo column
   } = useKanbanData();
 
+  // SSE: subscribe to server-sent events to get realtime restores
+  useSseEvents((payload: any) => {
+    try {
+      const colId = payload?.toColumnId;
+      const emailId = payload?.emailId;
+      if (!colId || !emailId) return;
+
+      // Refresh only the affected column
+      fetchColumnData(colId).catch((err: any) => console.error('Failed to fetch restored column:', err));
+
+      // Try to fetch email subject to display a nicer toast
+      (async () => {
+        try {
+          const email = await fetchEmailById(emailId);
+          const subject = email?.subject || 'No subject';
+          const short = subject.length > 20 ? subject.slice(0, 20) + '...' : subject;
+          const col = columns?.find((c: any) => c.id === colId);
+          const colTitle = col?.title || colId;
+          showToast(`Email "${short}" unsnoozed to ${colTitle}`, 'success');
+        } catch (e) {
+          console.error('Failed to fetch email for SSE toast', e);
+          showToast('Email restored', 'success');
+        }
+      })();
+    } catch (e) {
+      console.error('SSE handler error', e);
+    }
+  });
+
   const { showToast } = useToast();
   const [enabled, setEnabled] = useState(false);
+
+  // --- AUTO-SCROLL STATE FOR HORIZONTAL DRAG ---
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Auto-scroll horizontal container when dragging near edges
+  // Using Trello/Atlassian approach with live edge detection
+  useEffect(() => {
+    if (!isDragging || !scrollContainerRef.current) return;
+
+    const container = scrollContainerRef.current;
+    let animationFrameId: number;
+
+    // Mouse position tracking
+    let currentMouseX = 0;
+    let currentMouseY = 0;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Only store coordinates, calculation happens in autoScroll loop
+      currentMouseX = e.clientX;
+      currentMouseY = e.clientY;
+    };
+
+    const autoScroll = () => {
+      // Configuration (Trello-style)
+      const EDGE_SIZE = 80; // Hotzone: 80px from edge
+      const MAX_SCROLL_SPEED = 25; // Max pixels per frame
+      const MIN_SCROLL_SPEED = 5; // Min pixels per frame
+
+      // Get CURRENT container bounds (updates as container scrolls/moves)
+      // This is necessary for accurate edge detection
+      const containerRect = container.getBoundingClientRect();
+
+      // Calculate distance from edges using CURRENT viewport position
+      const distanceFromLeft = currentMouseX - containerRect.left;
+      const distanceFromRight = containerRect.right - currentMouseX;
+      const distanceFromTop = currentMouseY - containerRect.top;
+      const distanceFromBottom = containerRect.bottom - currentMouseY;
+
+      let scrollX = 0;
+      let scrollY = 0;
+
+      // Horizontal scroll (Primary for Kanban board)
+      if (distanceFromLeft < EDGE_SIZE && distanceFromLeft > 0) {
+        // Near left edge -> Scroll left
+        // Speed increases as mouse gets closer to edge
+        const intensity = 1 - (distanceFromLeft / EDGE_SIZE);
+        scrollX = -Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      } else if (distanceFromRight < EDGE_SIZE && distanceFromRight > 0) {
+        // Near right edge -> Scroll right
+        const intensity = 1 - (distanceFromRight / EDGE_SIZE);
+        scrollX = Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      }
+
+      // Vertical scroll (For long columns)
+      if (distanceFromTop < EDGE_SIZE && distanceFromTop > 0) {
+        // Near top edge -> Scroll up
+        const intensity = 1 - (distanceFromTop / EDGE_SIZE);
+        scrollY = -Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      } else if (distanceFromBottom < EDGE_SIZE && distanceFromBottom > 0) {
+        // Near bottom edge -> Scroll down
+        const intensity = 1 - (distanceFromBottom / EDGE_SIZE);
+        scrollY = Math.max(MIN_SCROLL_SPEED, intensity * MAX_SCROLL_SPEED);
+      }
+
+      // Apply scroll using scrollBy (smoother than direct scrollLeft assignment)
+      if (scrollX !== 0 || scrollY !== 0) {
+        container.scrollBy({
+          left: scrollX,
+          top: scrollY,
+          behavior: 'auto' // Use 'auto' for instant scroll during drag
+        });
+      }
+
+      // Continue animation loop
+      animationFrameId = requestAnimationFrame(autoScroll);
+    };
+
+    // Start tracking
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
+    animationFrameId = requestAnimationFrame(autoScroll);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [isDragging]);
 
   // Modals State
   const [isSnoozeModalOpen, setSnoozeModalOpen] = useState(false);
   const [selectedItemToSnooze, setSelectedItemToSnooze] = useState<any>(null);
   const [openedMail, setOpenedMail] = useState<any | null>(null);
+  const [triggerStar, setTriggerStar] = useState(0);
+  const [triggerArchive, setTriggerArchive] = useState(0);
+  const [triggerDelete, setTriggerDelete] = useState(0);
+  const [triggerMarkRead, setTriggerMarkRead] = useState(0);
+  const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
+  const [triggerToggle, setTriggerToggle] = useState(0);
+
+  // Handle deletion coming from MailContent inside modal: optimistic UI + backend metadata delete
+  const handleDeleteFromModal = async (mailId: string) => {
+    if (!mailId) return;
+    const backup = columns;
+    try {
+      // Optimistic remove from columns
+      setColumns(prev => prev.map(c => ({ ...c, items: c.items.filter(i => i.id !== mailId) })));
+      // Close modal
+      setOpenedMail(null);
+
+      // Parent shows a single toast; MailContent will perform the server modify
+      showToast("Email removed from Kanban", "success");
+    } catch (err: any) {
+      // Rollback
+      setColumns(backup);
+      console.error('[Kanban] deleteFromModal failed', err);
+      showToast(err?.response?.data?.message || err?.message || 'Failed to delete email metadata', 'error');
+    } finally {
+      setTriggerDelete(0);
+    }
+  };
+
+  // Keyboard shortcuts (Kanban) — enable MailContent actions when reading modal is open
+  const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
+    isKanbanMode: true,
+    isEmailOpen: !!openedMail,
+    onMarkRead: () => {
+      setTriggerMarkRead((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerMarkRead(0), 150);
+        return v;
+      });
+    },
+    onMarkUnread: () => {
+      setTriggerMarkUnread((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerMarkUnread(0), 150);
+        return v;
+      });
+    },
+    onArchive: () => {
+      setTriggerArchive((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerArchive(0), 150);
+        return v;
+      });
+    },
+    onStar: () => {
+      // Trigger MailContent's internal star handler via trigger counter
+      setTriggerStar((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerStar(0), 150);
+        return v;
+      });
+    },
+    onDelete: () => {
+      setTriggerDelete((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerDelete(0), 150);
+        return v;
+      });
+    },
+    onToggleRead: () => {
+      setTriggerToggle((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerToggle(0), 150);
+        return v;
+      });
+    },
+    onOpenInGmail: () => {
+      if (!openedMail) return;
+      const threadId = openedMail.threadId || openedMail.id;
+      if (!threadId) return;
+      window.open(`https://mail.google.com/mail/u/0/#all/${threadId}`, '_blank', 'noopener,noreferrer');
+    },
+    onCloseEmail: () => setOpenedMail(null),
+  });
 
   // Recovery Modal State
   const [isRecoveryModalOpen, setRecoveryModalOpen] = useState(false);
   const [recoveryColumnId, setRecoveryColumnId] = useState("");
   const [recoveryColumnName, setRecoveryColumnName] = useState("");
   const [recoveryOriginalLabel, setRecoveryOriginalLabel] = useState("");
+  
+  // Transient per-column notifications (shown inline on the column)
+  const [columnNotifications, setColumnNotifications] = useState<Record<string, string>>({});
+
+  // (No auto-open behavior: recovery modal opens only when user clicks "Click me to fix")
 
   // Add Column Inline Form State (Trello-style)
   const [isCreatingCol, setIsCreatingCol] = useState(false);
@@ -716,11 +770,15 @@ export default function KanbanPage() {
       }
 
       // Sort: Date
-      items.sort((a, b) => {
-        const dateA = new Date(a.date || "").getTime();
-        const dateB = new Date(b.date || "").getTime();
-        return config.sort === "newest" ? dateB - dateA : dateA - dateB;
-      });
+      // ⚠️ IMPORTANT: Preserve manual ordering during drag & drop
+      // Only auto-sort when NOT dragging to respect user's manual positioning
+      // if (!isDragging) {
+      //   items.sort((a, b) => {
+      //     const dateA = new Date(a.date || "").getTime();
+      //     const dateB = new Date(b.date || "").getTime();
+      //     return config.sort === "newest" ? dateB - dateA : dateA - dateB;
+      //   });
+      // }
 
       return {
         ...col,
@@ -843,7 +901,13 @@ export default function KanbanPage() {
     }
   }, [isCreatingCol]);
 
+  const onDragStart = () => {
+    setIsDragging(true);
+  };
+
   const onDragEnd = async (result: DropResult) => {
+    setIsDragging(false);
+
     const { source, destination, draggableId } = result;
     if (!destination) return;
 
@@ -861,9 +925,16 @@ export default function KanbanPage() {
       setColumns(newColumns);
 
       try {
-        const order = newColumns.map(c => c.id);
-        await reorderKanbanColumns(order);
-        showToast('Columns reordered successfully', 'success');
+        // Only send non-system columns (exclude "inbox" which is not in database)
+        const order = newColumns
+          .filter(c => !c.isSystem) // Exclude system columns like "inbox"
+          .map(c => c.id);
+
+        // Only call API if there are non-system columns to reorder
+        if (order.length > 0) {
+          await reorderKanbanColumns(order);
+          showToast('Columns reordered successfully', 'success');
+        }
       } catch (err: any) {
         console.error('Failed to persist column order', err);
         showToast('Failed to reorder columns. Reverting.', 'error');
@@ -881,26 +952,62 @@ export default function KanbanPage() {
       ) return;
 
       const sourceCol = columns.find((c: any) => c.id === source.droppableId);
+      const destCol = columns.find((c: any) => c.id === destination.droppableId);
       const movedEmail = sourceCol?.items.find((e: any) => e.id === draggableId);
 
       if (movedEmail) {
-        await moveEmail(
-          movedEmail.id,
-          movedEmail.threadId,
-          source.droppableId,
-          destination.droppableId,
-          destination.index
-        );
+        // Optimistic UI: immediately update `columns` to reflect the move,
+        // then call API. On error, rollback to previous state.
+        const backup = JSON.parse(JSON.stringify(columns));
+
+        // Build a new columns array with shallow copied items arrays
+        const optimistic = columns.map((c: any) => ({ ...c, items: Array.isArray(c.items) ? [...c.items] : [] }));
+
+        const src = optimistic.find((c: any) => c.id === source.droppableId);
+        const dst = optimistic.find((c: any) => c.id === destination.droppableId);
+
+        if (src && dst) {
+          const emailIndex = src.items.findIndex((e: any) => e.id === draggableId);
+          if (emailIndex !== -1) {
+            const [moved] = src.items.splice(emailIndex, 1);
+            if (destination.index !== undefined) dst.items.splice(destination.index, 0, moved);
+            else dst.items.push(moved);
+
+            // Apply optimistic state
+            setColumns(optimistic);
+          }
+        }
+
+        try {
+          // Call hook's moveEmail which persists on server
+          await moveEmail(
+            movedEmail.id,
+            movedEmail.threadId,
+            source.droppableId,
+            destination.droppableId,
+            destination.index
+          );
+
+          // Success toast: only show when moved to a different column
+          if (source.droppableId !== destination.droppableId) {
+            showToast("Move email successfully!", "success");
+          }
+        } catch (err: any) {
+          // Rollback optimistic state on error
+          setColumns(backup);
+          const errorMsg = err?.response?.data?.message || err.message || "Failed to move email";
+          showToast(errorMsg, "error");
+          console.error('Move email error:', err);
+        }
       }
     }
 
-    // TODO: Kéo thả COLUMN (Nếu bạn muốn sắp xếp cột)
-    // if (result.type === "COLUMN") { ... logic reorder columns ... }
   };
 
   // Helper chọn icon dựa trên ID hoặc Title
   const getColumnIcon = (col: any) => {
     if (col.id === "inbox") return <FaInbox className="text-blue-500" />;
+    if (col.id === "in_progress" || col.title.toLowerCase().includes("progress")) return <FaAdjust className = "text-yellow-500"></FaAdjust>
     if (col.id === "done" || col.title.toLowerCase() === "done") return <FaRegCheckCircle className="text-green-500" />;
     if (col.id === "todo" || col.title.toLowerCase().includes("todo")) return <FaRegCircle className="text-orange-500" />;
     return <FaRegCircle />; // Default icon
@@ -910,27 +1017,38 @@ export default function KanbanPage() {
   const getDragOverClass = (col: any) => {
     if (col.id === "inbox") return "bg-blue-50/50 dark:bg-blue-900/20";
     if (col.id === "done") return "bg-green-50/50 dark:bg-green-900/20";
+    if (col.id === "in_progress") return "bg-yellow-50/50 dark:bg-yellow-900/20";
     return "bg-gray-50/50 dark:bg-gray-800/50";
   };
 
   if (!enabled) return null;
-  if (isLoading) return <div className="p-10 text-center">Loading...</div>;
+  if (isLoading) return (
+    <div className="flex items-center justify-center h-full w-full p-10">
+      <div className="flex flex-col items-center gap-3">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+        <div className="text-sm text-gray-600 dark:text-gray-300">Loading Kanban…</div>
+      </div>
+    </div>
+  );
   if (error) return <div className="p-10 text-center text-red-500">{error}</div>;
 
   return (
     <div className="flex flex-col h-full w-full bg-gray-50 dark:bg-[#0a0a0a] text-slate-800 dark:text-gray-100">
-      <DragDropContext onDragEnd={onDragEnd}>
+      <DragDropContext onDragStart={onDragStart} onDragEnd={onDragEnd}>
 
 
         <main className="flex flex-row w-full divide-y md:divide-y-0 md:divide-x divide-gray-200 dark:divide-gray-800 min-h-0">
 
           {/* 1. DYNAMIC COLUMNS RENDERING */}
-          <Droppable droppableId="board" direction="horizontal" type="COLUMN">
+          <Droppable droppableId="board" direction="horizontal" type="COLUMN" mode="standard">
             {(provided) => (
               <div
-                ref={provided.innerRef}
+                ref={(el) => {
+                  provided.innerRef(el);
+                  scrollContainerRef.current = el;
+                }}
                 {...provided.droppableProps}
-                className="flex flex-row h-full overflow-x-auto overflow-y-hidden items-start" // CSS cho container ngang
+                className="flex flex-row overflow-x-auto overflow-y-auto"
               >
                 {processedColumns.map((col, index) => {
                   const originalCol = columns.find((c: any) => c.id === col.id);
@@ -943,7 +1061,7 @@ export default function KanbanPage() {
                           ref={providedDrag.innerRef}
                           {...providedDrag.draggableProps}
                           {...providedDrag.dragHandleProps} // Gắn drag handle vào div bao ngoài
-                          className={`flex flex-col shrink-0 w-[350px] md:w-2/7 min-h-[500px] md:h-full bg-white dark:bg-[#121212] md:min-h-0
+                          className={`flex flex-col shrink-0 w-[350px] min-h-screen md:w-2/7 bg-white dark:bg-[#121212]
                           ${snapshot.isDragging ? "opacity-100 z-50 rotate-2 shadow-2xl ring-1 ring-blue-500/50" : ""}
                         `}
                         >
@@ -961,21 +1079,52 @@ export default function KanbanPage() {
                               setSelectedItemToSnooze(item);
                               setSnoozeModalOpen(true);
                             }}
-                            onOpenClick={(item) => {
-                              setOpenedMail(item);
+                            onOpenClick={async (item) => {
+                              try {
+                                const detailed = await fetchEmailById(item.id);
+                                // Reset any outstanding keyboard triggers before opening
+                                setTriggerStar(0);
+                                setTriggerArchive(0);
+                                setTriggerDelete(0);
+                                setTriggerMarkRead(0);
+                                setTriggerMarkUnread(0);
+                                // fetchEmailById returns response.data shape; set opened mail to detailed object
+                                setOpenedMail(detailed?.data || detailed || item);
+                              } catch (err) {
+                                console.error('Failed to fetch email details, falling back to summary:', err);
+                                setOpenedMail(item);
+                              }
                             }}
                             onRegenerateSummary={generateSummary}
                             dragOverClass={getDragOverClass(col)}
+                            gmailLabel={originalCol?.gmailLabel}
+                            gmailLabelName={originalCol?.gmailLabelName}
+                            autoArchive={originalCol?.autoArchive}
                             hasLabelError={originalCol?.hasLabelError}
-                            labelErrorMessage={originalCol?.labelErrorMessage}
+                            labelErrorMessage={originalCol?.labelErrorMessage || columnNotifications[col.id]}
                             isSystemColumn={originalCol?.isSystem}
                             isLoading={isColumnLoading}
                             onEditTitle={!originalCol?.isSystem ? (newTitle) => handleEditColumnTitle(col.id, newTitle) : undefined}
                             onRecoverLabel={() => {
-                              setRecoveryColumnId(col.id);
-                              setRecoveryColumnName(col.title);
-                              setRecoveryOriginalLabel(originalCol?.gmailLabel || "");
-                              setRecoveryModalOpen(true);
+                              // Only open recovery modal when the backend marked this column as a label-mapping error
+                              if (originalCol?.hasLabelError) {
+                                setRecoveryColumnId(col.id);
+                                setRecoveryColumnName(col.title);
+                                setRecoveryOriginalLabel(originalCol?.gmailLabel || "");
+                                setRecoveryModalOpen(true);
+                                return;
+                              }
+
+                              // Otherwise, show a simple inline notification on the column (transient)
+                              const msg = error || "Temporary backend error. Please try again later.";
+                              setColumnNotifications(prev => ({ ...prev, [col.id]: msg }));
+                              window.setTimeout(() => {
+                                setColumnNotifications(prev => {
+                                  const copy = { ...prev };
+                                  delete copy[col.id];
+                                  return copy;
+                                });
+                              }, 5000);
                             }}
                             onDeleteColumn={!originalCol?.isSystem ? async () => {
                               try {
@@ -1023,7 +1172,7 @@ export default function KanbanPage() {
                             setSelectedExistingLabel("");
                             setNewLabelName("");
                           }}
-                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors cursor-pointer"
                         >
                           <X size={18} />
                         </button>
@@ -1123,12 +1272,21 @@ export default function KanbanPage() {
                                     {gmailLabels.filter(l => l.type === "system").length > 0 && (
                                       <optgroup label="System Labels" className="bg-white dark:bg-gray-900">
                                         {gmailLabels
-                                          .filter((label) => label.type === "system")
-                                          .map((label) => (
-                                            <option key={label.id} value={label.name} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-                                              {label.name}
-                                            </option>
-                                          ))}
+                                            .filter((label) => label.type === "system")
+                                            .map((label) => {
+                                              const mappedCol = columns.find((col: any) =>
+                                                col.id && (
+                                                  (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
+                                                  (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
+                                                )
+                                              );
+                                              const mapped = !!mappedCol;
+                                              return (
+                                                <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
+                                                  {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                                                </option>
+                                              );
+                                            })}
                                       </optgroup>
                                     )}
 
@@ -1137,11 +1295,31 @@ export default function KanbanPage() {
                                       <optgroup label="Custom Labels" className="bg-white dark:bg-gray-900">
                                         {gmailLabels
                                           .filter((label) => label.type === "user")
-                                          .map((label) => (
-                                            <option key={label.id} value={label.name} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-                                              {label.name}
-                                            </option>
-                                          ))}
+                                          .map((label) => {
+                                            const mappedCol = columns.find((col: any) => {
+                                              const colLabel = (col.gmailLabel || "").toString();
+                                              const colLabelName = (col.gmailLabelName || "").toString();
+                                              const colTitle = (col.title || col.name || "").toString();
+                                              const labelName = (label.name || "").toString();
+                                              const labelId = (label.id || "").toString();
+
+                                              return (
+                                                // direct id match
+                                                colLabel === labelId ||
+                                                colLabel.toLowerCase() === labelId.toLowerCase() ||
+                                                // label name matches stored label or title
+                                                colLabel.toLowerCase() === labelName.toLowerCase() ||
+                                                colLabelName.toLowerCase() === labelName.toLowerCase() ||
+                                                colTitle.toLowerCase() === labelName.toLowerCase()
+                                              );
+                                            });
+                                            const mapped = !!mappedCol;
+                                            return (
+                                              <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
+                                                {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                                              </option>
+                                            );
+                                          })}
                                       </optgroup>
                                     )}
                                   </select>
@@ -1224,7 +1402,7 @@ export default function KanbanPage() {
                             setSelectedExistingLabel("");
                             setNewLabelName("");
                           }}
-                          className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
                         >
                           Cancel
                         </button>
@@ -1232,7 +1410,7 @@ export default function KanbanPage() {
                           onClick={handleCreateColumn}
                           disabled={!!validationError || !newColTitle.trim() || (selectedLabelOption === "existing" && !selectedExistingLabel)}
                           style={{ backgroundColor: customColor || newColColor }}
-                          className="flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-md"
+                          className="flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-md cursor-pointer"
                         >
                           <Check size={16} /> Create Column
                         </button>
@@ -1290,8 +1468,26 @@ export default function KanbanPage() {
       <MailReadingModal
         isOpen={!!openedMail}
         mail={openedMail}
-        onClose={() => setOpenedMail(null)}
+        onClose={() => {
+          setOpenedMail(null);
+          setTriggerStar(0);
+          setTriggerArchive(0);
+          setTriggerDelete(0);
+          setTriggerMarkRead(0);
+          setTriggerMarkUnread(0);
+          setTriggerToggle(0);
+        }}
+        onDeleteFromModal={handleDeleteFromModal}
+        triggerStar={triggerStar}
+        triggerArchive={triggerArchive}
+        triggerDelete={triggerDelete}
+        triggerMarkRead={triggerMarkRead}
+        triggerMarkUnread={triggerMarkUnread}
+        triggerToggleRead={triggerToggle}
       />
+
+      {/* Keyboard Shortcuts Modal (Kanban) */}
+      <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
 
       {/* Snooze Modal */}
       <SnoozeModal

@@ -42,7 +42,7 @@ export class AutoIndexingService {
   private processingInterval: NodeJS.Timeout | null = null;
   
   // Rate limiting config
-  private readonly BATCH_SIZE = 10; // Process 10 emails at a time
+  private readonly BATCH_SIZE = 20; // Process 20 emails at a time (increased from 10)
   private readonly PROCESS_INTERVAL_MS = 5000; // Every 5 seconds
   private readonly MAX_QUEUE_SIZE = 1000; // Prevent memory overflow
   

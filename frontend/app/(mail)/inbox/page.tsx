@@ -12,6 +12,7 @@ import Kanban from "@/components/ui/Kanban";
 import { type SearchMode } from "@/components/search/SearchModeDropdown";
 import { type Mail, type EmailData } from "@/types";
 import { useSearch } from "@/hooks/useSearch";
+import { useKeyboardNavigation, KeyboardShortcutsModal } from "@/hooks/useKeyboardNavigation";
 
 export default function Home() {
   const router = useRouter();
@@ -19,7 +20,7 @@ export default function Home() {
   const { showToast } = useToast();
 
   // Lấy state từ Global UI Context thay vì state cục bộ
-  const { isKanBanMode, toggleKanBanMode, toggleSidebar } = useUI();
+  const { isKanBanMode, toggleKanBanMode, toggleSidebar, isComposeOpen, setComposeOpen } = useUI();
 
   // State quản lý dữ liệu Mail
   const [mails, setMails] = useState<Mail[]>([]);
@@ -43,8 +44,22 @@ export default function Home() {
   // State for forward modal
   const [isForwardOpen, setIsForwardOpen] = useState(false);
 
+  // Trigger star for MailContent when detail open
+  const [triggerStar, setTriggerStar] = useState(0);
+
   // Counter to trigger reply mode
   const [replyTrigger, setReplyTrigger] = useState(0);
+  // Counter to trigger archive in MailContent (used when an email is open)
+  const [triggerArchive, setTriggerArchive] = useState(0);
+  // Counter to trigger delete in MailContent (used when an email is open)
+  const [triggerDelete, setTriggerDelete] = useState(0);
+  // Counters to trigger mark read/unread in MailContent (when detail open)
+  const [triggerMarkRead, setTriggerMarkRead] = useState(0);
+  const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
+  // Counter to trigger toggle read/unread (keyboard 'm') in MailContent
+  const [triggerToggle, setTriggerToggle] = useState(0);
+  // Counter for automatic mark-read when opening a mail (no toast)
+  const [triggerMarkReadAuto, setTriggerMarkReadAuto] = useState(0);
 
   // Fetch inbox mails function (reusable) - Define BEFORE useSearch
   const fetchInboxMails = useCallback(async () => {
@@ -146,6 +161,174 @@ export default function Home() {
     }
   }, [isAuthenticated, searchQuery, fetchInboxMails, isAuthLoading]);
 
+  // Reset focused index when mail list changes
+  useEffect(() => {
+    setFocusedIndex(0);
+  }, [mails.length]);
+
+  // Keyboard shortcuts (global) using hook
+  const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
+    onNextEmail: () => setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
+    onPreviousEmail: () => setFocusedIndex((i) => Math.max(i - 1, 0)),
+    onOpenEmail: () => mails[focusedIndex] && handleSelectMail(mails[focusedIndex]),
+    onDelete: () => {
+      if (selectedMail) {
+        setTriggerDelete((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        handleDeleteEmail(mails[focusedIndex].id);
+      }
+    },
+    onArchive: () => {
+      if (selectedMail) {
+        // Let MailContent handle the archive when detail is open
+        setTriggerArchive((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        handleArchiveEmail(mails[focusedIndex].id);
+      }
+    },
+    onMarkRead: () => {
+      if (selectedMail) {
+        setTriggerMarkRead((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        // Mark focused mail in list as read
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action: 'markRead' }),
+            });
+            if (!res.ok) throw new Error('Failed to mark read');
+            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+          } catch (err) {
+            console.error('Mark read failed', err);
+          }
+        })();
+      }
+    },
+    onMarkUnread: () => {
+      if (selectedMail) {
+        setTriggerMarkUnread((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action: 'markUnread' }),
+            });
+            if (!res.ok) throw new Error('Failed to mark unread');
+            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+          } catch (err) {
+            console.error('Mark unread failed', err);
+          }
+        })();
+      }
+    },
+    onToggleRead: () => {
+      if (selectedMail) {
+        // Let MailContent handle the toggle when detail is open
+        setTriggerToggle((t) => t + 1);
+        // reset shortly to avoid stale triggers
+        setTimeout(() => setTriggerToggle(0), 80);
+      } else if (mails[focusedIndex]) {
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
+            const action = isUnread ? 'markRead' : 'markUnread';
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action }),
+            });
+            if (!res.ok) throw new Error('Failed to toggle read');
+            if (isUnread) {
+              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            } else {
+              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            }
+          } catch (err) {
+            console.error('Toggle read failed', err);
+          }
+        })();
+      }
+    },
+    onReply: () => {
+      if (mails[focusedIndex]) {
+        // Fetch full email data before opening reply mode to ensure EmailData shape
+        handleSelectMail(mails[focusedIndex]);
+        setReplyTrigger((t) => t + 1);
+      }
+    },
+    onStar: () => {
+      if (selectedMail) {
+        setTriggerStar((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        // Toggle star for focused mail in list view
+        (async () => {
+          const mail = mails[focusedIndex];
+          const isStarred = mail.labelIds?.includes("STARRED");
+          const action = isStarred ? "unstar" : "star";
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action }),
+            });
+            if (!res.ok) throw new Error('Failed to toggle star');
+            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: isStarred ? (m.labelIds || []).filter(l=>l!="STARRED") : [...(m.labelIds||[]), "STARRED"] } : m));
+          } catch (err) {
+            console.error('Toggle star failed', err);
+          }
+        })();
+      }
+    },
+    onForward: () => {
+      if (selectedMail) {
+        setIsForwardOpen(true);
+      } else if (mails[focusedIndex]) {
+        // Open forward for focused mail: fetch and set selected, then open forward modal
+        handleSelectMail(mails[focusedIndex]);
+        setIsForwardOpen(true);
+      }
+    },
+    onOpenInGmail: () => {
+      try {
+        const mail = selectedMail || mails[focusedIndex];
+        if (!mail) return;
+        const threadId = (mail as any).threadId || (mail as any).id;
+        if (!threadId) return;
+        const url = `https://mail.google.com/mail/u/0/#all/${threadId}`;
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch (err) {
+        console.error('Open in Gmail keyboard handler failed', err);
+      }
+    },
+    onSearch: () => {
+      const input = document.querySelector('.mailbox-search-input') as HTMLInputElement | null;
+      input?.focus();
+    },
+    onClearSearch: onClearSearch,
+    isEmailOpen: !!selectedMail,
+    onCompose: () => setComposeOpen(true),
+    isComposing: Boolean(isComposeOpen || isForwardOpen),
+  });
+
   // Load more function ... (Giữ nguyên logic cũ của bạn)
   const loadMoreMails = async () => {
     if (!hasMore || isLoadingMore || !nextPageToken) return;
@@ -217,6 +400,12 @@ export default function Home() {
       if (!response.ok) throw new Error("Failed");
       const data = await response.json();
       setSelectedMail(data);
+      // If opened mail is unread, mark it as read locally and trigger MailContent to mark read
+      const isUnread = Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
+      if (isUnread) {
+        setMails(prev => prev.map(m => m.id === data.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+        setTriggerMarkReadAuto(t => t + 1);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -256,12 +445,42 @@ export default function Home() {
     }
   };
 
-  // Handle delete email
-  const handleDeleteEmail = (mailId: string) => {
-    // Remove email from list
-    setMails((prevMails) => prevMails.filter((mail) => mail.id !== mailId));
-    // Close detail view
-    setSelectedMail(null);
+  // Handle delete email (confirm + API call) — keep behavior consistent with MailContent
+  const handleDeleteEmail = async (mailId: string) => {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this email? It will be moved to Trash."
+    );
+    if (!confirmed) return;
+
+    try {
+      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+      if (!token) {
+        throw new Error("Not authenticated");
+      }
+      const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+
+      const response = await fetch(`${apiURL}/emails/${mailId}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "delete" }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to delete email");
+      }
+
+      // Success - update UI
+      setMails((prevMails) => prevMails.filter((mail) => mail.id !== mailId));
+      setSelectedMail(null);
+      showToast("Email moved to trash", "success");
+    } catch (error: any) {
+      console.error("Delete failed:", error);
+      showToast(`Delete failed: ${error?.message || "Please try again"}`, "error");
+    }
   };
 
   // Handle archive email
@@ -277,7 +496,11 @@ export default function Home() {
 
   // Render
   return (
-    <div className="flex h-full w-full">
+    <>
+      {showShortcuts && (
+        <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      )}
+      <div className="flex h-full w-full">
       {/* SideBar đã bị xóa khỏi đây vì nó nằm ở AppShell (Layout).
          ComposeModal cũng nằm ở AppShell.
       */}
@@ -314,6 +537,7 @@ export default function Home() {
             error={error}
             searchMode={searchMode}
             onSearchModeChange={setSearchMode}
+            onFocusedIndexChange={setFocusedIndex}
           />
         )}
       </div>
@@ -332,8 +556,26 @@ export default function Home() {
           onForwardClick={() => selectedMail && setIsForwardOpen(true)}
           onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
           onDelete={handleDeleteEmail}
+          // Parent will perform server delete for inbox selection; suppress child toast
+          performServerDelete={false}
+          suppressDeleteToast={true}
+          triggerDelete={triggerDelete}
           onArchive={handleArchiveEmail}
+          triggerArchive={triggerArchive}
           triggerReply={replyTrigger}
+          triggerStar={triggerStar}
+          triggerMarkRead={triggerMarkRead}
+          triggerMarkReadAuto={triggerMarkReadAuto}
+          triggerMarkUnread={triggerMarkUnread}
+          triggerToggleRead={triggerToggle}
+          onMarkRead={(mailId: string) => {
+            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: (m.labelIds||[]).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: (prev.labelIds||[]).filter(l => l !== 'UNREAD') } : prev);
+          }}
+          onMarkUnread={(mailId: string) => {
+            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: Array.from(new Set([...(prev.labelIds||[]),'UNREAD'])) } : prev);
+          }}
         />
       </div>
 
@@ -347,5 +589,6 @@ export default function Home() {
         />
       )}
     </div>
+    </>
   );
 }

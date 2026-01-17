@@ -13,13 +13,262 @@ export class EmailMetadataService {
   ) { }
 
   // ============================================
-  // STATUS METHODS 
+  // KANBAN COLUMN METHODS (NEW PRIMARY SOURCE OF TRUTH)
+  // ============================================
+
+  async updateKanbanColumn(
+    userId: string,
+    emailId: string,
+    kanbanColumnId: string,
+    columnName?: string,
+  ) {
+    return this.emailMetadataModel.findOneAndUpdate(
+      { userId, emailId },
+      {
+        userId,
+        emailId,
+        kanbanColumnId, // NEW PRIMARY
+        cachedColumnName: columnName, // Cache for display
+        kanbanUpdatedAt: new Date(),
+      },
+      { upsert: true, new: true },
+    );
+  }
+
+  /**
+   * Move an email into a column at a specific position, adjusting
+   * positions of other emails in source and destination columns.
+   */
+  async moveEmailWithPosition(
+    userId: string,
+    emailId: string,
+    toColumnId: string,
+    destinationIndex?: number,
+    columnName?: string,
+  ) {
+    // Implementation using double/float positions with neighbor averaging.
+    // 1) Load destination items (lean for performance)
+    // 2) If moving within same column, remove the moved item from list
+    // 3) Normalize destinationIndex to [0, destItems.length]
+    // 4) Compute prev/next and calculate new position; reindex if gap too small
+    // 5) Persist with findOneAndUpdate
+
+    // run moveEmailWithPosition (quiet)
+    // Load current metadata for this email (lean)
+    const meta = await this.emailMetadataModel.findOne({ userId, emailId }).lean().exec();
+    const fromColumnId = meta?.kanbanColumnId || null;
+
+    // 1. Load destination items sorted ascending by position
+    let destItems: any[];
+    if (toColumnId === 'inbox') {
+      // Inbox is special: include emails explicitly assigned to 'inbox' AND those without any kanbanColumnId
+      destItems = await this.emailMetadataModel
+        .find({
+          userId,
+          $or: [
+            { kanbanColumnId: 'inbox' },
+            { kanbanColumnId: { $exists: false } },
+            { kanbanColumnId: null }
+          ]
+        })
+        .sort({ position: 1, kanbanUpdatedAt: -1 })
+        .lean()
+        .exec();
+    } else {
+      destItems = await this.emailMetadataModel
+        .find({ userId, kanbanColumnId: toColumnId })
+        .sort({ position: 1 })
+        .lean()
+        .exec();
+    }
+
+    // 2. If moving within same column, remove the moving item
+    if (fromColumnId === toColumnId) {
+      destItems = destItems.filter(d => d.emailId !== emailId);
+    }
+
+    // 3. Normalize destinationIndex
+    if (typeof destinationIndex !== 'number' || destinationIndex > destItems.length) {
+      destinationIndex = destItems.length;
+    }
+    if (destinationIndex < 0) {
+      destinationIndex = 0;
+    }
+
+    // 4. Neighbors
+    const prev = destinationIndex > 0 ? destItems[destinationIndex - 1] : null;
+    const next = destItems[destinationIndex] || null;
+
+    const MIN_GAP = 0.00001; // minimal gap resolution for floating positions
+
+    const calculatePos = (pPrev: number | null, pNext: number | null): number => {
+      if (pPrev === null && pNext === null) return 60000;
+      if (pPrev === null) return (pNext as number) / 2;
+      if (pNext === null) return (pPrev as number) + 60000;
+      return ((pPrev as number) + (pNext as number)) / 2;
+    };
+
+    let newPosition: number;
+    const toNumberOrNull = (v: any): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    let finalPrev: number | null = prev ? toNumberOrNull(prev.position) : null;
+    let finalNext: number | null = next ? toNumberOrNull(next.position) : null;
+
+    // If some destination items lack numeric positions (common for newly synced inbox items),
+    // fill in synthetic positions preserving current order so neighbor averaging works.
+    const GAP = 60000;
+    const ensureNumericPositions = (items: any[]) => {
+      let lastPos: number | null = null;
+      for (let i = 0; i < items.length; i++) {
+        const n = toNumberOrNull(items[i].position);
+        if (n === null) {
+          // derive position: if next item has numeric pos, place halfway; else increment by GAP
+          const nextNum = toNumberOrNull(items[i + 1]?.position);
+          if (lastPos === null && nextNum !== null) {
+            items[i].position = Math.floor(nextNum / 2);
+          } else if (lastPos !== null) {
+            items[i].position = lastPos + GAP;
+          } else if (nextNum !== null) {
+            items[i].position = Math.floor(nextNum / 2);
+          } else {
+            items[i].position = (i + 1) * GAP;
+          }
+        } else {
+          items[i].position = n;
+        }
+        lastPos = Number(items[i].position);
+      }
+    };
+
+    ensureNumericPositions(destItems);
+
+    // Recompute neighbors after filling positions
+    const recomputeNeighbor = (index: number) => {
+      const p = index > 0 ? destItems[index - 1] : null;
+      const nx = destItems[index] || null;
+      return { prev: p ? Number(p.position) : null, next: nx ? Number(nx.position) : null };
+    };
+
+    if (fromColumnId === toColumnId) {
+      // if moving within same column, we already removed the moving item earlier
+    }
+
+    // If prev/next were null earlier, try to recompute from destItems using destinationIndex
+    if (finalPrev === null || finalNext === null) {
+      const nb = recomputeNeighbor(destinationIndex as number);
+      finalPrev = finalPrev ?? nb.prev;
+      finalNext = finalNext ?? nb.next;
+    }
+
+    if (finalPrev !== null && finalNext !== null && (finalNext - finalPrev) < MIN_GAP) {
+      // Gap too small -> reindex column, then recompute
+      const warnMsg = `Gap too small in column ${toColumnId}. Reindexing positions...`;
+      logger.warn(warnMsg);
+      console.warn(warnMsg);
+      await this.reindexColumnPositions(userId, toColumnId);
+
+      // Reload items and recompute neighbors
+      let refreshed = await this.emailMetadataModel
+        .find({ userId, kanbanColumnId: toColumnId })
+        .sort({ position: 1 })
+        .lean()
+        .exec();
+
+      if (fromColumnId === toColumnId) {
+        refreshed = refreshed.filter(d => d.emailId !== emailId);
+      }
+
+      const rPrev = destinationIndex > 0 ? refreshed[destinationIndex - 1] : null;
+      const rNext = refreshed[destinationIndex] || null;
+
+      finalPrev = rPrev ? toNumberOrNull(rPrev.position) : null;
+      finalNext = rNext ? toNumberOrNull(rNext.position) : null;
+      newPosition = calculatePos(finalPrev, finalNext);
+    } else {
+      newPosition = calculatePos(finalPrev, finalNext);
+    }
+
+    // 5. Persist update. Only set previousColumnId when column actually changes.
+    const updateObj: any = {
+      kanbanColumnId: toColumnId,
+      position: newPosition,
+      kanbanUpdatedAt: new Date(),
+    };
+    if (fromColumnId && fromColumnId !== toColumnId) {
+      updateObj.previousColumnId = fromColumnId;
+    }
+
+    const result = await this.emailMetadataModel.findOneAndUpdate(
+      { userId, emailId },
+      { $set: updateObj },
+      { upsert: true, new: true }
+    ).exec();
+
+    return result;
+  }
+
+  async getKanbanColumn(userId: string, emailId: string) {
+    const metadata = await this.emailMetadataModel.findOne({ userId, emailId });
+    return metadata?.kanbanColumnId;
+  }
+
+  async getEmailsByKanbanColumn(userId: string, kanbanColumnId: string, limit: number = 50) {
+    // Return items ordered by `position` (ascending). Fallback to kanbanUpdatedAt
+    return this.emailMetadataModel
+      .find({ userId, kanbanColumnId })
+      .sort({ position: 1, kanbanUpdatedAt: -1 })
+      .limit(limit);
+  }
+
+  /**
+   * Reindex column positions with a large gap to make room for inserts.
+   * Assigns positions: 0, gap, 2*gap, ...
+   */
+  async reindexColumnPositions(userId: string, columnId: string, gap: number = 60000) { // 1. Tăng gap mặc định lên 60000
+    const docs = await this.emailMetadataModel
+      .find({ userId, kanbanColumnId: columnId })
+      .sort({ position: 1, kanbanUpdatedAt: -1 }) // Giữ nguyên thứ tự hiện tại
+      .select('_id') // 2. Chỉ lấy _id để tối ưu băng thông (quan trọng khi list dài)
+      .exec();
+
+    if (!docs || docs.length === 0) return true;
+
+    const ops = docs.map((doc: any, idx: number) => ({
+      updateOne: {
+        filter: { _id: doc._id },
+        update: {
+          // 3. QUAN TRỌNG: (idx + 1) để tránh giá trị 0
+          $set: { position: (idx + 1) * gap }
+        }
+      }
+    }));
+
+    if (ops.length > 0) {
+      await this.emailMetadataModel.bulkWrite(ops);
+    }
+
+    return true;
+  }
+
+  async getMetadataMap(userId: string): Promise<Map<string, EmailMetadata>> {
+    const metadata = await this.emailMetadataModel.find({ userId });
+    const map = new Map<string, EmailMetadata>();
+    metadata.forEach(item => {
+      map.set(item.emailId, item);
+    });
+    return map;
+  }
+
+  // ============================================
+  // LEGACY METHODS (DEPRECATED - KEEP FOR BACKWARD COMPATIBILITY)
   // ============================================
 
   async updateEmailStatus(
     userId: string,
     emailId: string,
-    threadId: string,
     cachedColumnId: string,
   ) {
     return this.emailMetadataModel.findOneAndUpdate(
@@ -27,7 +276,6 @@ export class EmailMetadataService {
       {
         userId,
         emailId,
-        threadId,
         cachedColumnId,
         kanbanUpdatedAt: new Date(),
       },
@@ -46,8 +294,8 @@ export class EmailMetadataService {
   async createEmailMetadata(data: {
     userId: string;
     emailId: string;
-    threadId: string;
     cachedColumnId?: string;
+    threadId?: string;
     subject?: string;
     from?: string;
     snippet?: string;
@@ -83,6 +331,51 @@ export class EmailMetadataService {
       .limit(limit);
   }
 
+  /**
+   * Get all emails (exclude trash, spam, draft, sent)
+   * @param userId - User ID
+   * @param limit - Maximum number of emails to return
+   */
+  async getAllEmails(userId: string, limit: number = 300) {
+    // System labels to exclude
+    const EXCLUDED_LABELS = ['TRASH', 'SPAM', 'DRAFT', 'SENT'];
+
+    return this.emailMetadataModel
+      .find({
+        userId,
+        // Exclude emails that have any of the excluded labels
+        labelIds: {
+          $not: {
+            $elemMatch: { $in: EXCLUDED_LABELS }
+          }
+        }
+      })
+      .sort({ receivedDate: -1 })  // Sort by date, newest first
+      .limit(limit);
+  }
+
+  /**
+   * Get emails for inbox column (emails not in other kanban columns)
+   * @param userId - User ID
+   * @param limit - Maximum number of emails to return
+   */
+  async getInboxEmails(userId: string, limit: number = 50) {
+    // Get emails that are either:
+    // 1. Explicitly assigned to 'inbox' column
+    // 2. Not assigned to any kanban column yet (kanbanColumnId not set)
+    return this.emailMetadataModel
+      .find({
+        userId,
+        $or: [
+          { kanbanColumnId: 'inbox' },
+          { kanbanColumnId: { $exists: false } },
+          { kanbanColumnId: null }
+        ]
+      })
+      .sort({ receivedDate: -1 })  // Sort by date, newest first
+      .limit(limit);
+  }
+
 
 
 
@@ -93,7 +386,6 @@ export class EmailMetadataService {
   async saveSummary(
     userId: string,
     emailId: string,
-    threadId: string,
     summary: string,
     model: string,
   ) {
@@ -102,7 +394,6 @@ export class EmailMetadataService {
       {
         userId,
         emailId,
-        threadId,
         summary,
         summaryGeneratedAt: new Date(),
         summaryModel: model,
@@ -137,7 +428,6 @@ export class EmailMetadataService {
   async snoozeEmail(
     userId: string,
     emailId: string,
-    threadId: string,
     snoozedUntil: Date,
     currentColumnId?: string,
   ) {
@@ -146,7 +436,6 @@ export class EmailMetadataService {
       {
         userId,
         emailId,
-        threadId,
         snoozedUntil,
         previousColumnId: currentColumnId,
         isSnoozed: true,
@@ -190,7 +479,6 @@ export class EmailMetadataService {
   async cacheEmailBasicData(
     userId: string,
     emailId: string,
-    threadId: string,
     data: {
       subject?: string;
       from?: string;
@@ -203,7 +491,6 @@ export class EmailMetadataService {
       {
         userId,
         emailId,
-        threadId,
         ...data,
       },
       { upsert: true, new: true },
