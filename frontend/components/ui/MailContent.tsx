@@ -6,6 +6,8 @@ import {
   IoMdClose,
   IoMdMore,
   IoMdSend,
+  IoMdMailOpen,
+  IoMdMailUnread,
 } from "react-icons/io";
 import { BsArchive, BsTrash3, BsInboxFill } from "react-icons/bs";
 import { FaReply, FaShare, FaPaperclip, FaDownload, FaExternalLinkAlt, FaStar, FaRegStar } from "react-icons/fa";
@@ -26,11 +28,17 @@ interface MailContentProps {
   onArchive?: (mailId: string) => void;
   triggerArchive?: number;
   triggerDelete?: number;
+  triggerMarkRead?: number;
+  triggerMarkReadAuto?: number;
+  triggerMarkUnread?: number;
+  triggerToggleRead?: number;
   triggerReply?: number;
   triggerStar?: number;
+  onMarkRead?: (mailId: string) => void;
+  onMarkUnread?: (mailId: string) => void;
 }
 
-// ... (Giữ nguyên các hàm Helper: getSenderName, getSenderEmail, formatDate) ...
+// Helper functions
 const getSenderName = (fromStr: string) => {
   if (!fromStr) return "Unknown";
   const parts = fromStr.split("<");
@@ -76,6 +84,12 @@ const MailContent = ({
   triggerReply,
   triggerStar,
   triggerDelete,
+  triggerMarkRead,
+  triggerMarkUnread,
+  triggerToggleRead,
+  triggerMarkReadAuto,
+  onMarkRead,
+  onMarkUnread,
 }: MailContentProps) => {
   const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
@@ -116,6 +130,40 @@ const MailContent = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerArchive]);
 
+  // Trigger mark read from parent
+  useEffect(() => {
+    if (typeof (triggerMarkRead) === 'number' && triggerMarkRead > 0) {
+      // User-initiated trigger (keyboard) — show toast
+      handleMarkRead();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerMarkRead]);
+
+  // Trigger mark read from parent for automatic mark-on-open (suppress toast)
+  useEffect(() => {
+    if (typeof (triggerMarkReadAuto) === 'number' && triggerMarkReadAuto > 0) {
+      // Automatic mark (when user opens a mail) — do not show toast
+      handleMarkRead(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerMarkReadAuto]);
+
+  // Trigger mark unread from parent
+  useEffect(() => {
+    if (typeof (triggerMarkUnread) === 'number' && triggerMarkUnread > 0) {
+      handleMarkUnread();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerMarkUnread]);
+
+  // Trigger toggle read/unread from parent
+  useEffect(() => {
+    if (typeof (triggerToggleRead) === 'number' && triggerToggleRead > 0) {
+      handleToggleRead();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerToggleRead]);
+
   // Trigger delete from parent (keyboard shortcut)
   useEffect(() => {
     if (typeof (triggerDelete) === 'number' && triggerDelete > 0) {
@@ -148,6 +196,7 @@ const MailContent = ({
 
   const senderName = getSenderName(mail.from);
   const senderEmail = getSenderEmail(mail.from);
+  const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
 
   const handleReplyClick = () => {
     setIsReplying(true);
@@ -421,6 +470,87 @@ const MailContent = ({
     }
   };
 
+  // --- MARK READ ---
+  const handleMarkRead = async (showToastFlag: boolean = true) => {
+    if (!mail?.id) return;
+    setIsArchiving(true);
+    try {
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "markRead" }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to mark read");
+      }
+      // Optimistic update: remove UNREAD label if present
+      if (mail.labelIds) {
+        mail.labelIds = mail.labelIds.filter((l) => l !== "UNREAD");
+      }
+      if (typeof showToastFlag === 'undefined' || showToastFlag) {
+        showToast("Marked as read", "success");
+        // Notify parent only for user-initiated actions
+        if (onMarkRead) onMarkRead(mail.id as string);
+      }
+    } catch (error: any) {
+      console.error("Mark read failed", error);
+      showToast(`Failed to mark read: ${error.message}`, "error");
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  // --- MARK UNREAD ---
+  const handleMarkUnread = async (showToastFlag: boolean = true) => {
+    if (!mail?.id) return;
+    setIsArchiving(true);
+    try {
+      const token = typeof window !== "undefined" ? window.__accessToken : null;
+      if (!token) throw new Error("Not authenticated");
+      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: "markUnread" }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to mark unread");
+      }
+      // Optimistic update: add UNREAD label if missing
+      if (mail.labelIds && !mail.labelIds.includes("UNREAD")) {
+        mail.labelIds.push("UNREAD");
+      }
+      if (typeof showToastFlag === 'undefined' || showToastFlag) {
+        showToast("Marked as unread", "success");
+        // Notify parent only for user-initiated actions
+        if (onMarkUnread) onMarkUnread(mail.id as string);
+      }
+    } catch (error: any) {
+      console.error("Mark unread failed", error);
+      showToast(`Failed to mark unread: ${error.message}`, "error");
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleToggleRead = () => {
+    const isUnread = Array.isArray(mail?.labelIds) && mail?.labelIds.includes("UNREAD");
+    if (isUnread) {
+      handleMarkRead();
+    } else {
+      handleMarkUnread();
+    }
+  };
+
   // --- HÀM GỌI API REPLY ---
   const handleSendReply = async () => {
     if (!replyBody.trim()) return;
@@ -540,6 +670,18 @@ const MailContent = ({
             </button>
           )}
           <button
+            onClick={handleToggleRead}
+            className="p-2 hover:bg-muted hover:text-primary rounded-md transition-colors cursor-pointer"
+            title={isUnread ? "Mark as read" : "Mark as unread"}
+            aria-label={isUnread ? "Mark as read" : "Mark as unread"}
+          >
+            {isUnread ? (
+              <IoMdMailUnread size={18} />
+            ) : (
+              <IoMdMailOpen size={18} />
+            )}
+          </button>
+          <button
             onClick={handleDelete}
             disabled={isDeleting}
             className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-400 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -573,7 +715,7 @@ const MailContent = ({
           {/* Sender Info Row */}
           <div className="flex flex-row justify-between items-start">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
+              <div className="w-10 h-10 rounded-full bg-linear-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shrink-0">
                 {senderName.charAt(0).toUpperCase()}
               </div>
               <div className="flex flex-col">

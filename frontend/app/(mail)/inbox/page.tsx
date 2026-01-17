@@ -53,6 +53,11 @@ export default function Home() {
   const [triggerArchive, setTriggerArchive] = useState(0);
   // Counter to trigger delete in MailContent (used when an email is open)
   const [triggerDelete, setTriggerDelete] = useState(0);
+  // Counters to trigger mark read/unread in MailContent (when detail open)
+  const [triggerMarkRead, setTriggerMarkRead] = useState(0);
+  const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
+  // Counter for automatic mark-read when opening a mail (no toast)
+  const [triggerMarkReadAuto, setTriggerMarkReadAuto] = useState(0);
 
   // Fetch inbox mails function (reusable) - Define BEFORE useSearch
   const fetchInboxMails = useCallback(async () => {
@@ -177,6 +182,53 @@ export default function Home() {
         setTriggerArchive((t) => t + 1);
       } else if (mails[focusedIndex]) {
         handleArchiveEmail(mails[focusedIndex].id);
+      }
+    },
+    onMarkRead: () => {
+      if (selectedMail) {
+        setTriggerMarkRead((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        // Mark focused mail in list as read
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action: 'markRead' }),
+            });
+            if (!res.ok) throw new Error('Failed to mark read');
+            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+          } catch (err) {
+            console.error('Mark read failed', err);
+          }
+        })();
+      }
+    },
+    onMarkUnread: () => {
+      if (selectedMail) {
+        setTriggerMarkUnread((t) => t + 1);
+      } else if (mails[focusedIndex]) {
+        (async () => {
+          const mail = mails[focusedIndex];
+          try {
+            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            if (!token) return;
+            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({ action: 'markUnread' }),
+            });
+            if (!res.ok) throw new Error('Failed to mark unread');
+            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+          } catch (err) {
+            console.error('Mark unread failed', err);
+          }
+        })();
       }
     },
     onReply: () => {
@@ -314,6 +366,12 @@ export default function Home() {
       if (!response.ok) throw new Error("Failed");
       const data = await response.json();
       setSelectedMail(data);
+      // If opened mail is unread, mark it as read locally and trigger MailContent to mark read
+      const isUnread = Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
+      if (isUnread) {
+        setMails(prev => prev.map(m => m.id === data.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+        setTriggerMarkReadAuto(t => t + 1);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -469,6 +527,17 @@ export default function Home() {
           triggerArchive={triggerArchive}
           triggerReply={replyTrigger}
           triggerStar={triggerStar}
+          triggerMarkRead={triggerMarkRead}
+          triggerMarkReadAuto={triggerMarkReadAuto}
+          triggerMarkUnread={triggerMarkUnread}
+          onMarkRead={(mailId: string) => {
+            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: (m.labelIds||[]).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: (prev.labelIds||[]).filter(l => l !== 'UNREAD') } : prev);
+          }}
+          onMarkUnread={(mailId: string) => {
+            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: Array.from(new Set([...(prev.labelIds||[]),'UNREAD'])) } : prev);
+          }}
         />
       </div>
 

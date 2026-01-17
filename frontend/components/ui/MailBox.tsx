@@ -464,6 +464,14 @@ const MailBox = ({
               mails.map((mail, index) => {
                 const isSelected = selectedMail?.id === mail.id;
                 const isFocused = focusedIndex === index;
+                const isUnread = !!mail.isUnread || (!!mail.labelIds && mail.labelIds.includes("UNREAD"));
+
+                const bgClass = isSelected
+                  ? "bg-primary/20 border-primary/30"
+                  : isUnread
+                  ? "bg-primary/5 border border-primary-100 hover:bg-primary/20 dark:bg-gray-800/50 dark:border-gray-700 dark:hover:bg-gray-800/70"
+                  : "bg-white border border-gray-200 hover:bg-primary/20 dark:bg-background dark:border-gray-800 dark:hover:bg-gray-800/70";
+                const focusClass = isFocused && !isSelected ? "ring-2 ring-primary/20" : "";
 
                 return (
                   <div
@@ -474,15 +482,7 @@ const MailBox = ({
                     role="option"
                     aria-selected={isSelected || isFocused}
                     tabIndex={-1}
-                    className={` 
-                      flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border
-                      ${isSelected
-                        ? "bg-primary/10 border-primary/50 shadow-sm"
-                        : isFocused
-                        ? "ring-2 ring-primary/30"
-                        : "hover:bg-muted/20"
-                      }
-                    `}
+                    className={`flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border focus:outline-none ${bgClass} ${focusClass}`}
                   >
                     {/* ... (Nội dung từng item mail giữ nguyên) ... */}
                     <div className="flex items-start md:items-center w-full overflow-hidden">
