@@ -111,6 +111,7 @@ export default function FolderPage() {
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const [isForwardOpen, setIsForwardOpen] = useState(false);
   const [replyTrigger, setReplyTrigger] = useState(0);
+  const [triggerArchive, setTriggerArchive] = useState(0);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -327,7 +328,8 @@ export default function FolderPage() {
           onForwardClick={handleForward}
           onReplyClick={handleReply}
           onDelete={handleDeleteEmail}
-          onArchive={handleArchiveEmail}
+            onArchive={handleArchiveEmail}
+            triggerArchive={triggerArchive}
           triggerReply={replyTrigger}
         />
       </div>

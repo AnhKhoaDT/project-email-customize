@@ -38,6 +38,7 @@ interface MailBoxProps {
   onSearchModeChange?: (mode: SearchMode) => void;
   // Folder name
   folderName?: string;
+  onFocusedIndexChange?: (index: number) => void;
 }
 
 const MailBox = ({
@@ -60,6 +61,7 @@ const MailBox = ({
   searchMode = "fuzzy",
   onSearchModeChange,
   folderName = "Inbox",
+  onFocusedIndexChange,
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
@@ -239,6 +241,8 @@ const MailBox = ({
     }
   }, [focusedIndex]);
 
+  // Note: global keyboard handling is provided by `useKeyboardNavigation` at page level.
+
   // Handle search on Enter key with keyboard navigation
   const handleSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     // Arrow Down: Navigate suggestions
@@ -402,7 +406,7 @@ const MailBox = ({
                   }, 200);
                 }}
                 disabled={isSearching}
-                className="w-full focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
+                className="w-full mailbox-search-input focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
                 autoComplete="off"
               />
               {(inputValue || searchQuery) && (
@@ -467,11 +471,16 @@ const MailBox = ({
                     ref={isFocused ? focusedItemRef : null}
                     onClick={() => onSelectMail(mail)}
                     draggable={true}
+                    role="option"
+                    aria-selected={isSelected || isFocused}
+                    tabIndex={-1}
                     className={` 
                       flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border
                       ${isSelected
                         ? "bg-primary/10 border-primary/50 shadow-sm"
                         : isFocused
+                        ? "ring-2 ring-primary/30"
+                        : "hover:bg-muted/20"
                       }
                     `}
                   >

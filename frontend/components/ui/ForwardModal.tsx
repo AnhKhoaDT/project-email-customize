@@ -6,7 +6,8 @@ import { Input } from "./input";
 import { Label } from "./label";
 import { Mail } from "@/types";
 import { type EmailData } from "@/types";
- import { useToast } from "@/contexts/toast-context";
+import { useToast } from "@/contexts/toast-context";
+import { useEffect } from "react";
 
 interface ForwardModalProps {
   isOpen: boolean;
@@ -36,10 +37,8 @@ const ForwardModal = ({
     `Fwd: ${originalMail.subject || "No subject"}`
   );
   const [body, setBody] = useState(
-    `\n\n---------- Forwarded message ---------\nFrom: ${
-      originalMail.from
-    }\nDate: ${originalMail.date}\nSubject: ${originalMail.subject}\nTo: ${
-      originalMail.to || ""
+    `\n\n---------- Forwarded message ---------\nFrom: ${originalMail.from
+    }\nDate: ${originalMail.date}\nSubject: ${originalMail.subject}\nTo: ${originalMail.to || ""
     }\n\n${originalMail.snippet || ""}`
   );
   const [showCc, setShowCc] = useState(false);
@@ -64,15 +63,15 @@ const ForwardModal = ({
           .filter(Boolean),
         cc: cc
           ? cc
-              .split(",")
-              .map((email) => email.trim())
-              .filter(Boolean)
+            .split(",")
+            .map((email) => email.trim())
+            .filter(Boolean)
           : undefined,
         bcc: bcc
           ? bcc
-              .split(",")
-              .map((email) => email.trim())
-              .filter(Boolean)
+            .split(",")
+            .map((email) => email.trim())
+            .filter(Boolean)
           : undefined,
         subject,
         body,
@@ -94,6 +93,97 @@ const ForwardModal = ({
     }
   };
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKey = (e: globalThis.KeyboardEvent) => {
+      // Allow opening/toggling shortcuts with Shift+? (let global handler run)
+      if (e.key === '?' && e.shiftKey) {
+        return;
+      }
+
+      // Close on Escape
+      if (e.key === 'Escape') {
+        try { e.stopImmediatePropagation(); } catch { }
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      // Block other keys from reaching global handlers while modal is open
+      try { e.stopImmediatePropagation(); } catch { }
+
+      const active = document.activeElement as HTMLElement | null;
+      const tag = active?.tagName?.toLowerCase();
+      const isEditable = tag === 'textarea' || tag === 'input' || (active?.isContentEditable === true);
+
+      // Close with 'f' when not typing
+      if (e.key.toLowerCase() === 'f' && !isEditable && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      // Alt+c / Alt+b to open Cc /Bcc 
+      if (e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.key.toLowerCase() === 'c') {
+          if (!showCc) {
+            // open Cc
+            e.preventDefault();
+            setShowCc(true);
+            return;
+          }
+          else {
+            // close Cc
+            e.preventDefault();
+            setShowCc(false);
+            return
+          }
+        }
+        if (e.key.toLowerCase() === 'b') {
+          if (!showBcc) {
+            // open Bcc
+            e.preventDefault();
+            setShowBcc(true);
+            return;
+          }
+          else {
+            // close Bcc
+            e.preventDefault();
+            setShowBcc(false);
+            return
+          }
+        }
+      }
+
+      // Ctrl/Cmd+Enter -> send
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (!isSending) handleSend();
+        return;
+      }
+
+      // Enter when not focused in textarea/input -> send
+      if (e.key === 'Enter' && !isEditable) {
+        e.preventDefault();
+        if (!isSending) handleSend();
+        return;
+      }
+
+      // For editable fields, allow default typing but global propagation was stopped above
+      if (isEditable) {
+        return;
+      }
+
+      // For other non-editable keys, prevent default to avoid unintended effects
+      e.preventDefault();
+    };
+
+    // Use capture to intercept keys before other listeners
+    window.addEventListener('keydown', handleKey as EventListener, true);
+    return () => window.removeEventListener('keydown', handleKey as EventListener, true);
+  }, [isOpen, isSending, handleSend]);
+
   if (!isOpen) return null;
 
   return (
@@ -104,7 +194,7 @@ const ForwardModal = ({
           <h2 className="text-lg font-semibold">Forward Message</h2>
           <button
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
+            className="hover:text-primary hover:bg-muted rounded-md px-2.5 py-1.5 transition-colors cursor-pointer"
           >
             ✕
           </button>

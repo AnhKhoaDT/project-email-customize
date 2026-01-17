@@ -24,7 +24,9 @@ interface MailContentProps {
   onReplyClick?: () => void;
   onDelete?: (mailId: string) => void;
   onArchive?: (mailId: string) => void;
+  triggerArchive?: number;
   triggerReply?: number;
+  triggerStar?: number;
 }
 
 // ... (Giữ nguyên các hàm Helper: getSenderName, getSenderEmail, formatDate) ...
@@ -69,7 +71,9 @@ const MailContent = ({
   onReplyClick,
   onDelete,
   onArchive,
+  triggerArchive,
   triggerReply,
+  triggerStar,
 }: MailContentProps) => {
   const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
@@ -87,6 +91,22 @@ const MailContent = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerReply]);
+
+  // Trigger star toggle from parent (keyboard shortcut)
+  useEffect(() => {
+    if (typeof (triggerStar) === 'number' && triggerStar > 0) {
+      handleToggleStar();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerStar]);
+
+  // Trigger archive from parent (keyboard shortcut)
+  useEffect(() => {
+    if (typeof (triggerArchive) === 'number' && triggerArchive > 0) {
+      handleArchive();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [triggerArchive]);
 
   // Focus and scroll to reply textarea when reply mode is activated
   useEffect(() => {
@@ -171,28 +191,27 @@ const MailContent = ({
   // --- ARCHIVE EMAIL FUNCTION ---
   const handleArchive = async () => {
     if (!mail?.id) return;
-
+    // Optimistic update: call parent callback and show toast immediately
     setIsArchiving(true);
-
     try {
-      // Get Token
+      if (onArchive) {
+        onArchive(mail.id);
+      }
+      showToast("Email archived successfully", "success");
+
+      // Perform API call in background; if it fails, notify user (no automatic revert)
       const token = typeof window !== "undefined" ? window.__accessToken : null;
       if (!token) {
-        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
-        setIsArchiving(false);
-        return;
+        throw new Error("Not authenticated");
       }
 
-      // Call API
       const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          action: "archive",
-        }),
+        body: JSON.stringify({ action: "archive" }),
       });
 
       if (!response.ok) {
@@ -200,14 +219,7 @@ const MailContent = ({
         throw new Error(errorData.message || "Failed to archive email");
       }
 
-      // Success - call parent callback
-      if (onArchive) {
-        onArchive(mail.id);
-      }
-
-      showToast("Email archived successfully", "success");
-
-      // Go back to list
+      // Successful server confirmation - nothing more to do (already optimistic)
       if (onBack) {
         onBack();
       }
@@ -216,6 +228,18 @@ const MailContent = ({
       showToast(`Failed to archive: ${error.message}`, "error");
     } finally {
       setIsArchiving(false);
+    }
+  };
+
+  // Open in Gmail handler (only opens Gmail)
+  const handleOpenInGmail = (e?: React.MouseEvent) => {
+    try {
+      const url = `https://mail.google.com/mail/u/0/#all/${mail.threadId}`;
+      // If called from an anchor, prevent duplicate navigation
+      if (e) e.preventDefault();
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.error('Open in Gmail failed', err);
     }
   };
 
@@ -460,15 +484,14 @@ const MailContent = ({
         </div>
 
         <div className="flex items-center gap-2 text-secondary">
-          <a
-            href={`https://mail.google.com/mail/u/0/#all/${mail.threadId}`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={(e) => handleOpenInGmail(e)}
             className="p-2 hover:bg-muted rounded-md transition-colors hover:text-red-500 cursor-pointer"
             title="Open in Gmail"
+            aria-label="Open in Gmail"
           >
             <SiGmail size={18} />
-          </a>
+          </button>
           <button
             onClick={handleToggleStar}
             disabled={isStarring}
@@ -550,16 +573,15 @@ const MailContent = ({
               </div>
             </div>
             <div className="flex items-center gap-3 text-secondary text-sm">
-              <a
-                href={`https://mail.google.com/mail/u/0/#all/${mail.threadId}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                onClick={(e) => handleOpenInGmail(e)}
                 className="hidden md:flex items-center gap-1.5 hover:text-foreground hover:bg-muted px-2 py-1 rounded transition-colors text-xs font-medium"
                 title="Open in Gmail"
+                aria-label="Open in Gmail"
               >
                 <SiGmail size={14} />
                 Open in Gmail
-              </a>
+              </button>
               <span>{formatDate(mail.date)}</span>
               <button className="p-1 hover:bg-muted rounded hover:text-foreground cursor-pointer">
                 <IoMdMore size={20} />
@@ -704,6 +726,12 @@ const MailContent = ({
               placeholder="Type your reply here..."
               value={replyBody}
               onChange={(e) => setReplyBody(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  handleSendReply();
+                }
+              }}
               disabled={isSending}
             />
             {/* Note: Nếu muốn thêm tính năng attach file, bạn cần thêm <input type="file"> ở đây và xử lý state attachments */}
