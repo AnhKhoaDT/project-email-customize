@@ -36,6 +36,12 @@ interface MailContentProps {
   triggerStar?: number;
   onMarkRead?: (mailId: string) => void;
   onMarkUnread?: (mailId: string) => void;
+  // When true, include deleteMetadata:true in modify API calls for delete action
+  deleteMetadataOnModify?: boolean;
+  // When true, suppress MailContent's own success toast on delete (parent will show one)
+  suppressDeleteToast?: boolean;
+  // When false, do not perform the server-side delete here; parent will handle it.
+  performServerDelete?: boolean;
 }
 
 // Helper functions
@@ -90,6 +96,9 @@ const MailContent = ({
   triggerMarkReadAuto,
   onMarkRead,
   onMarkUnread,
+  deleteMetadataOnModify,
+  suppressDeleteToast,
+  performServerDelete = true,
 }: MailContentProps) => {
   const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
@@ -419,6 +428,18 @@ const MailContent = ({
   const handleDelete = async () => {
     if (!mail?.id) return;
 
+    // If parent is responsible for server delete, delegate confirmation and server call to parent
+    if (!performServerDelete) {
+      if (onDelete) {
+        try {
+          onDelete(mail.id);
+        } catch (e) {
+          console.error('onDelete callback error (delegated):', e);
+        }
+      }
+      return;
+    }
+
     const confirmed = window.confirm(
       "Are you sure you want to delete this email? It will be moved to Trash."
     );
@@ -427,41 +448,44 @@ const MailContent = ({
     setIsDeleting(true);
 
     try {
-      // Get Token
-      const token = typeof window !== "undefined" ? window.__accessToken : null;
-      if (!token) {
-        alert("Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.");
-        setIsDeleting(false);
-        return;
-      }
-
-      // Call API
-      const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          action: "delete",
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to delete email");
-      }
-
-      // Success - call parent callback
+      // Optimistic: notify parent immediately so UI can remove the item
       if (onDelete) {
-        onDelete(mail.id);
+        try {
+          onDelete(mail.id);
+        } catch (e) {
+          // Parent callback should not throw; log just in case
+          console.error('onDelete callback error (optimistic):', e);
+        }
       }
 
-      showToast("Email moved to trash", "success");
+      // Show toast immediately unless parent requested suppression
+      if (!suppressDeleteToast) {
+        showToast("Email moved to trash", "success");
+      }
 
-      // Go back to list
-      if (onBack) {
-        onBack();
+      // Perform server-side move-to-trash in background if this component is responsible for it
+      if (performServerDelete) {
+        const token = typeof window !== "undefined" ? window.__accessToken : null;
+        if (!token) {
+          throw new Error("Not authenticated");
+        }
+
+        const response = await fetch(`${API_BASE_URL}/emails/${mail.id}/modify`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            action: "delete",
+            ...(typeof deleteMetadataOnModify !== 'undefined' && deleteMetadataOnModify ? { deleteMetadata: true } : {}),
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || "Failed to delete email");
+        }
       }
     } catch (error: any) {
       console.error("Error deleting email:", error);
@@ -859,7 +883,7 @@ const MailContent = ({
                           attachment.filename
                         )
                       }
-                      className="flex items-center gap-2 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md transition-colors text-sm font-medium shrink-0"
+                      className="flex items-center gap-2 px-3 py-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-md transition-colors text-sm font-medium shrink-0 cursor-pointer"
                       title={`Download ${attachment.filename}`}
                     >
                       <FaDownload size={14} />

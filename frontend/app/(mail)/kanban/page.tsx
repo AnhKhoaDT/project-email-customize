@@ -14,7 +14,7 @@ import {
 } from "@hello-pangea/dnd";
 import { useKanbanData, KanbanEmail } from "@/hooks/useKanbanData";
 import useSseEvents from '@/hooks/useSseEvents';
-import api, { fetchGmailLabels, fetchEmailById, createKanbanColumn, reorderKanbanColumns } from "@/lib/api";
+import api, { fetchGmailLabels, fetchEmailById, createKanbanColumn, reorderKanbanColumns, deleteEmailMetadata } from "@/lib/api";
 import { useToast } from "@/contexts/toast-context";
 
 // Icons
@@ -120,6 +120,7 @@ const MailReadingModal = ({
   triggerMarkRead,
   triggerMarkUnread,
   triggerToggleRead,
+  onDeleteFromModal,
 }: {
   isOpen: boolean;
   mail: KanbanEmail | null;
@@ -130,6 +131,7 @@ const MailReadingModal = ({
   triggerMarkRead?: number;
   triggerMarkUnread?: number;
   triggerToggleRead?: number;
+  onDeleteFromModal?: (mailId: string) => Promise<void>;
 }) => {
   const { showToast } = useToast();
   const [isForwardOpen, setIsForwardOpen] = useState(false);
@@ -195,7 +197,18 @@ const MailReadingModal = ({
             setIsForwardOpen(true);
           }}
           onReplyClick={() => {}}
-          onDelete={() => onClose()}
+          onDelete={async (mailId?: string) => {
+            const id = mailId || (mail as any)?.id;
+            if (typeof onDeleteFromModal === 'function') {
+              await onDeleteFromModal(id as string);
+            } else {
+              onClose();
+            }
+          }}
+          // Tell MailContent to include deleteMetadata when it calls modify
+          deleteMetadataOnModify={true}
+          // Parent (Kanban) will show a single toast for deletes — suppress MailContent's toast
+          suppressDeleteToast={true}
           onArchive={() => onClose()}
           triggerReply={0}
           triggerStar={triggerStar}
@@ -527,6 +540,28 @@ export default function KanbanPage() {
   const [triggerMarkRead, setTriggerMarkRead] = useState(0);
   const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
   const [triggerToggle, setTriggerToggle] = useState(0);
+
+  // Handle deletion coming from MailContent inside modal: optimistic UI + backend metadata delete
+  const handleDeleteFromModal = async (mailId: string) => {
+    if (!mailId) return;
+    const backup = columns;
+    try {
+      // Optimistic remove from columns
+      setColumns(prev => prev.map(c => ({ ...c, items: c.items.filter(i => i.id !== mailId) })));
+      // Close modal
+      setOpenedMail(null);
+
+      // Parent shows a single toast; MailContent will perform the server modify
+      showToast("Email removed from Kanban", "success");
+    } catch (err: any) {
+      // Rollback
+      setColumns(backup);
+      console.error('[Kanban] deleteFromModal failed', err);
+      showToast(err?.response?.data?.message || err?.message || 'Failed to delete email metadata', 'error');
+    } finally {
+      setTriggerDelete(0);
+    }
+  };
 
   // Keyboard shortcuts (Kanban) — enable MailContent actions when reading modal is open
   const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
@@ -1367,7 +1402,7 @@ export default function KanbanPage() {
                             setSelectedExistingLabel("");
                             setNewLabelName("");
                           }}
-                          className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                          className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
                         >
                           Cancel
                         </button>
@@ -1375,7 +1410,7 @@ export default function KanbanPage() {
                           onClick={handleCreateColumn}
                           disabled={!!validationError || !newColTitle.trim() || (selectedLabelOption === "existing" && !selectedExistingLabel)}
                           style={{ backgroundColor: customColor || newColColor }}
-                          className="flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-md"
+                          className="flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold rounded-lg shadow-md hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-md cursor-pointer"
                         >
                           <Check size={16} /> Create Column
                         </button>
@@ -1442,6 +1477,7 @@ export default function KanbanPage() {
           setTriggerMarkUnread(0);
           setTriggerToggle(0);
         }}
+        onDeleteFromModal={handleDeleteFromModal}
         triggerStar={triggerStar}
         triggerArchive={triggerArchive}
         triggerDelete={triggerDelete}

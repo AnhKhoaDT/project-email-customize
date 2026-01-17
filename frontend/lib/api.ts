@@ -439,6 +439,15 @@ export const unsnoozeEmail = async (emailId: string) => {
 };
 
 /**
+ * Delete email metadata from backend DB (hard delete from emailmetadatas)
+ * @param emailId - Gmail message ID
+ */
+export const deleteEmailMetadata = async (emailId: string) => {
+  const response = await api.delete(`/email-metadata/${emailId}`);
+  return response.data;
+};
+
+/**
  * 🔥 NEW: Get hybrid search suggestions (FAST - Atlas Search)
  * 
  * Performance: <200ms (vs old API ~3-5s)

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res, Logger, Sse, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Query, Req, UseGuards, Res, Logger, Sse, UnauthorizedException, Delete } from '@nestjs/common';
 import { Observable, fromEvent } from 'rxjs';
 import { filter, map } from 'rxjs/operators';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -368,9 +368,31 @@ export class MailController {
   async modifyEmail(@Req() req: any, @Param('id') id: string, @Body() dto: ModifyEmailDto) {
     try {
       const result = await this.gmailService.modifyMessage(req.user.id, id, dto.action);
+
+      // If action is delete (move to Trash) and caller explicitly requested metadata removal,
+      // perform DB delete without extra debug logging.
+      if (dto?.action === 'delete' && dto?.deleteMetadata === true) {
+        try {
+          await this.emailMetadataService.deleteEmail(req.user.id, id);
+        } catch (metaErr) {
+          // swallow metadata delete errors (do not fail the modify operation)
+        }
+      }
+
       return { status: 200, message: 'Email modified successfully', data: result };
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to modify email' };
+    }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('email-metadata/:id')
+  async deleteEmailMetadata(@Req() req: any, @Param('id') id: string) {
+    try {
+      const result = await this.emailMetadataService.deleteEmail(req.user.id, id);
+      return { status: 200, message: 'Email metadata deleted', data: result };
+    } catch (err) {
+      return { status: 500, message: err?.message || 'Failed to delete email metadata' };
     }
   }
 

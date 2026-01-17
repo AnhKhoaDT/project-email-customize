@@ -556,6 +556,9 @@ export default function Home() {
           onForwardClick={() => selectedMail && setIsForwardOpen(true)}
           onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
           onDelete={handleDeleteEmail}
+          // Parent will perform server delete for inbox selection; suppress child toast
+          performServerDelete={false}
+          suppressDeleteToast={true}
           triggerDelete={triggerDelete}
           onArchive={handleArchiveEmail}
           triggerArchive={triggerArchive}

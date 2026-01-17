@@ -215,13 +215,41 @@ export default function FolderPage() {
 
   // Handle delete email
   const handleDeleteEmail = useCallback(
-    (mailId: string) => {
-      // Close detail view
-      setSelectedMail(null);
-      // Refresh mail list to reflect deletion
-      refreshMails();
+    async (mailId: string) => {
+      const confirmed = window.confirm(
+        "Are you sure you want to delete this email? It will be moved to Trash."
+      );
+      if (!confirmed) return;
+
+      try {
+        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+        if (!token) throw new Error("Not authenticated");
+        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+
+        const response = await fetch(`${apiURL}/emails/${mailId}/modify`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "delete" }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.message || "Failed to delete email");
+        }
+
+        // Success - update UI
+        setMails((prevMails) => prevMails.filter((m) => m.id !== mailId));
+        setSelectedMail(null);
+        showToast("Email moved to trash", "success");
+      } catch (error: any) {
+        console.error("Delete failed:", error);
+        showToast(`Delete failed: ${error?.message || "Please try again"}`, "error");
+      }
     },
-    [refreshMails]
+    [accessToken, showToast]
   );
 
   // Handle archive email
@@ -481,6 +509,9 @@ export default function FolderPage() {
           onForwardClick={handleForward}
           onReplyClick={handleReply}
           onDelete={handleDeleteEmail}
+          // Parent performs server delete for folder pages to avoid race conditions
+          performServerDelete={false}
+          suppressDeleteToast={true}
           triggerDelete={triggerDelete}
           onArchive={handleArchiveEmail}
           triggerArchive={triggerArchive}
