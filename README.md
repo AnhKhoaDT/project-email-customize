@@ -63,6 +63,7 @@ This project demonstrates a production-ready React application with:
 - [x] **Column 2 - Email List**: Paginated email list with sender, subject, preview, timestamp
 - [x] **Column 3 - Email Detail**: Full email view with from, to, subject, body, attachments
 - [x] Email actions: Reply, Forward, Delete, Mark as Read/Unread, Toggle Star
+- [x] **Open in Gmail link** (Deep link to original thread)
 - [x] Compose new email (modal)
 - [x] Attachment download support
 - [x] Responsive layout (3 columns → stacked on mobile)
@@ -179,7 +180,7 @@ Notes:
 
 ### Kanban Board Architecture
 
-The application implements a **dynamic Kanban system** with Gmail label synchronization:
+The application implements a **fully dynamic Kanban system** allowing users to **create, rename, reorder, and delete columns** mapped to Gmail labels (unlike static boards).
 
 **Key Components:**
 - **Gmail Labels** = Source of truth for email categorization
@@ -188,10 +189,10 @@ The application implements a **dynamic Kanban system** with Gmail label synchron
 - **Backend** = Two-way sync between Kanban columns and Gmail labels
 
 **Data Flow:**
-1. Each Kanban column maps to a Gmail label (system or custom)
-2. Moving emails between columns modifies Gmail labels in real-time
-3. Inbox uses client-side deduplication (filters emails already in other columns)
-4. Per-column sequential fetching (non-inbox first, inbox last for accurate filtering)
+1. Each Kanban column maps to a Gmail label (system or custom).
+2. **Sync Action:** Moving an email between columns triggers a request to Gmail API to update labels accordingly.
+3. Inbox uses client-side deduplication (filters emails already in other columns).
+4. Per-column sequential fetching (non-inbox first, inbox last for accurate filtering).
 
 **Technical Highlights:**
 - Optimistic updates for all mutations (create/delete/move/reorder columns)

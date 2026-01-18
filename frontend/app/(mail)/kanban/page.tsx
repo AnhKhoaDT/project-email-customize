@@ -82,6 +82,57 @@ const defaultConfig: ColumnConfig = {
   filterAttachment: false,
 };
 
+// 5. Helper: Apply filters and sorting
+const getFilteredSortedItems = (
+  items: KanbanEmail[],
+  config: ColumnConfig
+): KanbanEmail[] => {
+  let filtered = [...items];
+
+  // FILTER 1: Read Status (support both boolean `isUnread` and Gmail `labelIds`)
+  const isItemUnread = (item: any): boolean => {
+    // Priority 1: Check labelIds array (Gmail API primary source)
+    if (Array.isArray(item.labelIds)) {
+      return item.labelIds.includes('UNREAD');
+    }
+
+    // Priority 2: Check boolean isUnread field (backend transformed)
+    if (typeof item.isUnread === 'boolean') {
+      return item.isUnread;
+    }
+
+    // Fallback: Default to false (read) if no data available
+    return false;
+  };
+
+  if (config.filterRead === "unread") {
+    filtered = filtered.filter(item => isItemUnread(item));
+  } else if (config.filterRead === "read") {
+    filtered = filtered.filter(item => !isItemUnread(item));
+  }
+  // "all" → no filtering
+
+  // FILTER 2: Has Attachment
+  if (config.filterAttachment) {
+    filtered = filtered.filter(item => item.hasAttachment === true);
+  }
+
+  // SORT: By date
+  filtered.sort((a, b) => {
+    // Safely parse dates (fallback to epoch if missing)
+    const dateA = a.date ? new Date(a.date).getTime() : 0;
+    const dateB = b.date ? new Date(b.date).getTime() : 0;
+
+    if (config.sort === "newest") {
+      return dateB - dateA; // Newest first
+    } else {
+      return dateA - dateB; // Oldest first
+    }
+  });
+
+  return filtered;
+};
+
 // --- HELPER COMPONENTS (SnoozeModal, MailReadingModal, etc.) ---
 const getSenderName = (fromStr: string) => {
   if (!fromStr) return "Unknown";
@@ -214,7 +265,7 @@ const MailReadingModal = ({
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
-          <MailContent
+        <MailContent
           mail={mail as any}
           onBack={onClose}
           onForwardClick={() => {
@@ -668,7 +719,7 @@ export default function KanbanPage() {
   const [recoveryColumnId, setRecoveryColumnId] = useState("");
   const [recoveryColumnName, setRecoveryColumnName] = useState("");
   const [recoveryOriginalLabel, setRecoveryOriginalLabel] = useState("");
-  
+
   // Transient per-column notifications (shown inline on the column)
   const [columnNotifications, setColumnNotifications] = useState<Record<string, string>>({});
 
@@ -796,33 +847,13 @@ export default function KanbanPage() {
 
     return columns.map((col) => {
       const config = getColConfig(col.id);
-      let items = [...(col.items || [])];
 
-      // Deduplicate
-      items = Array.from(new Map(items.map((item) => [item.id, item])).values());
+      // Start with original items and deduplicate by id
+      const rawItems = Array.isArray(col.items) ? col.items : [];
+      const deduped = Array.from(new Map(rawItems.map((item: any) => [item.id, item])).values());
 
-      // Filter: Read Status
-      if (config.filterRead === "unread") {
-        items = items.filter((item) => item.isUnread);
-      } else if (config.filterRead === "read") {
-        items = items.filter((item) => !item.isUnread);
-      }
-
-      // Filter: Attachment
-      if (config.filterAttachment) {
-        items = items.filter((item) => item.hasAttachment);
-      }
-
-      // Sort: Date
-      // ⚠️ IMPORTANT: Preserve manual ordering during drag & drop
-      // Only auto-sort when NOT dragging to respect user's manual positioning
-      // if (!isDragging) {
-      //   items.sort((a, b) => {
-      //     const dateA = new Date(a.date || "").getTime();
-      //     const dateB = new Date(b.date || "").getTime();
-      //     return config.sort === "newest" ? dateB - dateA : dateA - dateB;
-      //   });
-      // }
+      // Apply centralized filter/sort helper once
+      const items = getFilteredSortedItems(deduped as KanbanEmail[], config);
 
       return {
         ...col,
@@ -1045,7 +1076,7 @@ export default function KanbanPage() {
   // Helper chọn icon dựa trên ID hoặc Title
   const getColumnIcon = (col: any) => {
     if (col.id === "inbox") return <FaInbox className="text-blue-500" />;
-    if (col.id === "in_progress" || col.title.toLowerCase().includes("progress")) return <FaAdjust className = "text-yellow-500"></FaAdjust>
+    if (col.id === "in_progress" || col.title.toLowerCase().includes("progress")) return <FaAdjust className="text-yellow-500"></FaAdjust>
     if (col.id === "done" || col.title.toLowerCase() === "done") return <FaRegCheckCircle className="text-green-500" />;
     if (col.id === "todo" || col.title.toLowerCase().includes("todo")) return <FaRegCircle className="text-orange-500" />;
     return <FaRegCircle />; // Default icon
@@ -1312,21 +1343,21 @@ export default function KanbanPage() {
                                     {gmailLabels.filter(l => l.type === "system").length > 0 && (
                                       <optgroup label="System Labels" className="bg-white dark:bg-gray-900">
                                         {gmailLabels
-                                            .filter((label) => label.type === "system")
-                                            .map((label) => {
-                                              const mappedCol = columns.find((col: any) =>
-                                                col.id && (
-                                                  (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
-                                                  (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
-                                                )
-                                              );
-                                              const mapped = !!mappedCol;
-                                              return (
-                                                <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
-                                                  {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
-                                                </option>
-                                              );
-                                            })}
+                                          .filter((label) => label.type === "system")
+                                          .map((label) => {
+                                            const mappedCol = columns.find((col: any) =>
+                                              col.id && (
+                                                (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
+                                                (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
+                                              )
+                                            );
+                                            const mapped = !!mappedCol;
+                                            return (
+                                              <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
+                                                {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                                              </option>
+                                            );
+                                          })}
                                       </optgroup>
                                     )}
 

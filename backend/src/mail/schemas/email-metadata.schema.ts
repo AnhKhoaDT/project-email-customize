@@ -74,7 +74,7 @@ export class EmailMetadata {
    * - PENDING: Đang chờ sync (optimistic update)
    * - ERROR: Sync thất bại, cần retry
    */
-  @Prop({ 
+  @Prop({
     type: Object,
     default: { state: 'SYNCED', retryCount: 0 }
   })
@@ -123,6 +123,12 @@ export class EmailMetadata {
 
   @Prop()
   receivedDate?: Date;
+
+  @Prop({ default: false })
+  hasAttachment?: boolean;
+
+  @Prop({ type: [Object], default: [] })
+  attachments?: any[];
 
   // ============================================
   // SEMANTIC SEARCH - WEEK 4
@@ -177,12 +183,12 @@ EmailMetadataSchema.index({ 'syncStatus.state': 1, 'syncStatus.retryCount': 1 })
 // Compound text index on searchable fields (subject, from, snippet)
 // Weights: subject is most important, then from, then snippet
 EmailMetadataSchema.index(
-  { 
-    subject: 'text', 
-    from: 'text', 
-    snippet: 'text' 
+  {
+    subject: 'text',
+    from: 'text',
+    snippet: 'text'
   },
-  { 
+  {
     weights: {
       subject: 10,  // Highest priority
       from: 5,      // Medium priority

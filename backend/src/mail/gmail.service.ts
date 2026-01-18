@@ -151,7 +151,76 @@ export class GmailService {
     return kanbanLabels;
   }
 
-  async listMessagesInLabel(userId: string, labelId: string, pageSize = 20, pageToken?: string) {
+  /**
+ * Recursively check if email has attachments
+ * Handles nested multipart structures (multipart/mixed, multipart/related, etc.)
+ * 
+ * @param payload - Gmail message payload
+ * @returns true if email has attachments, false otherwise
+ */
+private hasAttachments(payload: any): boolean {
+  if (!payload) return false;
+
+  /**
+   * Recursive helper to check all parts
+   */
+  const checkParts = (parts: any[]): boolean => {
+    if (!parts || !Array.isArray(parts)) return false;
+
+    for (const part of parts) {
+      // Method 1: Check if part has filename (most reliable indicator)
+      if (part.filename && part.filename.length > 0) {
+        // Exclude inline images that are embedded in HTML content
+        // These usually have Content-Disposition: inline or are in multipart/related
+        const headers = part.headers || [];
+        const disposition = headers.find(
+          (h: any) => h.name && h.name.toLowerCase() === 'content-disposition'
+        );
+        
+        // If there's a Content-Disposition header, check if it's "attachment"
+        if (disposition) {
+          const value = disposition.value || '';
+          // Accept "attachment" disposition as true attachment
+          if (value.toLowerCase().includes('attachment')) {
+            return true;
+          }
+          // Skip "inline" disposition (usually embedded images)
+          if (value.toLowerCase().includes('inline')) {
+            continue;
+          }
+        } else {
+          // No disposition header but has filename → likely an attachment
+          // Exception: common image types might be inline
+          const mimeType = (part.mimeType || '').toLowerCase();
+          const isLikelyInline = mimeType.startsWith('image/') && 
+                                 part.filename.match(/\.(png|jpg|jpeg|gif|webp)$/i);
+          
+          if (!isLikelyInline) {
+            return true;
+          }
+        }
+      }
+
+      // Method 2: Check if part has attachmentId in body (Gmail-specific)
+      if (part.body && part.body.attachmentId) {
+        return true;
+      }
+
+      // Method 3: Recursive check nested parts (for multipart emails)
+      if (part.parts && Array.isArray(part.parts)) {
+        if (checkParts(part.parts)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
+  return checkParts(payload.parts || []);
+}
+
+  async listMessagesInLabel(userId: string, labelId: string, pageSize = 20, pageToken?: string, includeBody = false) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
 
@@ -160,7 +229,7 @@ export class GmailService {
     // without the INBOX label. Handle this here to avoid sending 'ARCHIVE'
     // as a labelId to the Gmail API which would cause "Invalid label" errors.
     if (labelId === 'ARCHIVE') {
-      return this.listArchivedMessages(userId, pageSize, pageToken);
+      return this.listArchivedMessages(userId, pageSize, pageToken, includeBody);
     }
 
     // CRITICAL: Verify label exists first to detect deleted labels
@@ -195,7 +264,7 @@ export class GmailService {
           const detail = await gmail.users.messages.get({
             userId: 'me',
             id: msg.id,
-            format: 'metadata',
+            format: includeBody ? 'full' : 'metadata',
             metadataHeaders: ['Subject', 'From', 'To', 'Date']
           });
 
@@ -235,7 +304,7 @@ export class GmailService {
             internalDate: detail.data.internalDate,
             isUnread: (detail.data.labelIds || []).includes('UNREAD'),
             isStarred: (detail.data.labelIds || []).includes('STARRED'),
-            hasAttachment: (detail.data.payload?.parts || []).some((p: any) => p.filename && p.body?.attachmentId)
+            hasAttachment: this.hasAttachments(detail.data.payload)
           };
         } catch (err) {
           logger.error(`Failed to fetch message ${msg.id}:`, err);
@@ -266,7 +335,7 @@ export class GmailService {
     };
   }
 
-  async listArchivedMessages(userId: string, pageSize = 20, pageToken?: string) {
+  async listArchivedMessages(userId: string, pageSize = 20, pageToken?: string, includeBody = false) {
     const client = await this.getOAuthClientForUser(userId);
     const gmail = google.gmail({ version: 'v1', auth: client });
 
@@ -298,7 +367,7 @@ export class GmailService {
           const detail = await gmail.users.messages.get({
             userId: 'me',
             id: msg.id,
-            format: 'metadata',
+            format: includeBody ? 'full' : 'metadata',
             metadataHeaders: ['Subject', 'From', 'To', 'Date']
           });
 
@@ -338,7 +407,7 @@ export class GmailService {
             internalDate: detail.data.internalDate,
             isUnread: (detail.data.labelIds || []).includes('UNREAD'),
             isStarred: (detail.data.labelIds || []).includes('STARRED'),
-            hasAttachment: (detail.data.payload?.parts || []).some((p: any) => p.filename && p.body?.attachmentId)
+            hasAttachment: this.hasAttachments(detail.data.payload)
           };
         } catch (err) {
           logger.error(`Failed to fetch message ${msg.id}:`, err);
@@ -442,7 +511,7 @@ export class GmailService {
             isUnread: (detail.data.labelIds || []).includes('UNREAD'),
             isStarred: (detail.data.labelIds || []).includes('STARRED'),
             isImportant: (detail.data.labelIds || []).includes('IMPORTANT'),
-            hasAttachment: (detail.data.payload?.parts || []).some((p: any) => p.filename && p.body?.attachmentId)
+            hasAttachment: this.hasAttachments(detail.data.payload)
           };
         } catch (err) {
           logger.error(`Failed to fetch message ${msg.id}:`, err);
@@ -513,6 +582,7 @@ export class GmailService {
       date: getHeader('Date'),
       sizeEstimate: res.data.sizeEstimate,
       internalDate: res.data.internalDate,
+      hasAttachment: this.hasAttachments(res.data.payload),
     };
   }
 
