@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useUI } from "@/contexts/ui-context"; // Import useUI
@@ -12,15 +12,43 @@ import Kanban from "@/components/ui/Kanban";
 import { type SearchMode } from "@/components/search/SearchModeDropdown";
 import { type Mail, type EmailData } from "@/types";
 import { useSearch } from "@/hooks/useSearch";
-import { useKeyboardNavigation, KeyboardShortcutsModal } from "@/hooks/useKeyboardNavigation";
+import {
+  useKeyboardNavigation,
+  KeyboardShortcutsModal,
+} from "@/hooks/useKeyboardNavigation";
 
 export default function Home() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: isAuthLoading, isAuthInitialized, accessToken } = useAuth();
+  const {
+    isAuthenticated,
+    isLoading: isAuthLoading,
+    isAuthInitialized,
+    accessToken,
+  } = useAuth();
   const { showToast } = useToast();
 
   // Lấy state từ Global UI Context thay vì state cục bộ
-  const { isKanBanMode, toggleKanBanMode, toggleSidebar, isComposeOpen, setComposeOpen } = useUI();
+  const {
+    isKanBanMode,
+    toggleKanBanMode,
+    toggleSidebar,
+    isComposeOpen,
+    setComposeOpen,
+  } = useUI();
+
+  // Filter & Sort state
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | null>(null);
+  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterAttachments, setFilterAttachments] = useState(false);
+
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log("Filter state changed:", {
+      sortBy,
+      filterUnread,
+      filterAttachments,
+    });
+  }, [sortBy, filterUnread, filterAttachments]);
 
   // State quản lý dữ liệu Mail
   const [mails, setMails] = useState<Mail[]>([]);
@@ -63,7 +91,7 @@ export default function Home() {
 
   // Fetch inbox mails function (reusable) - Define BEFORE useSearch
   const fetchInboxMails = useCallback(async () => {
-    console.debug('[Inbox] fetchInboxMails called');
+    console.debug("[Inbox] fetchInboxMails called");
     setError(null); // Clear any previous errors
     try {
       setIsMailsLoading(true);
@@ -71,17 +99,25 @@ export default function Home() {
       const limit = 20;
 
       // Use token from AuthContext instead of window.__accessToken
-      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
-      console.debug('[Inbox] Token check:', { hasToken: !!token, source: accessToken ? 'AuthContext' : 'window' });
+      const token =
+        accessToken ||
+        (typeof window !== "undefined" ? window.__accessToken : null);
+      console.debug("[Inbox] Token check:", {
+        hasToken: !!token,
+        source: accessToken ? "AuthContext" : "window",
+      });
       if (!token) {
-        console.log('[Inbox] No token found, aborting fetch');
+        console.log("[Inbox] No token found, aborting fetch");
         setIsMailsLoading(false);
         return;
       }
 
       const maiURL =
         process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-      console.log('[Inbox] Fetching from:', `${maiURL}/mailboxes/${id}/emails?limit=${limit}`);
+      console.log(
+        "[Inbox] Fetching from:",
+        `${maiURL}/mailboxes/${id}/emails?limit=${limit}`,
+      );
       const response = await fetch(
         `${maiURL}/mailboxes/${id}/emails?limit=${limit}`,
         {
@@ -90,25 +126,25 @@ export default function Home() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-        }
+        },
       );
 
-      console.log('[Inbox] Response status:', response.status);
+      console.log("[Inbox] Response status:", response.status);
       if (!response.ok) throw new Error("Failed to fetch mails");
 
       const data = await response.json();
       const fetched = Array.isArray(data?.messages)
         ? data.messages
         : Array.isArray(data)
-        ? data
-        : [];
+          ? data
+          : [];
 
-      console.log('[Inbox] Fetched mails:', fetched.length);
+      console.log("[Inbox] Fetched mails:", fetched.length);
       setMails(fetched);
       setNextPageToken(data.nextPageToken || null);
       setHasMore(!!data.nextPageToken);
     } catch (err: any) {
-      console.error('[Inbox] Fetch error:', err);
+      console.error("[Inbox] Fetch error:", err);
       setError("Unable to load emails. Please try again.");
     } finally {
       setIsMailsLoading(false);
@@ -153,7 +189,11 @@ export default function Home() {
 
   // 2. Call API lấy danh sách mail on mount (and after clear search)
   useEffect(() => {
-    console.log('[Inbox] fetchInboxMails effect:', { isAuthenticated, searchQuery, isAuthLoading });
+    console.log("[Inbox] fetchInboxMails effect:", {
+      isAuthenticated,
+      searchQuery,
+      isAuthLoading,
+    });
     if (isAuthenticated && !searchQuery) {
       // Clear error when returning to inbox
       setError(null);
@@ -168,9 +208,11 @@ export default function Home() {
 
   // Keyboard shortcuts (global) using hook
   const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
-    onNextEmail: () => setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
+    onNextEmail: () =>
+      setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
     onPreviousEmail: () => setFocusedIndex((i) => Math.max(i - 1, 0)),
-    onOpenEmail: () => mails[focusedIndex] && handleSelectMail(mails[focusedIndex]),
+    onOpenEmail: () =>
+      mails[focusedIndex] && handleSelectMail(mails[focusedIndex]),
     onDelete: () => {
       if (selectedMail) {
         setTriggerDelete((t) => t + 1);
@@ -194,18 +236,37 @@ export default function Home() {
         (async () => {
           const mail = mails[focusedIndex];
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ action: 'markRead' }),
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: "markRead" }),
             });
-            if (!res.ok) throw new Error('Failed to mark read');
-            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            if (!res.ok) throw new Error("Failed to mark read");
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mail.id
+                  ? {
+                      ...m,
+                      labelIds: (m.labelIds || []).filter(
+                        (l) => l !== "UNREAD",
+                      ),
+                      isUnread: false,
+                    }
+                  : m,
+              ),
+            );
           } catch (err) {
-            console.error('Mark read failed', err);
+            console.error("Mark read failed", err);
           }
         })();
       }
@@ -217,18 +278,37 @@ export default function Home() {
         (async () => {
           const mail = mails[focusedIndex];
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ action: 'markUnread' }),
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: "markUnread" }),
             });
-            if (!res.ok) throw new Error('Failed to mark unread');
-            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            if (!res.ok) throw new Error("Failed to mark unread");
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mail.id
+                  ? {
+                      ...m,
+                      labelIds: Array.from(
+                        new Set([...(m.labelIds || []), "UNREAD"]),
+                      ),
+                      isUnread: true,
+                    }
+                  : m,
+              ),
+            );
           } catch (err) {
-            console.error('Mark unread failed', err);
+            console.error("Mark unread failed", err);
           }
         })();
       }
@@ -243,24 +323,56 @@ export default function Home() {
         (async () => {
           const mail = mails[focusedIndex];
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-            const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
-            const action = isUnread ? 'markRead' : 'markUnread';
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
+            const isUnread =
+              Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
+            const action = isUnread ? "markRead" : "markUnread";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({ action }),
             });
-            if (!res.ok) throw new Error('Failed to toggle read');
+            if (!res.ok) throw new Error("Failed to toggle read");
             if (isUnread) {
-              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+              setMails((prev) =>
+                prev.map((m) =>
+                  m.id === mail.id
+                    ? {
+                        ...m,
+                        labelIds: (m.labelIds || []).filter(
+                          (l) => l !== "UNREAD",
+                        ),
+                        isUnread: false,
+                      }
+                    : m,
+                ),
+              );
             } else {
-              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+              setMails((prev) =>
+                prev.map((m) =>
+                  m.id === mail.id
+                    ? {
+                        ...m,
+                        labelIds: Array.from(
+                          new Set([...(m.labelIds || []), "UNREAD"]),
+                        ),
+                        isUnread: true,
+                      }
+                    : m,
+                ),
+              );
             }
           } catch (err) {
-            console.error('Toggle read failed', err);
+            console.error("Toggle read failed", err);
           }
         })();
       }
@@ -282,21 +394,39 @@ export default function Home() {
           const isStarred = mail.labelIds?.includes("STARRED");
           const action = isStarred ? "unstar" : "star";
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) {
-              console.warn('[Inbox page] onStar: no auth token, aborting');
+              console.warn("[Inbox page] onStar: no auth token, aborting");
               return;
             }
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({ action }),
             });
-            if (!res.ok) throw new Error('Failed to toggle star');
-            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: isStarred ? (m.labelIds || []).filter(l=>l!="STARRED") : [...(m.labelIds||[]), "STARRED"] } : m));
+            if (!res.ok) throw new Error("Failed to toggle star");
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mail.id
+                  ? {
+                      ...m,
+                      labelIds: isStarred
+                        ? (m.labelIds || []).filter((l) => l != "STARRED")
+                        : [...(m.labelIds || []), "STARRED"],
+                    }
+                  : m,
+              ),
+            );
           } catch (err) {
-            console.error('Toggle star failed', err);
+            console.error("Toggle star failed", err);
           }
         })();
       }
@@ -319,11 +449,13 @@ export default function Home() {
         const url = `https://mail.google.com/mail/u/0/#all/${threadId}`;
         window.open(url, "_blank", "noopener,noreferrer");
       } catch (err) {
-        console.error('Open in Gmail keyboard handler failed', err);
+        console.error("Open in Gmail keyboard handler failed", err);
       }
     },
     onSearch: () => {
-      const input = document.querySelector('.mailbox-search-input') as HTMLInputElement | null;
+      const input = document.querySelector(
+        ".mailbox-search-input",
+      ) as HTMLInputElement | null;
       input?.focus();
     },
     onClearSearch: onClearSearch,
@@ -339,7 +471,9 @@ export default function Home() {
     // Lưu ý: Đảm bảo copy lại phần logic loadMoreMails từ code cũ vào đây
     try {
       setIsLoadingMore(true);
-      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+      const token =
+        accessToken ||
+        (typeof window !== "undefined" ? window.__accessToken : null);
       if (!token) return;
       const maiURL =
         process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
@@ -347,7 +481,7 @@ export default function Home() {
         `${maiURL}/mailboxes/INBOX/emails?limit=20&pageToken=${nextPageToken}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       );
       if (!response.ok) throw new Error("Failed");
       const data = await response.json();
@@ -355,7 +489,7 @@ export default function Home() {
       setMails((prev) => {
         const existingIds = new Set(prev.map((m) => m.id));
         const uniqueNewMails = newMails.filter(
-          (m: Mail) => !existingIds.has(m.id)
+          (m: Mail) => !existingIds.has(m.id),
         );
         return [...prev, ...uniqueNewMails];
       });
@@ -404,10 +538,21 @@ export default function Home() {
       const data = await response.json();
       setSelectedMail(data);
       // If opened mail is unread, mark it as read locally and trigger MailContent to mark read
-      const isUnread = Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
+      const isUnread =
+        Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
       if (isUnread) {
-        setMails(prev => prev.map(m => m.id === data.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
-        setTriggerMarkReadAuto(t => t + 1);
+        setMails((prev) =>
+          prev.map((m) =>
+            m.id === data.id
+              ? {
+                  ...m,
+                  labelIds: (m.labelIds || []).filter((l) => l !== "UNREAD"),
+                  isUnread: false,
+                }
+              : m,
+          ),
+        );
+        setTriggerMarkReadAuto((t) => t + 1);
       }
     } catch (err) {
       console.error(err);
@@ -417,8 +562,10 @@ export default function Home() {
   // Hàm send email riêng cho Forward Modal (vì modal này nằm trong Page)
   const handleForwardEmail = async (emailData: any) => {
     try {
-      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
-      console.log('[Forward] Sending email:', { emailData, hasToken: !!token });
+      const token =
+        accessToken ||
+        (typeof window !== "undefined" ? window.__accessToken : null);
+      console.log("[Forward] Sending email:", { emailData, hasToken: !!token });
       if (!token) throw new Error("Not authenticated");
       const apiURL =
         process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
@@ -430,19 +577,21 @@ export default function Home() {
         },
         body: JSON.stringify(emailData),
       });
-      
-      console.log('[Forward] Response status:', response.status);
+
+      console.log("[Forward] Response status:", response.status);
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
-        console.error('[Forward] Error response:', errorData);
+        const errorData = await response
+          .json()
+          .catch(() => ({ message: "Unknown error" }));
+        console.error("[Forward] Error response:", errorData);
         throw new Error(errorData.message || "Failed to send");
       }
-      
+
       showToast("Email forwarded successfully", "success");
       setIsForwardOpen(false);
       return await response.json();
     } catch (error: any) {
-      console.error('[Forward] Exception:', error);
+      console.error("[Forward] Exception:", error);
       showToast(`Failed to forward: ${error.message}`, "error");
       throw error;
     }
@@ -451,16 +600,19 @@ export default function Home() {
   // Handle delete email (confirm + API call) — keep behavior consistent with MailContent
   const handleDeleteEmail = async (mailId: string) => {
     const confirmed = window.confirm(
-      "Are you sure you want to delete this email? It will be moved to Trash."
+      "Are you sure you want to delete this email? It will be moved to Trash.",
     );
     if (!confirmed) return;
 
     try {
-      const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+      const token =
+        accessToken ||
+        (typeof window !== "undefined" ? window.__accessToken : null);
       if (!token) {
         throw new Error("Not authenticated");
       }
-      const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+      const apiURL =
+        process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
 
       const response = await fetch(`${apiURL}/emails/${mailId}/modify`, {
         method: "POST",
@@ -482,7 +634,10 @@ export default function Home() {
       showToast("Email moved to trash", "success");
     } catch (error: any) {
       console.error("Delete failed:", error);
-      showToast(`Delete failed: ${error?.message || "Please try again"}`, "error");
+      showToast(
+        `Delete failed: ${error?.message || "Please try again"}`,
+        "error",
+      );
     }
   };
 
@@ -497,101 +652,257 @@ export default function Home() {
   if (isAuthLoading) return null; // Hoặc loading spinner
   if (!isAuthenticated) return null;
 
+  // Apply filters and sorting
+  const displayMails = useMemo(() => {
+    console.log("Computing displayMails with filters:", {
+      sortBy,
+      filterUnread,
+      filterAttachments,
+      mailsCount: mails.length,
+    });
+
+    // Log sample mail to debug
+    if (mails.length > 0) {
+      console.log("Sample mail structure:", {
+        id: mails[0].id,
+        date: mails[0].date,
+        hasAttachment: mails[0].hasAttachment,
+        attachments: (mails[0] as any).attachments,
+        internalDate: (mails[0] as any).internalDate,
+      });
+    }
+
+    let filtered = [...mails];
+
+    // Apply unread filter
+    if (filterUnread) {
+      filtered = filtered.filter(
+        (mail) => mail.isUnread || mail.labelIds?.includes("UNREAD"),
+      );
+      console.log("After unread filter:", filtered.length);
+    }
+
+    // Apply attachments filter
+    if (filterAttachments) {
+      const before = filtered.length;
+      console.log("🔍 Checking attachments in all emails:");
+
+      // First, let's see what we have
+      filtered.forEach((mail, index) => {
+        if (index < 5) {
+          // Log first 5 emails for debugging
+          console.log(`Email ${index + 1}:`, {
+            id: mail.id,
+            subject: mail.subject?.substring(0, 30),
+            hasAttachment: mail.hasAttachment,
+            attachments: (mail as any).attachments,
+            attachmentsLength: (mail as any).attachments?.length,
+          });
+        }
+      });
+
+      filtered = filtered.filter((mail) => {
+        const hasAttach =
+          mail.hasAttachment || (mail as any).attachments?.length > 0;
+        if (hasAttach) {
+          console.log("✅ Mail WITH attachment kept:", {
+            id: mail.id,
+            subject: mail.subject?.substring(0, 30),
+            hasAttachment: mail.hasAttachment,
+            attachmentsCount: (mail as any).attachments?.length,
+          });
+        } else {
+          if (
+            (mail as any).attachments !== undefined ||
+            mail.hasAttachment !== undefined
+          ) {
+            console.log("❌ Mail WITHOUT attachment removed:", {
+              id: mail.id,
+              subject: mail.subject?.substring(0, 30),
+              hasAttachment: mail.hasAttachment,
+              attachments: (mail as any).attachments,
+            });
+          }
+        }
+        return hasAttach;
+      });
+      console.log(
+        `After attachments filter: ${filtered.length} (removed ${before - filtered.length})`,
+      );
+    }
+
+    // Apply sorting
+    if (sortBy === "newest") {
+      console.log("Applying newest sort...");
+      filtered.sort((a, b) => {
+        // internalDate is a Unix timestamp in milliseconds as a string
+        const dateA = parseInt((a as any).internalDate || "0");
+        const dateB = parseInt((b as any).internalDate || "0");
+        console.log(`Comparing: ${a.date} (${dateA}) vs ${b.date} (${dateB})`);
+        return dateB - dateA; // Newest first
+      });
+      console.log("Sorted by newest - first mail date:", filtered[0]?.date);
+    } else if (sortBy === "oldest") {
+      console.log("Applying oldest sort...");
+      filtered.sort((a, b) => {
+        // internalDate is a Unix timestamp in milliseconds as a string
+        const dateA = parseInt((a as any).internalDate || "0");
+        const dateB = parseInt((b as any).internalDate || "0");
+        return dateA - dateB; // Oldest first
+      });
+      console.log("Sorted by oldest - first mail date:", filtered[0]?.date);
+    }
+
+    console.log("Final displayMails count:", filtered.length);
+    return filtered;
+  }, [mails, filterUnread, filterAttachments, sortBy]);
+
   // Render
   return (
     <>
       {showShortcuts && (
-        <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+        <KeyboardShortcutsModal
+          isOpen={showShortcuts}
+          onClose={() => setShowShortcuts(false)}
+        />
       )}
       <div className="flex h-full w-full">
-      {/* SideBar đã bị xóa khỏi đây vì nó nằm ở AppShell (Layout).
+        {/* SideBar đã bị xóa khỏi đây vì nó nằm ở AppShell (Layout).
          ComposeModal cũng nằm ở AppShell.
       */}
 
-      {/* Cột Danh sách Mail */}
-      <div
-        className={`
+        {/* Cột Danh sách Mail */}
+        <div
+          className={`
           h-full flex flex-col
           ${selectedMail ? "hidden" : "flex"} 
           md:flex md:w-1/3 w-full
         `}
-      >
-        {isMailsLoading && mails.length === 0 ? (
-          <div className="flex items-center justify-center w-full h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          </div>
-        ) : (
-          <MailBox
-            toggleSidebar={toggleSidebar}
-            mails={mails}
-            selectedMail={selectedMail}
-            onSelectMail={handleSelectMail}
-            focusedIndex={focusedIndex}
-            isLoadingMore={isLoadingMore}
-            isLoading={isMailsLoading}
-            hasMore={hasMore}
-            kanbanMode={isKanBanMode}
-            kanbanClick={toggleKanBanMode}
-            onRefresh={fetchInboxMails}
-            searchQuery={searchQuery || undefined}
-            onSearch={handleSearch}
-            onClearSearch={onClearSearch}
-            isSearching={isSearching}
-            error={error}
-            searchMode={searchMode}
-            onSearchModeChange={setSearchMode}
-            onFocusedIndexChange={setFocusedIndex}
-          />
-        )}
-      </div>
+        >
+          {isMailsLoading && mails.length === 0 ? (
+            <div className="flex items-center justify-center w-full h-full">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : (
+            <MailBox
+              toggleSidebar={toggleSidebar}
+              mails={displayMails}
+              selectedMail={selectedMail}
+              onSelectMail={handleSelectMail}
+              focusedIndex={focusedIndex}
+              isLoadingMore={isLoadingMore}
+              isLoading={isMailsLoading}
+              hasMore={hasMore}
+              kanbanMode={isKanBanMode}
+              kanbanClick={toggleKanBanMode}
+              onRefresh={fetchInboxMails}
+              searchQuery={searchQuery || undefined}
+              onSearch={handleSearch}
+              onClearSearch={onClearSearch}
+              isSearching={isSearching}
+              error={error}
+              searchMode={searchMode}
+              onSearchModeChange={setSearchMode}
+              onFocusedIndexChange={setFocusedIndex}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+              filterUnread={filterUnread}
+              onFilterUnreadChange={setFilterUnread}
+              filterAttachments={filterAttachments}
+              onFilterAttachmentsChange={setFilterAttachments}
+            />
+          )}
+        </div>
 
-      {/* Cột Nội dung Mail / Kanban */}
-      <div
-        className={`
+        {/* Cột Nội dung Mail / Kanban */}
+        <div
+          className={`
           h-full 
           ${selectedMail ? "flex" : "hidden"} 
           md:flex md:w-2/3 w-full
         `}
-      >
-        <MailContent
-          mail={selectedMail}
-          onBack={() => setSelectedMail(null)}
-          onForwardClick={() => selectedMail && setIsForwardOpen(true)}
-          onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
-          onDelete={handleDeleteEmail}
-          // Parent will perform server delete for inbox selection; suppress child toast
-          performServerDelete={false}
-          suppressDeleteToast={true}
-          triggerDelete={triggerDelete}
-          onArchive={handleArchiveEmail}
-          triggerArchive={triggerArchive}
-          triggerReply={replyTrigger}
-          triggerStar={triggerStar}
-          triggerMarkRead={triggerMarkRead}
-          triggerMarkReadAuto={triggerMarkReadAuto}
-          triggerMarkUnread={triggerMarkUnread}
-          triggerToggleRead={triggerToggle}
-          onMarkRead={(mailId: string) => {
-            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: (m.labelIds||[]).filter(l => l !== 'UNREAD'), isUnread: false } : m));
-            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: (prev.labelIds||[]).filter(l => l !== 'UNREAD') } : prev);
-          }}
-          onMarkUnread={(mailId: string) => {
-            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
-            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: Array.from(new Set([...(prev.labelIds||[]),'UNREAD'])) } : prev);
-          }}
-        />
-      </div>
+        >
+          <MailContent
+            mail={selectedMail}
+            onBack={() => setSelectedMail(null)}
+            onForwardClick={() => selectedMail && setIsForwardOpen(true)}
+            onReplyClick={() => setReplyTrigger((prev) => prev + 1)}
+            onDelete={handleDeleteEmail}
+            // Parent will perform server delete for inbox selection; suppress child toast
+            performServerDelete={false}
+            suppressDeleteToast={true}
+            triggerDelete={triggerDelete}
+            onArchive={handleArchiveEmail}
+            triggerArchive={triggerArchive}
+            triggerReply={replyTrigger}
+            triggerStar={triggerStar}
+            triggerMarkRead={triggerMarkRead}
+            triggerMarkReadAuto={triggerMarkReadAuto}
+            triggerMarkUnread={triggerMarkUnread}
+            triggerToggleRead={triggerToggle}
+            onMarkRead={(mailId: string) => {
+              setMails((prev) =>
+                prev.map((m) =>
+                  m.id === mailId
+                    ? {
+                        ...m,
+                        labelIds: (m.labelIds || []).filter(
+                          (l) => l !== "UNREAD",
+                        ),
+                        isUnread: false,
+                      }
+                    : m,
+                ),
+              );
+              setSelectedMail((prev) =>
+                prev && prev.id === mailId
+                  ? {
+                      ...prev,
+                      labelIds: (prev.labelIds || []).filter(
+                        (l) => l !== "UNREAD",
+                      ),
+                    }
+                  : prev,
+              );
+            }}
+            onMarkUnread={(mailId: string) => {
+              setMails((prev) =>
+                prev.map((m) =>
+                  m.id === mailId
+                    ? {
+                        ...m,
+                        labelIds: Array.from(
+                          new Set([...(m.labelIds || []), "UNREAD"]),
+                        ),
+                        isUnread: true,
+                      }
+                    : m,
+                ),
+              );
+              setSelectedMail((prev) =>
+                prev && prev.id === mailId
+                  ? {
+                      ...prev,
+                      labelIds: Array.from(
+                        new Set([...(prev.labelIds || []), "UNREAD"]),
+                      ),
+                    }
+                  : prev,
+              );
+            }}
+          />
+        </div>
 
-      {/* Forward Modal vẫn giữ ở Page vì nó phụ thuộc vào selectedMail */}
-      {selectedMail && (
-        <ForwardModal
-          isOpen={isForwardOpen}
-          onClose={() => setIsForwardOpen(false)}
-          onSend={handleForwardEmail}
-          originalMail={selectedMail}
-        />
-      )}
-    </div>
+        {/* Forward Modal vẫn giữ ở Page vì nó phụ thuộc vào selectedMail */}
+        {selectedMail && (
+          <ForwardModal
+            isOpen={isForwardOpen}
+            onClose={() => setIsForwardOpen(false)}
+            onSend={handleForwardEmail}
+            originalMail={selectedMail}
+          />
+        )}
+      </div>
     </>
   );
 }
