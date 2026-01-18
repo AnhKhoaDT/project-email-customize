@@ -14,10 +14,11 @@ import { type EmailData, type Mail } from "@/types";
 import { useSearch } from "@/hooks/useSearch";
 import { useKeyboardNavigation, KeyboardShortcutsModal } from "@/hooks/useKeyboardNavigation";
 
-// Mapping folder slug to Gmail Label ID
+// Mapping folder slug to Gmail Label ID for known system folders
 const FOLDER_MAP: Record<string, string> = {
   inbox: "INBOX",
   starred: "STARRED",
+  important: "IMPORTANT",
   sent: "SENT",
   drafts: "DRAFT",
   spam: "SPAM",
@@ -47,18 +48,133 @@ export default function FolderPage() {
   const { isKanBanMode, toggleSidebar, isComposeOpen, setComposeOpen } = useUI();
   const { showToast } = useToast();
 
-  // Get folder from URL params
-  const folderSlug = params.folder as string;
-  const folderId = FOLDER_MAP[folderSlug?.toLowerCase()] || "INBOX";
-  const folderDisplayName = getFolderDisplayName(folderSlug);
+  // Get folder from URL params (decode percent-encoding)
+  const rawFolderParam = params.folder as string;
+  const folderSlug = rawFolderParam ? decodeURIComponent(rawFolderParam) : rawFolderParam;
+  const lower = folderSlug?.toLowerCase();
+  const systemFolderId = FOLDER_MAP[lower];
+
+  const slugify = (s?: string) =>
+    (s || "")
+      .toString()
+      .trim()
+      .toLowerCase()
+      // normalize Unicode and strip diacritic marks (accents)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-_]/g, "");
+
+  // State for label resolution
+  // undefined = not resolved yet, null = resolved but not found, string = found
+  const [resolvedFolderId, setResolvedFolderId] = useState<string | null | undefined>(
+    systemFolderId ?? undefined
+  );
+  const [resolvedDisplayName, setResolvedDisplayName] = useState<string>(
+    systemFolderId ? getFolderDisplayName(folderSlug) : folderSlug
+  );
+  const [isResolving, setIsResolving] = useState(!systemFolderId);
+
+  // Resolve custom label slugs to Gmail label IDs
+  useEffect(() => {
+    let mounted = true;
+    const resolveLabel = async () => {
+      // If it's a known system folder, nothing to do
+      if (systemFolderId) {
+        setIsResolving(false);
+        return;
+      }
+
+      setIsResolving(true);
+
+      // If the slug already looks like a Gmail label id, use it directly
+      if (folderSlug) {
+        const idMatch = folderSlug.match(/(Label_\d+)$/);
+        if (idMatch) {
+          setResolvedFolderId(idMatch[1]);
+          setIsResolving(false);
+          return;
+        }
+
+        if (folderSlug.startsWith("Label_")) {
+          setResolvedFolderId(folderSlug);
+          setIsResolving(false);
+          return;
+        }
+      }
+
+      // Otherwise fetch mailboxes and try to match by slugified name
+      try {
+        const token = typeof window !== "undefined" ? (window as any).__accessToken : null;
+        if (!token) {
+          setIsResolving(false);
+          return;
+        }
+        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+        const res = await fetch(`${apiURL}/mailboxes`, {
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          credentials: 'include'
+        });
+        if (!res.ok) {
+          setIsResolving(false);
+          return;
+        }
+        const boxes = await res.json();
+        if (!mounted) return;
+
+        // Try to match by slugified name or by id
+        const target = (boxes || []).find((b: any) => {
+          const nameSlug = slugify(b.name) || "";
+          const folderSlugSlug = slugify(folderSlug || "") || "";
+          if (nameSlug && nameSlug === folderSlugSlug) return true;
+          if (`${nameSlug}-${b.id}` === folderSlugSlug) return true;
+          // direct id match (when URL used label id)
+          if (b.id === folderSlug) return true;
+          return false;
+        });
+
+        if (target) {
+          setResolvedFolderId(target.id);
+          setResolvedDisplayName(target.name || folderSlug);
+        } else {
+          // Not found
+          setResolvedFolderId(null);
+        }
+      } catch (err) {
+        console.error('Failed to resolve label slug', err);
+        setResolvedFolderId(null);
+      } finally {
+        if (mounted) setIsResolving(false);
+      }
+    };
+
+    resolveLabel();
+    return () => { mounted = false; };
+  }, [folderSlug, systemFolderId]);
 
   // Search query from URL
   const searchQuery = searchParams.get("q");
 
-  // State for mails (will be updated by either useMailFolder or useSearch)
+  // State for mails
   const [mails, setMails] = useState<Mail[]>([]);
 
-  // Use custom hook to fetch mails (only when NOT searching)
+  // Only fetch when we have a resolved folder ID
+  const RESOLVING_LABEL = "RESOLVING_LABEL";
+  const NOT_FOUND_LABEL = "NOT_FOUND_LABEL";
+
+  // Determine effective folder id without falling back to INBOX for custom labels.
+  // Order: system folder -> resolving sentinel -> resolved mailbox id -> not-found sentinel.
+  let effectiveFolderId: string;
+  if (systemFolderId) {
+    effectiveFolderId = systemFolderId;
+  } else if (isResolving) {
+    effectiveFolderId = RESOLVING_LABEL;
+  } else if (typeof resolvedFolderId === "string" && resolvedFolderId) {
+    effectiveFolderId = resolvedFolderId;
+  } else {
+    effectiveFolderId = NOT_FOUND_LABEL;
+  }
+
   const {
     mails: folderMails,
     isLoading: isMailsLoading,
@@ -67,13 +183,15 @@ export default function FolderPage() {
     isLoadingMore,
     loadMoreMails,
     refreshMails,
-  } = useMailFolder({ folderId, searchQuery: null }); // Don't pass searchQuery
+  } = useMailFolder({ 
+    folderId: effectiveFolderId, 
+    searchQuery: null,
+  });
 
-  // Use search hook for search functionality
+  // Search hook
   const [searchError, setSearchError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Stable callback for updating mails from search
   const handleMailsChange = useCallback((newMails: Mail[]) => {
     console.log('[Page] onMailsChange called with mails:', newMails.length);
     setMails(newMails);
@@ -97,14 +215,12 @@ export default function FolderPage() {
     onRefreshMails: refreshMails,
   });
 
-  // Update mails when folder mails change (only if not searching)
+  // Update mails when folder mails change (only if not searching and not resolving)
   useEffect(() => {
-    console.log('[Page] Folder mails effect:', { searchQuery, folderMailsCount: folderMails.length });
-    if (!searchQuery) {
-      console.log('[Page] Setting mails from folderMails:', folderMails.length);
+    if (!searchQuery && !isResolving) {
       setMails(folderMails);
     }
-  }, [folderMails, searchQuery]);
+  }, [folderMails, searchQuery, isResolving]);
 
   // Combine errors
   const combinedError = error || searchError || hookSearchError;
@@ -118,7 +234,6 @@ export default function FolderPage() {
   const [triggerMarkRead, setTriggerMarkRead] = useState(0);
   const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
   const [triggerMarkReadAuto, setTriggerMarkReadAuto] = useState(0);
-  // Counter to trigger toggle read/unread (keyboard 'm') in MailContent
   const [triggerToggle, setTriggerToggle] = useState(0);
 
   // Redirect if not authenticated
@@ -171,7 +286,6 @@ export default function FolderPage() {
     }) => {
       try {
         const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
-        console.log('[Forward] Sending email:', { emailData, hasToken: !!token });
         if (!token) return;
 
         const apiURL =
@@ -186,17 +300,14 @@ export default function FolderPage() {
           body: JSON.stringify(emailData),
         });
 
-        console.log('[Forward] Response status:', response.status);
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
-          console.error('[Forward] Error response:', errorData);
           throw new Error(errorData.message || "Failed to send forward");
         }
 
         showToast("Email forwarded successfully", "success");
         setIsForwardOpen(false);
       } catch (err: any) {
-        console.error('[Forward] Exception:', err);
         showToast(`Failed to forward: ${err.message}`, "error");
       }
     },
@@ -240,7 +351,6 @@ export default function FolderPage() {
           throw new Error(errorData.message || "Failed to delete email");
         }
 
-        // Success - update UI
         setMails((prevMails) => prevMails.filter((m) => m.id !== mailId));
         setSelectedMail(null);
         showToast("Email moved to trash", "success");
@@ -255,15 +365,13 @@ export default function FolderPage() {
   // Handle archive email
   const handleArchiveEmail = useCallback(
     (mailId: string) => {
-      // Close detail view
       setSelectedMail(null);
-      // Refresh mail list to reflect archive
       refreshMails();
     },
     [refreshMails]
   );
 
-  // Keyboard navigation (shared hook)
+  // Keyboard navigation
   const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
     onNextEmail: () => setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
     onPreviousEmail: () => setFocusedIndex((i) => Math.max(i - 1, 0)),
@@ -455,6 +563,9 @@ export default function FolderPage() {
     return <Kanban />;
   }
 
+  // Show loading while resolving label
+  const isLoading = isResolving || (isMailsLoading && mails.length === 0);
+
   return (
     <div className="flex h-full w-full">
       {/* Cột Danh sách Mail */}
@@ -465,7 +576,7 @@ export default function FolderPage() {
           md:flex md:w-1/3 w-full
         `}
       >
-        {isMailsLoading && mails.length === 0 ? (
+        {isLoading ? (
           <div className="flex items-center justify-center w-full h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
@@ -490,7 +601,7 @@ export default function FolderPage() {
             error={combinedError}
             searchMode={searchMode}
             onSearchModeChange={setSearchMode}
-            folderName={folderDisplayName}
+            folderName={resolvedDisplayName}
           />
         )}
       </div>
@@ -509,11 +620,11 @@ export default function FolderPage() {
           onForwardClick={handleForward}
           onReplyClick={handleReply}
           onDelete={handleDeleteEmail}
-          // Parent performs server delete for folder pages to avoid race conditions
           performServerDelete={false}
           suppressDeleteToast={true}
           triggerDelete={triggerDelete}
           onArchive={handleArchiveEmail}
+          triggerStar={triggerStar}
           triggerArchive={triggerArchive}
           triggerReply={replyTrigger}
           triggerMarkRead={triggerMarkRead}

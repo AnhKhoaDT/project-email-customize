@@ -27,6 +27,7 @@ interface KeyboardNavigationOptions {
     isEmailOpen?: boolean;
     isComposing?: boolean;
     isForwarding?: boolean;
+    isReplyOpen?: boolean;
     disabled?: boolean;
     isKanbanMode?: boolean;
 }
@@ -67,6 +68,32 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
             return;
         }
 
+        // If the reply editor is focused, do not trigger global shortcuts
+        try {
+            const active = document.activeElement as HTMLElement | null;
+            const isReplyFocused = !!active && (
+                active.classList.contains?.('reply-textarea') ||
+                active.getAttribute?.('data-reply-input') === 'true' ||
+                !!active.closest?.('[data-reply-input]')
+            );
+            if (isReplyFocused) {
+                return;
+            }
+
+            // If the search input is focused, do not trigger global shortcuts
+            // (explicitly allow Ctrl+/ and Shift+? which are handled earlier)
+            const isSearchFocused = !!active && (
+                active.classList.contains?.('mailbox-search-input') ||
+                active.getAttribute?.('data-search-input') === 'true' ||
+                !!active.closest?.('.mailbox-search-input')
+            );
+            if (isSearchFocused) {
+                return;
+            }
+        } catch {
+            // ignore detection errors
+        }
+
         // If the search input is focused, allow Escape to unfocus (blur) it
         const isSearchInput = target instanceof HTMLElement && target.classList.contains?.('mailbox-search-input');
         if (isSearchInput && e.key === 'Escape') {
@@ -92,7 +119,7 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
             'ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab', '/', '?', 'm'
         ];
 
-        if (preventDefaultKeys.includes(e.key) && !e.ctrlKey && !e.metaKey) {
+        if (preventDefaultKeys.includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
         }
 
@@ -114,7 +141,7 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
                 options.onMoveLeft?.();
                 return;
             }
-            if (['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(e.key) && !e.ctrlKey && !e.metaKey) {
+            if (['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 const columnIndex = parseInt(e.key) - 1;
                 options.onJumpToColumn?.(columnIndex);
                 return;
@@ -138,6 +165,11 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
                         return;
                     case 's':
                         options.onStar?.();
+                        return;
+                    case 'escape':
+                    case 'esc':
+                        if (options.isReplyOpen) return; // don't close email when reply editor is open
+                        options.onCloseEmail?.();
                         return;
                     case 'r':
                         options.onReply?.();
@@ -174,7 +206,9 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
             }
 
             switch (e.key.toLowerCase()) {
+                case 'escape':
                 case 'esc':
+                    if (options.isReplyOpen) break; // ignore escape when reply editor is open
                     options.onCloseEmail?.();
                     break;
                 case 'm':
@@ -214,64 +248,67 @@ export const useKeyboardNavigation = (options: KeyboardNavigationOptions) => {
             return;
         }
 
-        // Toggle read/unread with 'm'
-        if (e.key.toLowerCase() === 'm') {
+        // Toggle read/unread with 'm' (only when no modifiers)
+        const isPlainKey = !e.ctrlKey && !e.metaKey && !e.altKey;
+        if (e.key.toLowerCase() === 'm' && isPlainKey) {
             options.onToggleRead?.();
             return;
         }
 
-        switch (e.key.toLowerCase()) {
-            // Điều hướng cơ bản trong danh sách email
-            case 'j':
-            case 'arrowdown':
-                options.onNextEmail?.();
-                break;
-            case 'k':
-            case 'arrowup':
-                options.onPreviousEmail?.();
-                break;
-            case 'enter':
-                options.onOpenEmail?.();
-                break;
+        // Only handle single-key shortcuts when no modifier keys are held
+        if (isPlainKey) {
+            switch (e.key.toLowerCase()) {
+                // Điều hướng cơ bản trong danh sách email
+                case 'j':
+                case 'arrowdown':
+                    options.onNextEmail?.();
+                    break;
+                case 'k':
+                case 'arrowup':
+                    options.onPreviousEmail?.();
+                    break;
+                case 'enter':
+                    options.onOpenEmail?.();
+                    break;
 
-            // Tác vụ trên email
-            case 'x':
-                options.onSelectToggle?.();
-                break;
-            case 'e':
-            case 'y': // 'y' là shortcut archive trong Gmail
-                options.onArchive?.();
-                break;
-            case 's':
-                options.onStar?.();
-                break;
-            case 'd':
-            case '#':
-                options.onDelete?.();
-                break;
+                // Tác vụ trên email
+                case 'x':
+                    options.onSelectToggle?.();
+                    break;
+                case 'e':
+                case 'y': // 'y' là shortcut archive trong Gmail
+                    options.onArchive?.();
+                    break;
+                case 's':
+                    options.onStar?.();
+                    break;
+                case 'd':
+                case '#':
+                    options.onDelete?.();
+                    break;
 
 
-            // Tác vụ toàn cục
-            case 'c':
-                options.onCompose?.();
-                break;
-            case '/':
-                options.onSearch?.();
-                break;
-            case '?':
-                if (e.shiftKey) {
-                    setShowShortcuts(prev => !prev);
-                }
-                break;
-            case 'tab':
-                if (e.shiftKey) {
-                    options.onPreviousColumn?.();
-                } else {
-                    options.onNextColumn?.();
-                }
-                break;
+                // Tác vụ toàn cục
+                case 'c':
+                    options.onCompose?.();
+                    break;
+                case '/':
+                    options.onSearch?.();
+                    break;
+                case '?':
+                    if (e.shiftKey) {
+                        setShowShortcuts(prev => !prev);
+                    }
+                    break;
+                case 'tab':
+                    if (e.shiftKey) {
+                        options.onPreviousColumn?.();
+                    } else {
+                        options.onNextColumn?.();
+                    }
+                    break;
+            }
         }
-
         // Xử lý các phím tắt với Ctrl/Cmd
         if (e.ctrlKey || e.metaKey) {
             switch (e.key.toLowerCase()) {

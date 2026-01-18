@@ -121,6 +121,9 @@ const MailReadingModal = ({
   triggerMarkUnread,
   triggerToggleRead,
   onDeleteFromModal,
+  triggerReply,
+  triggerForward,
+  onReplyStateChange,
 }: {
   isOpen: boolean;
   mail: KanbanEmail | null;
@@ -132,6 +135,9 @@ const MailReadingModal = ({
   triggerMarkUnread?: number;
   triggerToggleRead?: number;
   onDeleteFromModal?: (mailId: string) => Promise<void>;
+  triggerReply?: number;
+  triggerForward?: number;
+  onReplyStateChange?: (isReplying: boolean) => void;
 }) => {
   const { showToast } = useToast();
   const [isForwardOpen, setIsForwardOpen] = useState(false);
@@ -165,11 +171,15 @@ const MailReadingModal = ({
   const [replyBody, setReplyBody] = useState("");
   const [isSending, setIsSending] = useState(false);
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [replyTrigger, setReplyTrigger] = useState(0);
 
   // Reset state when mail changes
   useEffect(() => {
     setIsReplying(false);
     setReplyBody("");
+    // Ensure any internal reply trigger is cleared so reply editor
+    // does not auto-open when the modal mounts or mail changes.
+    setReplyTrigger(0);
   }, [mail]);
 
   useEffect(() => {
@@ -182,6 +192,21 @@ const MailReadingModal = ({
     }
   }, [isReplying]);
 
+  // Parent-triggered reply: when parent increments triggerReply, forward to internal replyTrigger
+  useEffect(() => {
+    if (typeof triggerReply === "number" && triggerReply > 0) {
+      setReplyTrigger((t) => t + 1);
+    }
+  }, [triggerReply]);
+
+  // Parent-triggered forward: open forward modal when trigger increments
+  useEffect(() => {
+    if (typeof triggerForward === "number" && triggerForward > 0) {
+      setForwardOriginalMail(mail);
+      setIsForwardOpen(true);
+    }
+  }, [triggerForward, mail]);
+
   if (!isOpen) return null;
   if (!mail) return null;
 
@@ -189,14 +214,15 @@ const MailReadingModal = ({
   return (
     <div className="fixed inset-0 z-100 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="w-[90vw] h-[90vh] md:w-[850px] bg-background dark:bg-[#121212] rounded-xl shadow-2xl border border-divider dark:border-white/10 flex flex-col overflow-hidden">
-        <MailContent
+          <MailContent
           mail={mail as any}
           onBack={onClose}
           onForwardClick={() => {
             setForwardOriginalMail(mail);
             setIsForwardOpen(true);
           }}
-          onReplyClick={() => {}}
+          onReplyClick={() => setReplyTrigger((t) => t + 1)}
+          onReplyStateChange={onReplyStateChange}
           onDelete={async (mailId?: string) => {
             const id = mailId || (mail as any)?.id;
             if (typeof onDeleteFromModal === 'function') {
@@ -210,7 +236,7 @@ const MailReadingModal = ({
           // Parent (Kanban) will show a single toast for deletes — suppress MailContent's toast
           suppressDeleteToast={true}
           onArchive={() => onClose()}
-          triggerReply={0}
+          triggerReply={replyTrigger}
           triggerStar={triggerStar}
           triggerArchive={triggerArchive}
           triggerDelete={triggerDelete}
@@ -540,6 +566,9 @@ export default function KanbanPage() {
   const [triggerMarkRead, setTriggerMarkRead] = useState(0);
   const [triggerMarkUnread, setTriggerMarkUnread] = useState(0);
   const [triggerToggle, setTriggerToggle] = useState(0);
+  const [triggerReply, setTriggerReply] = useState(0);
+  const [triggerForward, setTriggerForward] = useState(0);
+  const [isReplyOpen, setIsReplyOpen] = useState(false);
 
   // Handle deletion coming from MailContent inside modal: optimistic UI + backend metadata delete
   const handleDeleteFromModal = async (mailId: string) => {
@@ -567,6 +596,7 @@ export default function KanbanPage() {
   const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
     isKanbanMode: true,
     isEmailOpen: !!openedMail,
+    isReplyOpen: isReplyOpen,
     onMarkRead: () => {
       setTriggerMarkRead((t) => {
         const v = t + 1;
@@ -607,6 +637,20 @@ export default function KanbanPage() {
       setTriggerToggle((t) => {
         const v = t + 1;
         setTimeout(() => setTriggerToggle(0), 150);
+        return v;
+      });
+    },
+    onReply: () => {
+      setTriggerReply((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerReply(0), 150);
+        return v;
+      });
+    },
+    onForward: () => {
+      setTriggerForward((t) => {
+        const v = t + 1;
+        setTimeout(() => setTriggerForward(0), 150);
         return v;
       });
     },
@@ -883,12 +927,6 @@ export default function KanbanPage() {
       setIsLoadingLabels(true);
       fetchGmailLabels()
         .then((labels) => {
-          console.log("📧 Fetched Gmail labels:", labels);
-          console.log("📊 Label breakdown:", {
-            total: labels.length,
-            system: labels.filter((l: any) => l.type === "system").length,
-            user: labels.filter((l: any) => l.type === "user").length,
-          });
           setGmailLabels(Array.isArray(labels) ? labels : []);
         })
         .catch((err) => {
@@ -1088,6 +1126,8 @@ export default function KanbanPage() {
                                 setTriggerDelete(0);
                                 setTriggerMarkRead(0);
                                 setTriggerMarkUnread(0);
+                                setTriggerReply(0);
+                                setIsReplyOpen(false);
                                 // fetchEmailById returns response.data shape; set opened mail to detailed object
                                 setOpenedMail(detailed?.data || detailed || item);
                               } catch (err) {
@@ -1476,6 +1516,8 @@ export default function KanbanPage() {
           setTriggerMarkRead(0);
           setTriggerMarkUnread(0);
           setTriggerToggle(0);
+          setTriggerReply(0);
+          setTriggerForward(0);
         }}
         onDeleteFromModal={handleDeleteFromModal}
         triggerStar={triggerStar}
@@ -1484,6 +1526,9 @@ export default function KanbanPage() {
         triggerMarkRead={triggerMarkRead}
         triggerMarkUnread={triggerMarkUnread}
         triggerToggleRead={triggerToggle}
+        triggerReply={triggerReply}
+        triggerForward={triggerForward}
+        onReplyStateChange={(v: boolean) => setIsReplyOpen(v)}
       />
 
       {/* Keyboard Shortcuts Modal (Kanban) */}

@@ -63,7 +63,7 @@ export default function Home() {
 
   // Fetch inbox mails function (reusable) - Define BEFORE useSearch
   const fetchInboxMails = useCallback(async () => {
-    console.log('[Inbox] fetchInboxMails called');
+    console.debug('[Inbox] fetchInboxMails called');
     setError(null); // Clear any previous errors
     try {
       setIsMailsLoading(true);
@@ -72,7 +72,7 @@ export default function Home() {
 
       // Use token from AuthContext instead of window.__accessToken
       const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
-      console.log('[Inbox] Token check:', { hasToken: !!token, source: accessToken ? 'AuthContext' : 'window' });
+      console.debug('[Inbox] Token check:', { hasToken: !!token, source: accessToken ? 'AuthContext' : 'window' });
       if (!token) {
         console.log('[Inbox] No token found, aborting fetch');
         setIsMailsLoading(false);
@@ -283,7 +283,10 @@ export default function Home() {
           const action = isStarred ? "unstar" : "star";
           try {
             const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
-            if (!token) return;
+            if (!token) {
+              console.warn('[Inbox page] onStar: no auth token, aborting');
+              return;
+            }
             const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
               method: 'POST',
