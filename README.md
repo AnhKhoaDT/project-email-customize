@@ -309,10 +309,10 @@ BASE_URL=http://localhost:3000
    Password: demo123
 
 4. Click "Sign In"
-   → Frontend validates input
-   → POST /auth/login to backend
-   → Backend returns: { accessToken, refreshToken, user }
-   → Tokens được lưu (access: in-memory, refresh: localStorage)
+  → Frontend validates input
+  → POST /auth/login to backend
+  → Backend returns: `{ accessToken, user }` and sets the app refresh token as an HttpOnly cookie
+  → Frontend saves `accessToken` to AuthContext (in-memory); refresh token is stored in an HttpOnly cookie by the backend
 
 5. Redirect to /inbox
    → 3-column email dashboard loads
@@ -364,8 +364,8 @@ Actions available:
 ```
 1. Click user profile → Logout button (top-right)
 2. POST /auth/logout to backend
-   → Backend revokes refresh token
-3. Frontend clears tokens from memory & localStorage
+  → Backend revokes refresh token and clears the HttpOnly cookie
+3. Frontend clears in-memory tokens and user state (refresh cookie cleared by backend)
 4. Redirect to /login
 ```
 
@@ -534,8 +534,8 @@ Key directories:
 1. User submits credentials via login form
 2. Client validates input (Zod schema)
 3. POST `/auth/login` to backend
-4. Backend validates and returns `{ accessToken, refreshToken, user }`
-5. Frontend saves tokens (accessToken in-memory, refreshToken in localStorage)
+4. Backend validates and returns `{ accessToken, user }` and sets the refresh token as an HttpOnly cookie
+5. Frontend saves `accessToken` in-memory (AuthContext); refresh token is stored as an HttpOnly cookie by backend
 6. User redirected to `/inbox`
 
 ### Google Sign-In

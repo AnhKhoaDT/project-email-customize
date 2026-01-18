@@ -28,9 +28,10 @@ Tài liệu này mô tả chi tiết các endpoint backend mà frontend (React S
 
 ---
 ## 2) Yêu cầu môi trường / CORS
-- Biến môi trường quan trọng (backend):
+-- Biến môi trường quan trọng (backend):
   - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-  - `GOOGLE_CALLBACK_URL` (ví dụ `http://localhost:5000/auth/google/callback`)
+  - `GOOGLE_CALLBACK_URL` (ví dụ `http://localhost:5000/auth/google/callback`) — used by `auth` endpoints
+  - `GOOGLE_REDIRECT_URI` (ví dụ `http://localhost:5000/auth/google/callback`) — used by some mail sync services (legacy variable). It's safe to set both to the same value.
   - `FE_URL` (ví dụ `http://localhost:3000`)
   - `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`
   - `MONGODB_URI`

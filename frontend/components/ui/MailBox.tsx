@@ -283,13 +283,18 @@ const MailBox = ({
         setSuggestions([]);
       }
     }
-    // Escape: Close suggestions or clear search
+    // Escape: Close suggestions or clear search, then unfocus input
     else if (e.key === "Escape") {
-      if (showSuggestions) {
-        setShowSuggestions(false);
-        setSuggestions([]);
-      } else {
-        handleClearSearch();
+      try {
+        if (showSuggestions) {
+          setShowSuggestions(false);
+          setSuggestions([]);
+        } else {
+          handleClearSearch();
+        }
+        try { (e.target as HTMLInputElement).blur(); } catch { }
+      } catch (err) {
+        // ignore
       }
     }
   };
@@ -406,6 +411,7 @@ const MailBox = ({
                   }, 200);
                 }}
                 disabled={isSearching}
+                data-search-input="true"
                 className="w-full mailbox-search-input focus:outline-none placeholder-secondary bg-transparent disabled:opacity-50"
                 autoComplete="off"
               />
@@ -467,11 +473,11 @@ const MailBox = ({
                 const isUnread = !!mail.isUnread || (!!mail.labelIds && mail.labelIds.includes("UNREAD"));
 
                 const bgClass = isSelected
-                  ? "bg-primary/20 border-primary/30"
+                  ? "bg-primary/20 border-primary/60 shadow-lg"
                   : isUnread
                   ? "bg-primary/5 border border-primary-100 hover:bg-primary/20 dark:bg-gray-800/50 dark:border-gray-700 dark:hover:bg-gray-800/70"
                   : "bg-white border border-gray-200 hover:bg-primary/20 dark:bg-background dark:border-gray-800 dark:hover:bg-gray-800/70";
-                const focusClass = isFocused && !isSelected ? "ring-2 ring-primary/20" : "";
+                const focusClass = isFocused && !isSelected ? "ring-2 ring-primary/30" : "";
 
                 return (
                   <div
@@ -482,7 +488,7 @@ const MailBox = ({
                     role="option"
                     aria-selected={isSelected || isFocused}
                     tabIndex={-1}
-                    className={`flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border focus:outline-none ${bgClass} ${focusClass}`}
+                    className={`flex flex-row justify-between items-start md:items-center p-3 rounded-md transition-all cursor-pointer border ${bgClass} ${focusClass}`}
                   >
                     {/* ... (Nội dung từng item mail giữ nguyên) ... */}
                     <div className="flex items-start md:items-center w-full overflow-hidden">

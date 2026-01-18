@@ -207,7 +207,7 @@ export class MailController {
 
       const result = await this.kanbanConfigService.getKanbanEmails(
         req.user.id,
-        mailboxId,
+        decodeURIComponent(mailboxId),
         options
       );
 
@@ -276,21 +276,26 @@ export class MailController {
 
       // Try Gmail API first
       try {
+        const mailboxId = decodeURIComponent(id);
+        this.logger.debug(`mailboxEmails: requested mailbox id=${mailboxId} user=${req.user?.id}`);
         // Special handling for ARCHIVE: Gmail doesn't have ARCHIVE label
         // Archived emails are those without INBOX label
-        if (id === 'ARCHIVE') {
+        if (mailboxId === 'ARCHIVE') {
           const res = await this.gmailService.listArchivedMessages(req.user.id, pageSize, pageToken as any);
           return res;
         }
         
-        const res = await this.gmailService.listMessagesInLabel(req.user.id, id, pageSize, pageToken as any);
+        const res = await this.gmailService.listMessagesInLabel(req.user.id, mailboxId, pageSize, pageToken as any);
+        this.logger.debug(`mailboxEmails: gmail returned ${Array.isArray(res?.messages) ? res.messages.length : 0} messages for label ${mailboxId}`);
         return res;
       } catch (gmailError) {
+        this.logger.warn(`mailboxEmails: Gmail API failed for label=${id} user=${req.user?.id} error=${gmailError?.message || gmailError}`);
         // Fallback to MongoDB seed data if Gmail fails (no token, etc.)
         this.logger.warn(`Gmail API failed for user ${req.user.id}, falling back to MongoDB seed data`);
 
         // Get emails from MongoDB by label
         const dbEmails = await this.emailMetadataService.getEmailsByLabel(req.user.id, id, pageSize);
+        this.logger.debug(`mailboxEmails: fallback DB returned ${dbEmails?.length || 0} emails for label ${id}`);
 
         // Format to match Gmail API response
         return {
@@ -400,7 +405,8 @@ export class MailController {
   @Post('labels/:id/toggle')
   async toggleLabel(@Req() req: any, @Param('id') labelId: string, @Body() dto: ToggleLabelDto) {
     try {
-      const result = await this.gmailService.toggleLabel(req.user.id, labelId, dto.emailIds, dto.action);
+      const decodedLabelId = decodeURIComponent(labelId);
+      const result = await this.gmailService.toggleLabel(req.user.id, decodedLabelId, dto.emailIds, dto.action);
       return { status: 200, message: 'Label toggled successfully', data: result };
     } catch (err) {
       return { status: 500, message: err?.message || 'Failed to toggle label' };
@@ -800,10 +806,11 @@ export class MailController {
     try {
       const pageSize = limit ? parseInt(limit, 10) : 50;
 
+      const decodedLabelId = decodeURIComponent(labelId);
       // Fetch emails from Gmail
       const result = await this.gmailService.listMessagesInLabel(
         req.user.id,
-        labelId,
+        decodedLabelId,
         pageSize,
         pageToken as any
       );

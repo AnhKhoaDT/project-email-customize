@@ -166,8 +166,8 @@ export class GmailService {
     // CRITICAL: Verify label exists first to detect deleted labels
     // Gmail API messages.list doesn't throw error for non-existent labels, just returns []
     try {
-      await gmail.users.labels.get({ userId: 'me', id: labelId });
-      logger.debug(`Label ${labelId} exists and is accessible`);
+      const labelRes = await gmail.users.labels.get({ userId: 'me', id: labelId });
+      logger.debug(`Label ${labelId} exists and is accessible; name=${labelRes?.data?.name || '<unknown>'}`);
     } catch (err) {
       // Label doesn't exist or is inaccessible
       logger.error(`❌ Label ${labelId} not found or inaccessible:`, err.message);
@@ -176,6 +176,8 @@ export class GmailService {
 
     // Lấy danh sách message IDs
     const res = await gmail.users.messages.list({ userId: 'me', labelIds: [labelId], maxResults: pageSize, pageToken });
+
+    logger.debug(`listMessagesInLabel: messages.list returned ${res?.data?.messages?.length || 0} ids for label ${labelId}`);
 
     // Nếu không có messages thì return luôn
     if (!res.data.messages || res.data.messages.length === 0) {

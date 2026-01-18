@@ -34,6 +34,7 @@ interface MailContentProps {
   triggerToggleRead?: number;
   triggerReply?: number;
   triggerStar?: number;
+  onReplyStateChange?: (isReplying: boolean) => void;
   onMarkRead?: (mailId: string) => void;
   onMarkUnread?: (mailId: string) => void;
   // When true, include deleteMetadata:true in modify API calls for delete action
@@ -99,6 +100,7 @@ const MailContent = ({
   deleteMetadataOnModify,
   suppressDeleteToast,
   performServerDelete = true,
+  onReplyStateChange,
 }: MailContentProps) => {
   const { showToast } = useToast();
   const [isReplying, setIsReplying] = useState(false);
@@ -192,6 +194,15 @@ const MailContent = ({
       });
     }
   }, [isReplying]);
+
+  // Notify parent when reply state changes
+  useEffect(() => {
+    try {
+      onReplyStateChange?.(isReplying);
+    } catch {
+      // ignore
+    }
+  }, [isReplying, onReplyStateChange]);
 
   if (!mail) {
     return (
@@ -906,11 +917,17 @@ const MailContent = ({
             <textarea
               ref={replyTextareaRef}
               autoFocus
-              className="w-full bg-background border border-divider dark:border-gray-700 rounded-md p-4 text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
+              data-reply-input="true"
+              className="reply-textarea w-full bg-background border border-divider dark:border-gray-700 rounded-md p-4 text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary min-h-[150px] resize-y"
               placeholder="Type your reply here..."
               value={replyBody}
               onChange={(e) => setReplyBody(e.target.value)}
               onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  handleCancelReply();
+                  return;
+                }
                 if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                   e.preventDefault();
                   handleSendReply();

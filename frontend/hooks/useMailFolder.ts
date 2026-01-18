@@ -5,6 +5,7 @@ import { type Mail } from "@/types";
 interface UseMailFolderOptions {
   folderId: string;
   searchQuery?: string | null;
+  enabled?: boolean;
 }
 
 interface UseMailFolderReturn {
@@ -25,7 +26,9 @@ export function useMailFolder({
   const { isAuthenticated, isLoading: isAuthLoading, accessToken } = useAuth();
 
   const [mails, setMails] = useState<Mail[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState<boolean>(() =>
+    folderId !== "RESOLVING_LABEL" && folderId !== "NOT_FOUND_LABEL"
+  );
   const [error, setError] = useState<string | null>(null);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
@@ -34,6 +37,22 @@ export function useMailFolder({
   // Fetch mails for a specific folder
   const fetchMails = useCallback(
     async (pageToken?: string) => {
+      // Handle special sentinels
+      if (folderId === "RESOLVING_LABEL") {
+        console.log("[useMailFolder] Skipping fetch while label slug is resolving");
+        setIsLoading(false);
+        return;
+      }
+
+      if (folderId === "NOT_FOUND_LABEL") {
+        console.log("[useMailFolder] Label slug resolved but mailbox not found");
+        setError("Folder not found");
+        setIsLoading(false);
+        setMails([]);
+        setHasMore(false);
+        setNextPageToken(null);
+        return;
+      }
       console.log('[useMailFolder] fetchMails:', { isAuthLoading, isAuthenticated, hasToken: !!accessToken });
       // Wait for auth to complete before checking authentication
       if (isAuthLoading) return;
@@ -207,6 +226,25 @@ export function useMailFolder({
       console.log('[useMailFolder] Not authenticated, skipping fetch');
       return;
     }
+
+    // Skip fetching when a label slug is being resolved to avoid transient loading flashes.
+    if (folderId === "RESOLVING_LABEL") {
+      console.log('[useMailFolder] Effect: skipping fetch while resolving label slug');
+      setIsLoading(false);
+      return;
+    }
+
+    // Surface not-found state immediately without attempting fetch.
+    if (folderId === "NOT_FOUND_LABEL") {
+      console.log('[useMailFolder] Effect: folder not found sentinel');
+      setError("Folder not found");
+      setIsLoading(false);
+      setMails([]);
+      setHasMore(false);
+      setNextPageToken(null);
+      return;
+    }
+
     if (searchQuery) {
       searchMails(searchQuery);
     } else {
