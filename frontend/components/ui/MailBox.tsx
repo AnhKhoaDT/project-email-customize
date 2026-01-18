@@ -29,7 +29,11 @@ interface MailBoxProps {
   onRefresh?: () => void; // Reload emails
   // Search props
   searchQuery?: string;
-  onSearch?: (query: string, isSuggestion?: boolean, suggestionType?: 'sender' | 'subject') => void;
+  onSearch?: (
+    query: string,
+    isSuggestion?: boolean,
+    suggestionType?: "sender" | "subject",
+  ) => void;
   onClearSearch?: () => void;
   isSearching?: boolean;
   error?: string | null;
@@ -39,6 +43,13 @@ interface MailBoxProps {
   // Folder name
   folderName?: string;
   onFocusedIndexChange?: (index: number) => void;
+  // Filter & Sort props
+  sortBy?: "newest" | "oldest" | null;
+  onSortChange?: (sort: "newest" | "oldest" | null) => void;
+  filterUnread?: boolean;
+  onFilterUnreadChange?: (value: boolean) => void;
+  filterAttachments?: boolean;
+  onFilterAttachmentsChange?: (value: boolean) => void;
 }
 
 const MailBox = ({
@@ -62,9 +73,19 @@ const MailBox = ({
   onSearchModeChange,
   folderName = "Inbox",
   onFocusedIndexChange,
+  sortBy = null,
+  onSortChange,
+  filterUnread = false,
+  onFilterUnreadChange,
+  filterAttachments = false,
+  onFilterAttachmentsChange,
 }: MailBoxProps) => {
   // Ref to track focused mail item for scroll-into-view
   const focusedItemRef = useRef<HTMLDivElement | null>(null);
+
+  // Filter dropdown state
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const filterDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Local state for search input (to prevent parent re-renders on every keystroke)
   const [inputValue, setInputValue] = useState(searchQuery || "");
@@ -119,17 +140,20 @@ const MailBox = ({
         }
 
         // Convert hybrid format to old format for backward compatibility
-        const convertedSuggestions: Array<{ value: string; type: 'sender' | 'subject' }> = [
+        const convertedSuggestions: Array<{
+          value: string;
+          type: "sender" | "subject";
+        }> = [
           // Top Hits (emails) → map to 'sender' type for navigation
-          ...result.topHits.map(hit => ({
+          ...result.topHits.map((hit) => ({
             value: hit.subject,
-            type: 'sender' as const // Will trigger navigation
+            type: "sender" as const, // Will trigger navigation
           })),
           // Keywords → map to 'subject' type for semantic search
-          ...result.keywords.map(keyword => ({
+          ...result.keywords.map((keyword) => ({
             value: keyword.value,
-            type: 'subject' as const // Will trigger semantic search
-          }))
+            type: "subject" as const, // Will trigger semantic search
+          })),
         ];
 
         // Double check if request was aborted before updating state
@@ -157,7 +181,7 @@ const MailBox = ({
         console.error("[Suggestions] Failed:", error);
         setSuggestions([]);
         setSuggestionsError(
-          error instanceof Error ? error.message : "Failed to load suggestions"
+          error instanceof Error ? error.message : "Failed to load suggestions",
         );
         // Only show error dropdown if input is still focused
         // Use ref to get latest focus state (avoid stale closure)
@@ -167,7 +191,7 @@ const MailBox = ({
         setIsLoadingSuggestions(false);
       }
     },
-    [] // isFocusedRef is used instead of isFocused to avoid stale closures
+    [], // isFocusedRef is used instead of isFocused to avoid stale closures
   );
 
   // Debounced input handler
@@ -216,7 +240,7 @@ const MailBox = ({
         fetchSuggestions(value, abortControllerRef.current.signal);
       }, 500); // Increased to 500ms for better debouncing
     },
-    [fetchSuggestions, isFocused]
+    [fetchSuggestions, isFocused],
   );
 
   // Cleanup debounce timer and abort controller
@@ -230,6 +254,36 @@ const MailBox = ({
       }
     };
   }, []);
+
+  // Close filter dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+
+      // Check if click is outside the filter dropdown container
+      if (
+        filterDropdownRef.current &&
+        !filterDropdownRef.current.contains(target)
+      ) {
+        console.log("Clicked outside, closing dropdown");
+        setShowFilterDropdown(false);
+      } else {
+        console.log("Clicked inside dropdown, keeping it open");
+      }
+    };
+
+    if (showFilterDropdown) {
+      // Use timeout to ensure dropdown is rendered before adding listener
+      const timer = setTimeout(() => {
+        document.addEventListener("mousedown", handleClickOutside);
+      }, 0);
+
+      return () => {
+        clearTimeout(timer);
+        document.removeEventListener("mousedown", handleClickOutside);
+      };
+    }
+  }, [showFilterDropdown]);
 
   // Scroll focused item into view when focusedIndex changes
   useEffect(() => {
@@ -250,7 +304,7 @@ const MailBox = ({
       e.preventDefault();
       if (showSuggestions && suggestions.length > 0) {
         setSelectedSuggestionIndex((prev) =>
-          prev < suggestions.length - 1 ? prev + 1 : prev
+          prev < suggestions.length - 1 ? prev + 1 : prev,
         );
       }
     }
@@ -292,7 +346,9 @@ const MailBox = ({
         } else {
           handleClearSearch();
         }
-        try { (e.target as HTMLInputElement).blur(); } catch { }
+        try {
+          (e.target as HTMLInputElement).blur();
+        } catch {}
       } catch (err) {
         // ignore
       }
@@ -311,14 +367,14 @@ const MailBox = ({
   // Handle suggestion selection
   // Contact → Exact filter, Keyword → Semantic search (per requirement)
   const handleSelectSuggestion = useCallback(
-    (suggestionValue: string, suggestionType: 'sender' | 'subject') => {
+    (suggestionValue: string, suggestionType: "sender" | "subject") => {
       setInputValue(suggestionValue);
       onSearch?.(suggestionValue, true, suggestionType); // Pass type
       setShowSuggestions(false);
       setSuggestions([]);
       setSelectedSuggestionIndex(-1);
     },
-    [onSearch]
+    [onSearch],
   );
 
   // UPDATE 1: Đổi w-1/3 thành w-full.
@@ -348,17 +404,153 @@ const MailBox = ({
                 className="flex justify-center items-center h-8 w-8 hover:bg-secondary/10 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Reload emails"
               >
-                <IoMdRefresh size={20} className={isLoading ? "animate-spin" : ""} />
+                <IoMdRefresh
+                  size={20}
+                  className={isLoading ? "animate-spin" : ""}
+                />
               </button>
             )}
-            {/* kanban active/ unactive*/}
-            <button
-              onClick={kanbanClick}
-              className={`flex justify-center items-center h-8 w-8  rounded-md transition-colors cursor-pointer ${kanbanMode ? "bg-primary/40 " : "hover:bg-secondary/60"
+            {/* Filter Button */}
+            <div className="relative" ref={filterDropdownRef}>
+              <button
+                onClick={() => {
+                  console.log(
+                    "Filter button clicked, current state:",
+                    showFilterDropdown,
+                  );
+                  setShowFilterDropdown(!showFilterDropdown);
+                }}
+                className={`flex justify-center items-center h-8 w-8 rounded-md transition-colors cursor-pointer ${
+                  showFilterDropdown ||
+                  sortBy ||
+                  filterUnread ||
+                  filterAttachments
+                    ? "bg-primary/40"
+                    : "hover:bg-secondary/60"
                 }`}
-            >
-              <LuSquareKanban size={20} />
-            </button>
+                title="Filter & Sort"
+              >
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                  <path
+                    fill="currentColor"
+                    d="M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 .8 1.6l-5.6 7.47V19a1 1 0 0 1-1.45.9l-4-2A1 1 0 0 1 9 17v-4.93L3.2 6.6A1 1 0 0 1 3 5Zm3.28 1 5.22 6.96a1 1 0 0 1 .2.6V16.4l2 1V13a1 1 0 0 1 .2-.6L20.72 6H3.28Z"
+                  />
+                </svg>
+              </button>
+
+              {/* Filter Dropdown */}
+              {showFilterDropdown && (
+                <div className="absolute right-0 top-10 w-64 bg-background dark:bg-gray-900 border border-secondary rounded-lg shadow-xl z-50 p-4">
+                  {/* Sort Section */}
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold mb-2 text-foreground">
+                      Sort By
+                    </h3>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="radio"
+                          name="sort"
+                          checked={sortBy === "newest"}
+                          onChange={() => {
+                            console.log("Sorting to newest, current:", sortBy);
+                            onSortChange?.("newest");
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Newest First
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="radio"
+                          name="sort"
+                          checked={sortBy === "oldest"}
+                          onChange={() => {
+                            console.log("Sorting to oldest, current:", sortBy);
+                            onSortChange?.("oldest");
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Oldest First
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="radio"
+                          name="sort"
+                          checked={sortBy === null}
+                          onChange={() => {
+                            console.log("Sorting to default, current:", sortBy);
+                            onSortChange?.(null);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">Default</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-px bg-secondary/30 my-3"></div>
+
+                  {/* Filter Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2 text-foreground">
+                      Filters
+                    </h3>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={filterUnread}
+                          onChange={(e) => {
+                            console.log("Filter unread:", e.target.checked);
+                            onFilterUnreadChange?.(e.target.checked);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Unread Only
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={filterAttachments}
+                          onChange={(e) => {
+                            console.log(
+                              "Filter attachments:",
+                              e.target.checked,
+                            );
+                            onFilterAttachmentsChange?.(e.target.checked);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Has Attachments
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Clear All Button */}
+                  {(sortBy || filterUnread || filterAttachments) && (
+                    <button
+                      onClick={() => {
+                        onSortChange?.(null);
+                        onFilterUnreadChange?.(false);
+                        onFilterAttachmentsChange?.(false);
+                      }}
+                      className="mt-4 w-full py-2 px-3 text-sm bg-secondary/20 hover:bg-secondary/40 rounded-md transition-colors text-foreground font-medium"
+                    >
+                      Clear All Filters
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {/* Search */}
@@ -465,19 +657,22 @@ const MailBox = ({
                 </span>
               </div>
             )}
-            
+
             {mails && mails.length > 0 ? (
               mails.map((mail, index) => {
                 const isSelected = selectedMail?.id === mail.id;
                 const isFocused = focusedIndex === index;
-                const isUnread = !!mail.isUnread || (!!mail.labelIds && mail.labelIds.includes("UNREAD"));
+                const isUnread =
+                  !!mail.isUnread ||
+                  (!!mail.labelIds && mail.labelIds.includes("UNREAD"));
 
                 const bgClass = isSelected
                   ? "bg-primary/20 border-primary/60 shadow-lg"
                   : isUnread
-                  ? "bg-primary/5 border border-primary-100 hover:bg-primary/20 dark:bg-gray-800/50 dark:border-gray-700 dark:hover:bg-gray-800/70"
-                  : "bg-white border border-gray-200 hover:bg-primary/20 dark:bg-background dark:border-gray-800 dark:hover:bg-gray-800/70";
-                const focusClass = isFocused && !isSelected ? "ring-2 ring-primary/30" : "";
+                    ? "bg-primary/5 border border-primary-100 hover:bg-primary/20 dark:bg-gray-800/50 dark:border-gray-700 dark:hover:bg-gray-800/70"
+                    : "bg-white border border-gray-200 hover:bg-primary/20 dark:bg-background dark:border-gray-800 dark:hover:bg-gray-800/70";
+                const focusClass =
+                  isFocused && !isSelected ? "ring-2 ring-primary/30" : "";
 
                 return (
                   <div
@@ -513,10 +708,11 @@ const MailBox = ({
                       <div className="flex flex-col w-full min-w-0">
                         <div className="flex flex-row items-center justify-between">
                           <span
-                            className={`mr-2 truncate text-secondary ${isSelected
-                              ? "font-bold text-foreground"
-                              : "font-semibold"
-                              }`}
+                            className={`mr-2 truncate text-secondary ${
+                              isSelected
+                                ? "font-bold text-foreground"
+                                : "font-semibold"
+                            }`}
                           >
                             {mail.from || "someone"}
                           </span>
@@ -526,11 +722,12 @@ const MailBox = ({
                               <div
                                 className={`
                                   flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
-                                  ${mail.similarityScore >= 0.7
-                                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
-                                    : mail.similarityScore >= 0.5
-                                      ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
-                                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                                  ${
+                                    mail.similarityScore >= 0.7
+                                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                                      : mail.similarityScore >= 0.5
+                                        ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
+                                        : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
                                   }
                                 `}
                                 title={`Similarity: ${(

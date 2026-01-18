@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useSearchParams, useParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useUI } from "@/contexts/ui-context";
@@ -12,7 +12,10 @@ import ForwardModal from "@/components/ui/ForwardModal";
 import Kanban from "@/components/ui/Kanban";
 import { type EmailData, type Mail } from "@/types";
 import { useSearch } from "@/hooks/useSearch";
-import { useKeyboardNavigation, KeyboardShortcutsModal } from "@/hooks/useKeyboardNavigation";
+import {
+  useKeyboardNavigation,
+  KeyboardShortcutsModal,
+} from "@/hooks/useKeyboardNavigation";
 
 // Mapping folder slug to Gmail Label ID for known system folders
 const FOLDER_MAP: Record<string, string> = {
@@ -44,13 +47,21 @@ export default function FolderPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
-  const { isAuthenticated, isLoading: isAuthLoading, isAuthInitialized, accessToken } = useAuth();
-  const { isKanBanMode, toggleSidebar, isComposeOpen, setComposeOpen } = useUI();
+  const {
+    isAuthenticated,
+    isLoading: isAuthLoading,
+    isAuthInitialized,
+    accessToken,
+  } = useAuth();
+  const { isKanBanMode, toggleSidebar, isComposeOpen, setComposeOpen } =
+    useUI();
   const { showToast } = useToast();
 
   // Get folder from URL params (decode percent-encoding)
   const rawFolderParam = params.folder as string;
-  const folderSlug = rawFolderParam ? decodeURIComponent(rawFolderParam) : rawFolderParam;
+  const folderSlug = rawFolderParam
+    ? decodeURIComponent(rawFolderParam)
+    : rawFolderParam;
   const lower = folderSlug?.toLowerCase();
   const systemFolderId = FOLDER_MAP[lower];
 
@@ -65,13 +76,27 @@ export default function FolderPage() {
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9-_]/g, "");
 
+  // Filter & Sort state
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | null>(null);
+  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterAttachments, setFilterAttachments] = useState(false);
+
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log("Filter state changed:", {
+      sortBy,
+      filterUnread,
+      filterAttachments,
+    });
+  }, [sortBy, filterUnread, filterAttachments]);
+
   // State for label resolution
   // undefined = not resolved yet, null = resolved but not found, string = found
-  const [resolvedFolderId, setResolvedFolderId] = useState<string | null | undefined>(
-    systemFolderId ?? undefined
-  );
+  const [resolvedFolderId, setResolvedFolderId] = useState<
+    string | null | undefined
+  >(systemFolderId ?? undefined);
   const [resolvedDisplayName, setResolvedDisplayName] = useState<string>(
-    systemFolderId ? getFolderDisplayName(folderSlug) : folderSlug
+    systemFolderId ? getFolderDisplayName(folderSlug) : folderSlug,
   );
   const [isResolving, setIsResolving] = useState(!systemFolderId);
 
@@ -105,15 +130,20 @@ export default function FolderPage() {
 
       // Otherwise fetch mailboxes and try to match by slugified name
       try {
-        const token = typeof window !== "undefined" ? (window as any).__accessToken : null;
+        const token =
+          typeof window !== "undefined" ? (window as any).__accessToken : null;
         if (!token) {
           setIsResolving(false);
           return;
         }
-        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+        const apiURL =
+          process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
         const res = await fetch(`${apiURL}/mailboxes`, {
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          credentials: 'include'
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          credentials: "include",
         });
         if (!res.ok) {
           setIsResolving(false);
@@ -141,7 +171,7 @@ export default function FolderPage() {
           setResolvedFolderId(null);
         }
       } catch (err) {
-        console.error('Failed to resolve label slug', err);
+        console.error("Failed to resolve label slug", err);
         setResolvedFolderId(null);
       } finally {
         if (mounted) setIsResolving(false);
@@ -149,7 +179,9 @@ export default function FolderPage() {
     };
 
     resolveLabel();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [folderSlug, systemFolderId]);
 
   // Search query from URL
@@ -183,8 +215,8 @@ export default function FolderPage() {
     isLoadingMore,
     loadMoreMails,
     refreshMails,
-  } = useMailFolder({ 
-    folderId: effectiveFolderId, 
+  } = useMailFolder({
+    folderId: effectiveFolderId,
     searchQuery: null,
   });
 
@@ -193,7 +225,7 @@ export default function FolderPage() {
   const [isSearching, setIsSearching] = useState(false);
 
   const handleMailsChange = useCallback((newMails: Mail[]) => {
-    console.log('[Page] onMailsChange called with mails:', newMails.length);
+    console.log("[Page] onMailsChange called with mails:", newMails.length);
     setMails(newMails);
   }, []);
 
@@ -264,9 +296,20 @@ export default function FolderPage() {
       const data = await response.json();
       setSelectedMail(data);
       // Auto-mark read when opening detail if unread
-      const isUnread = Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
+      const isUnread =
+        Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
       if (isUnread) {
-        setMails(prev => prev.map(m => m.id === data.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+        setMails((prev) =>
+          prev.map((m) =>
+            m.id === data.id
+              ? {
+                  ...m,
+                  labelIds: (m.labelIds || []).filter((l) => l !== "UNREAD"),
+                  isUnread: false,
+                }
+              : m,
+          ),
+        );
         setTriggerMarkReadAuto((t) => t + 1);
       }
     } catch (err) {
@@ -285,7 +328,9 @@ export default function FolderPage() {
       isHtml: boolean;
     }) => {
       try {
-        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+        const token =
+          accessToken ||
+          (typeof window !== "undefined" ? window.__accessToken : null);
         if (!token) return;
 
         const apiURL =
@@ -301,7 +346,9 @@ export default function FolderPage() {
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+          const errorData = await response
+            .json()
+            .catch(() => ({ message: "Unknown error" }));
           throw new Error(errorData.message || "Failed to send forward");
         }
 
@@ -311,7 +358,7 @@ export default function FolderPage() {
         showToast(`Failed to forward: ${err.message}`, "error");
       }
     },
-    [showToast, accessToken]
+    [showToast, accessToken],
   );
 
   // Handle forward
@@ -328,14 +375,17 @@ export default function FolderPage() {
   const handleDeleteEmail = useCallback(
     async (mailId: string) => {
       const confirmed = window.confirm(
-        "Are you sure you want to delete this email? It will be moved to Trash."
+        "Are you sure you want to delete this email? It will be moved to Trash.",
       );
       if (!confirmed) return;
 
       try {
-        const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+        const token =
+          accessToken ||
+          (typeof window !== "undefined" ? window.__accessToken : null);
         if (!token) throw new Error("Not authenticated");
-        const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+        const apiURL =
+          process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
 
         const response = await fetch(`${apiURL}/emails/${mailId}/modify`, {
           method: "POST",
@@ -356,10 +406,13 @@ export default function FolderPage() {
         showToast("Email moved to trash", "success");
       } catch (error: any) {
         console.error("Delete failed:", error);
-        showToast(`Delete failed: ${error?.message || "Please try again"}`, "error");
+        showToast(
+          `Delete failed: ${error?.message || "Please try again"}`,
+          "error",
+        );
       }
     },
-    [accessToken, showToast]
+    [accessToken, showToast],
   );
 
   // Handle archive email
@@ -368,14 +421,16 @@ export default function FolderPage() {
       setSelectedMail(null);
       refreshMails();
     },
-    [refreshMails]
+    [refreshMails],
   );
 
   // Keyboard navigation
   const { showShortcuts, setShowShortcuts } = useKeyboardNavigation({
-    onNextEmail: () => setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
+    onNextEmail: () =>
+      setFocusedIndex((i) => Math.min(i + 1, mails.length - 1)),
     onPreviousEmail: () => setFocusedIndex((i) => Math.max(i - 1, 0)),
-    onOpenEmail: () => mails[focusedIndex] && handleMailClick(mails[focusedIndex]),
+    onOpenEmail: () =>
+      mails[focusedIndex] && handleMailClick(mails[focusedIndex]),
     onDelete: () => {
       if (selectedMail) {
         setTriggerDelete((t) => t + 1);
@@ -390,18 +445,37 @@ export default function FolderPage() {
         (async () => {
           const mail = mails[focusedIndex];
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ action: 'markRead' }),
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: "markRead" }),
             });
-            if (!res.ok) throw new Error('Failed to mark read');
-            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+            if (!res.ok) throw new Error("Failed to mark read");
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mail.id
+                  ? {
+                      ...m,
+                      labelIds: (m.labelIds || []).filter(
+                        (l) => l !== "UNREAD",
+                      ),
+                      isUnread: false,
+                    }
+                  : m,
+              ),
+            );
           } catch (err) {
-            console.error('Mark read failed', err);
+            console.error("Mark read failed", err);
           }
         })();
       }
@@ -413,18 +487,37 @@ export default function FolderPage() {
         (async () => {
           const mail = mails[focusedIndex];
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({ action: 'markUnread' }),
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ action: "markUnread" }),
             });
-            if (!res.ok) throw new Error('Failed to mark unread');
-            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+            if (!res.ok) throw new Error("Failed to mark unread");
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mail.id
+                  ? {
+                      ...m,
+                      labelIds: Array.from(
+                        new Set([...(m.labelIds || []), "UNREAD"]),
+                      ),
+                      isUnread: true,
+                    }
+                  : m,
+              ),
+            );
           } catch (err) {
-            console.error('Mark unread failed', err);
+            console.error("Mark unread failed", err);
           }
         })();
       }
@@ -437,24 +530,56 @@ export default function FolderPage() {
         (async () => {
           const mail = mails[focusedIndex];
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
-            const isUnread = Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
-            const action = isUnread ? 'markRead' : 'markUnread';
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
+            const isUnread =
+              Array.isArray(mail.labelIds) && mail.labelIds.includes("UNREAD");
+            const action = isUnread ? "markRead" : "markUnread";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({ action }),
             });
-            if (!res.ok) throw new Error('Failed to toggle read');
+            if (!res.ok) throw new Error("Failed to toggle read");
             if (isUnread) {
-              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: (m.labelIds || []).filter(l => l !== 'UNREAD'), isUnread: false } : m));
+              setMails((prev) =>
+                prev.map((m) =>
+                  m.id === mail.id
+                    ? {
+                        ...m,
+                        labelIds: (m.labelIds || []).filter(
+                          (l) => l !== "UNREAD",
+                        ),
+                        isUnread: false,
+                      }
+                    : m,
+                ),
+              );
             } else {
-              setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
+              setMails((prev) =>
+                prev.map((m) =>
+                  m.id === mail.id
+                    ? {
+                        ...m,
+                        labelIds: Array.from(
+                          new Set([...(m.labelIds || []), "UNREAD"]),
+                        ),
+                        isUnread: true,
+                      }
+                    : m,
+                ),
+              );
             }
           } catch (err) {
-            console.error('Toggle read failed', err);
+            console.error("Toggle read failed", err);
           }
         })();
       }
@@ -481,18 +606,36 @@ export default function FolderPage() {
           const isStarred = mail.labelIds?.includes("STARRED");
           const action = isStarred ? "unstar" : "star";
           try {
-            const token = accessToken || (typeof window !== "undefined" ? window.__accessToken : null);
+            const token =
+              accessToken ||
+              (typeof window !== "undefined" ? window.__accessToken : null);
             if (!token) return;
-            const apiURL = process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
+            const apiURL =
+              process.env.NEXT_PUBLIC_BACKEND_API_URL ||
+              "http://localhost:5000";
             const res = await fetch(`${apiURL}/emails/${mail.id}/modify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
               body: JSON.stringify({ action }),
             });
-            if (!res.ok) throw new Error('Failed to toggle star');
-            setMails((prev) => prev.map(m => m.id === mail.id ? { ...m, labelIds: isStarred ? (m.labelIds || []).filter(l=>l!="STARRED") : [...(m.labelIds||[]), "STARRED"] } : m));
+            if (!res.ok) throw new Error("Failed to toggle star");
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mail.id
+                  ? {
+                      ...m,
+                      labelIds: isStarred
+                        ? (m.labelIds || []).filter((l) => l != "STARRED")
+                        : [...(m.labelIds || []), "STARRED"],
+                    }
+                  : m,
+              ),
+            );
           } catch (err) {
-            console.error('Toggle star failed', err);
+            console.error("Toggle star failed", err);
           }
         })();
       }
@@ -514,11 +657,13 @@ export default function FolderPage() {
         const url = `https://mail.google.com/mail/u/0/#all/${threadId}`;
         window.open(url, "_blank", "noopener,noreferrer");
       } catch (err) {
-        console.error('Open in Gmail keyboard handler failed', err);
+        console.error("Open in Gmail keyboard handler failed", err);
       }
     },
     onSearch: () => {
-      const input = document.querySelector('.mailbox-search-input') as HTMLInputElement | null;
+      const input = document.querySelector(
+        ".mailbox-search-input",
+      ) as HTMLInputElement | null;
       input?.focus();
     },
     onClearSearch: onClearSearch,
@@ -558,10 +703,73 @@ export default function FolderPage() {
     return null;
   }
 
-  // Kanban mode
-  if (isKanBanMode) {
-    return <Kanban />;
-  }
+  // Remove Kanban mode UI (replaced by filter)
+
+  // Apply filters and sorting
+  const displayMails = useMemo(() => {
+    console.log("Computing displayMails with filters:", {
+      sortBy,
+      filterUnread,
+      filterAttachments,
+      mailsCount: mails.length,
+      isSearching: !!searchQuery,
+    });
+    // Use folderMails directly when not searching, use mails (search results) when searching
+    const sourceMails = searchQuery ? mails : folderMails;
+    let filtered = [...sourceMails];
+
+    // Apply unread filter
+    if (filterUnread) {
+      filtered = filtered.filter(
+        (mail) => mail.isUnread || mail.labelIds?.includes("UNREAD"),
+      );
+      console.log("After unread filter:", filtered.length);
+    }
+
+    // Apply attachments filter
+    if (filterAttachments) {
+      filtered = filtered.filter(
+        (mail) => mail.hasAttachment || (mail as any).attachments?.length > 0,
+      );
+      console.log("After attachments filter:", filtered.length);
+    }
+
+    // Apply sorting
+    if (sortBy === "newest") {
+      filtered.sort((a, b) => {
+        // internalDate is a Unix timestamp in milliseconds as a string
+        const dateA = parseInt((a as any).internalDate || "0");
+        const dateB = parseInt((b as any).internalDate || "0");
+        return dateB - dateA; // Newest first
+      });
+      console.log("Sorted by newest");
+    } else if (sortBy === "oldest") {
+      filtered.sort((a, b) => {
+        // internalDate is a Unix timestamp in milliseconds as a string
+        const dateA = parseInt((a as any).internalDate || "0");
+        const dateB = parseInt((b as any).internalDate || "0");
+        return dateA - dateB; // Oldest first
+      });
+      console.log("Sorted by oldest");
+    }
+
+    console.log("Final displayMails count:", filtered.length);
+    return filtered;
+  }, [
+    folderMails,
+    mails,
+    searchQuery,
+    filterUnread,
+    filterAttachments,
+    sortBy,
+  ]);
+
+  // Reset focusedIndex when displayMails changes to avoid out of bounds
+  useEffect(() => {
+    if (focusedIndex >= displayMails.length && displayMails.length > 0) {
+      setFocusedIndex(0);
+    }
+  }, [displayMails.length, focusedIndex, setFocusedIndex]);
 
   // Show loading while resolving label
   const isLoading = isResolving || (isMailsLoading && mails.length === 0);
@@ -583,7 +791,7 @@ export default function FolderPage() {
         ) : (
           <MailBox
             toggleSidebar={toggleSidebar}
-            mails={mails}
+            mails={displayMails}
             selectedMail={selectedMail}
             onSelectMail={handleMailClick}
             focusedIndex={focusedIndex}
@@ -592,7 +800,7 @@ export default function FolderPage() {
             isLoading={isMailsLoading}
             hasMore={hasMore}
             kanbanMode={isKanBanMode}
-            kanbanClick={() => { }}
+            kanbanClick={() => {}}
             onRefresh={refreshMails}
             searchQuery={searchQuery ?? undefined}
             onSearch={handleSearch}
@@ -602,6 +810,12 @@ export default function FolderPage() {
             searchMode={searchMode}
             onSearchModeChange={setSearchMode}
             folderName={resolvedDisplayName}
+            sortBy={sortBy}
+            onSortChange={setSortBy}
+            filterUnread={filterUnread}
+            onFilterUnreadChange={setFilterUnread}
+            filterAttachments={filterAttachments}
+            onFilterAttachmentsChange={setFilterAttachments}
           />
         )}
       </div>
@@ -632,12 +846,54 @@ export default function FolderPage() {
           triggerMarkReadAuto={triggerMarkReadAuto}
           triggerMarkUnread={triggerMarkUnread}
           onMarkRead={(mailId: string) => {
-            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: (m.labelIds||[]).filter(l => l !== 'UNREAD'), isUnread: false } : m));
-            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: (prev.labelIds||[]).filter(l => l !== 'UNREAD') } : prev);
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mailId
+                  ? {
+                      ...m,
+                      labelIds: (m.labelIds || []).filter(
+                        (l) => l !== "UNREAD",
+                      ),
+                      isUnread: false,
+                    }
+                  : m,
+              ),
+            );
+            setSelectedMail((prev) =>
+              prev && prev.id === mailId
+                ? {
+                    ...prev,
+                    labelIds: (prev.labelIds || []).filter(
+                      (l) => l !== "UNREAD",
+                    ),
+                  }
+                : prev,
+            );
           }}
           onMarkUnread={(mailId: string) => {
-            setMails(prev => prev.map(m => m.id === mailId ? { ...m, labelIds: Array.from(new Set([...(m.labelIds||[]),'UNREAD'])), isUnread: true } : m));
-            setSelectedMail(prev => prev && prev.id === mailId ? { ...prev, labelIds: Array.from(new Set([...(prev.labelIds||[]),'UNREAD'])) } : prev);
+            setMails((prev) =>
+              prev.map((m) =>
+                m.id === mailId
+                  ? {
+                      ...m,
+                      labelIds: Array.from(
+                        new Set([...(m.labelIds || []), "UNREAD"]),
+                      ),
+                      isUnread: true,
+                    }
+                  : m,
+              ),
+            );
+            setSelectedMail((prev) =>
+              prev && prev.id === mailId
+                ? {
+                    ...prev,
+                    labelIds: Array.from(
+                      new Set([...(prev.labelIds || []), "UNREAD"]),
+                    ),
+                  }
+                : prev,
+            );
           }}
         />
       </div>
@@ -652,7 +908,10 @@ export default function FolderPage() {
         />
       )}
       {showShortcuts && (
-        <KeyboardShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+        <KeyboardShortcutsModal
+          isOpen={showShortcuts}
+          onClose={() => setShowShortcuts(false)}
+        />
       )}
     </div>
   );
