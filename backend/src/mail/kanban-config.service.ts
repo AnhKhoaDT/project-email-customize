@@ -660,7 +660,7 @@ export class KanbanConfigService {
         isUnread: !email.labelIds?.includes('READ'),
         isStarred: email.labelIds?.includes('STARRED') || false,
         isImportant: email.labelIds?.includes('IMPORTANT') || false,
-        hasAttachment: false, // TODO: Add attachment detection if needed
+        hasAttachment: email.hasAttachment || false,
       }));
 
       // Apply filters if specified

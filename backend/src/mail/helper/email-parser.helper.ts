@@ -48,9 +48,10 @@ export function parseEmailMessage(messageDetail: any) {
     const filename = part.filename;
 
     // Nếu là attachment (có filename và không phải inline)
-    if (filename && part.body?.attachmentId) {
+    if (part.body?.attachmentId) {
+      // Accept attachments that may not have a filename (some providers omit filename)
       attachments.push({
-        filename: filename,
+        filename: filename || '',
         mimeType: mimeType,
         attachmentId: part.body.attachmentId,
         size: part.body.size
@@ -104,5 +105,7 @@ export function parseEmailMessage(messageDetail: any) {
     internalDate: messageDetail.internalDate,
     // Giữ raw payload nếu frontend cần xử lý thêm
     raw: messageDetail
+    ,
+    hasAttachment: attachments.length > 0
   };
 }

@@ -175,7 +175,7 @@ export class GmailSyncService {
     }
 
     // Fetch full email metadata from Gmail
-    const emailData = await this.gmailService.getMessageMetadata(userId, emailId);
+    const emailData = await this.gmailService.getMessage(userId, emailId);
     
     if (!emailData) {
       throw new Error(`Failed to fetch email data from Gmail`);
@@ -198,6 +198,9 @@ export class GmailSyncService {
       snippet: emailData.snippet?.trim() || null,
       receivedDate: emailData.date ? new Date(emailData.date) : new Date(),
       labelIds: emailData.labelIds || [],
+      // Attachment info
+      hasAttachment: (emailData as any).hasAttachment || false,
+      attachments: (emailData as any).attachments || [],
       // Sync status
       syncStatus: { state: 'SYNCED' as const, retryCount: 0 },
     };

@@ -251,7 +251,7 @@ export class MailController {
             isUnread: !email.labelIds?.includes('READ'),
             isStarred: email.labelIds?.includes('STARRED') || false,
             isImportant: email.labelIds?.includes('IMPORTANT') || false,
-            hasAttachment: false,
+            hasAttachment: email.hasAttachment || false,
           })),
           resultSizeEstimate: dbEmails.length,
           nextPageToken: null,
@@ -308,7 +308,7 @@ export class MailController {
             from: email.from || 'Unknown',
             date: email.receivedDate?.toISOString() || new Date().toISOString(),
             isUnread: !email.labelIds?.includes('READ'),
-            hasAttachment: false,
+            hasAttachment: email.hasAttachment || false,
           })),
           resultSizeEstimate: dbEmails.length,
           nextPageToken: null,
@@ -812,7 +812,8 @@ export class MailController {
         req.user.id,
         decodedLabelId,
         pageSize,
-        pageToken as any
+        pageToken as any,
+        filterAttachment === 'true'
       );
 
       let emails = result.messages || [];
