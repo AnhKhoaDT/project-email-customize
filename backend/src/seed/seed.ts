@@ -50,90 +50,105 @@ const EMAIL_TEMPLATES = [
         from: 'support@company.com',
         snippet: 'Thank you for joining us. Here are some tips to get started...',
         labelIds: ['INBOX'],
+        hasAttachment: false,
     },
     {
         subject: 'Your weekly report is ready',
         from: 'analytics@company.com',
         snippet: 'Here is your weekly performance summary. Total views: 1,234...',
         labelIds: ['INBOX', 'STARRED'],
+        hasAttachment: true, // Report PDF attached
     },
     {
         subject: 'Meeting reminder: Team Sync',
         from: 'calendar@company.com',
         snippet: 'Reminder: Team sync meeting tomorrow at 10 AM...',
         labelIds: ['INBOX', 'IMPORTANT'],
+        hasAttachment: false,
     },
     {
         subject: 'Invoice #12345',
         from: 'billing@company.com',
         snippet: 'Your invoice for this month is attached. Amount due: $99...',
         labelIds: ['INBOX'],
+        hasAttachment: true, // Invoice PDF attached
     },
     {
         subject: 'Project update: Q1 2026',
         from: 'project-manager@company.com',
         snippet: 'Great progress this quarter! Here are the highlights...',
         labelIds: ['INBOX', 'STARRED'],
+        hasAttachment: false,
     },
     {
         subject: 'Security alert: New login detected',
         from: 'security@company.com',
         snippet: 'We detected a new login from Chrome on Windows...',
         labelIds: ['INBOX', 'IMPORTANT'],
+        hasAttachment: false,
     },
     {
         subject: 'Newsletter: Tech trends 2026',
         from: 'newsletter@techblog.com',
         snippet: 'Top 10 technology trends to watch this year...',
         labelIds: ['INBOX'],
+        hasAttachment: false,
     },
     {
         subject: 'Re: Question about API integration',
         from: 'developer@partner.com',
         snippet: 'Thanks for your question. Here is how to integrate our API...',
         labelIds: ['SENT'],
+        hasAttachment: true, // API documentation attached
     },
     {
         subject: 'Draft: Proposal for new feature',
         from: 'me@example.com',
         snippet: 'I propose we add a new feature to improve user experience...',
         labelIds: ['DRAFT'],
+        hasAttachment: true, // Proposal document attached
     },
     {
         subject: 'Spam: You won a million dollars!',
         from: 'scam@spam.com',
         snippet: 'Congratulations! Click here to claim your prize...',
         labelIds: ['SPAM'],
+        hasAttachment: false,
     },
     {
         subject: 'Old newsletter from 2020',
         from: 'old@newsletter.com',
         snippet: 'This is an old email that should be archived...',
         labelIds: ['ARCHIVE'],
+        hasAttachment: false,
     },
     {
         subject: 'Deleted email',
         from: 'deleted@example.com',
         snippet: 'This email was moved to trash...',
         labelIds: ['TRASH'],
+        hasAttachment: false,
     },
     {
         subject: 'Important: Action required',
         from: 'urgent@company.com',
         snippet: 'Please review and approve the attached document by EOD...',
         labelIds: ['INBOX', 'STARRED', 'IMPORTANT'],
+        hasAttachment: true, // Important document attached
     },
     {
         subject: 'Team lunch this Friday',
         from: 'hr@company.com',
         snippet: 'Join us for team lunch at the Italian restaurant downtown...',
         labelIds: ['INBOX'],
+        hasAttachment: false,
     },
     {
         subject: 'Code review request',
         from: 'senior-dev@company.com',
         snippet: 'Could you please review my pull request #456?',
         labelIds: ['INBOX', 'STARRED'],
+        hasAttachment: true, // Code diff attached
     },
 ];
 
@@ -240,21 +255,21 @@ async function seed() {
                 const emailId = `email_${user._id}_${i + 1}`;
                 const threadId = `thread_${user._id}_${i + 1}`;
 
-                // Determine cached column based on labels
-                let cachedColumnId = null;
-                let cachedColumnName = null;
+                // Determine kanban column based on labels
+                let kanbanColumnId = 'col_inbox'; // Default to inbox
+                let cachedColumnName = 'Inbox';
 
                 if (template.labelIds.includes('STARRED')) {
-                    cachedColumnId = 'col_todo';
+                    kanbanColumnId = 'col_todo';
                     cachedColumnName = 'To Do';
                 } else if (template.labelIds.includes('IMPORTANT')) {
-                    cachedColumnId = 'col_in_progress';
+                    kanbanColumnId = 'col_in_progress';
                     cachedColumnName = 'In Progress';
                 } else if (template.labelIds.includes('ARCHIVE')) {
-                    cachedColumnId = 'col_done';
+                    kanbanColumnId = 'col_done';
                     cachedColumnName = 'Done';
                 } else if (template.labelIds.includes('INBOX')) {
-                    cachedColumnId = 'col_inbox';
+                    kanbanColumnId = 'col_inbox';
                     cachedColumnName = 'Inbox';
                 }
 
@@ -263,11 +278,12 @@ async function seed() {
                     emailId,
                     threadId,
                     labelIds: template.labelIds,
-                    cachedColumnId,
+                    kanbanColumnId,
                     cachedColumnName,
                     subject: template.subject,
                     from: template.from,
                     snippet: template.snippet,
+                    hasAttachment: template.hasAttachment || false,
                     receivedDate: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000), // Random date within last 30 days
                     syncStatus: {
                         state: 'SYNCED',

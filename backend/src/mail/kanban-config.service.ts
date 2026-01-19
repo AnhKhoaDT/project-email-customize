@@ -1076,7 +1076,7 @@ async moveEmail(userId: string, dto: MoveEmailDto): Promise<any> {
       }
 
       if (options.filterAttachment) {
-        filteredEmails = filteredEmails.filter(e => e.attachments && e.attachments.length > 0);
+        filteredEmails = filteredEmails.filter(e => e.hasAttachment === true);
       }
 
       // Step 4: Apply sorting

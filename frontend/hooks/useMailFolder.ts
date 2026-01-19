@@ -6,6 +6,9 @@ interface UseMailFolderOptions {
   folderId: string;
   searchQuery?: string | null;
   enabled?: boolean;
+  sortBy?: string | null;
+  filterUnread?: boolean;
+  filterAttachment?: boolean;
 }
 
 interface UseMailFolderReturn {
@@ -17,11 +20,16 @@ interface UseMailFolderReturn {
   isLoadingMore: boolean;
   loadMoreMails: () => Promise<void>;
   refreshMails: () => Promise<void>;
+  removeMailById: (mailId: string) => void;
+  updateMailById: (mailId: string, updates: Partial<Mail>) => void;
 }
 
 export function useMailFolder({
   folderId,
   searchQuery,
+  sortBy = null,
+  filterUnread = false,
+  filterAttachment = false,
 }: UseMailFolderOptions): UseMailFolderReturn {
   const { isAuthenticated, isLoading: isAuthLoading, accessToken } = useAuth();
 
@@ -77,10 +85,36 @@ export function useMailFolder({
           process.env.NEXT_PUBLIC_BACKEND_API_URL || "http://localhost:5000";
         const limit = 20;
 
-        // Build URL with pagination
-        let url = `${apiURL}/mailboxes/${folderId}/emails?limit=${limit}`;
+        // Check if filters are active (must check for actual values, not falsy)
+        const hasFilters = sortBy !== null || filterUnread === true || filterAttachment === true;
+        
+        console.log('[useMailFolder] Filter state:', { 
+          sortBy, 
+          filterUnread, 
+          filterAttachment, 
+          hasFilters 
+        });
+
+        // Build URL with pagination and filters
+        let url = hasFilters 
+          ? `${apiURL}/mailboxes/${folderId}/emails/filtered?limit=${limit}`
+          : `${apiURL}/mailboxes/${folderId}/emails?limit=${limit}`;
+        
+        console.log('[useMailFolder] Using endpoint:', url);
+        
         if (pageToken) {
           url += `&pageToken=${pageToken}`;
+        }
+        
+        // Add filter params if active
+        if (sortBy) {
+          url += `&sortBy=${sortBy}`;
+        }
+        if (filterUnread) {
+          url += `&filterUnread=true`;
+        }
+        if (filterAttachment) {
+          url += `&filterAttachment=true`;
         }
 
         const response = await fetch(url, {
@@ -100,11 +134,19 @@ export function useMailFolder({
         if (!response.ok) throw new Error("Failed to fetch mails");
 
         const data = await response.json();
-        const rawMessages = Array.isArray(data?.messages)
-          ? data.messages
-          : Array.isArray(data)
-            ? data
-            : [];
+        
+        // Handle different response formats
+        // - Filtered endpoint: { status: 200, data: { messages: [...] } }
+        // - Normal endpoint: { messages: [...] } or [...]
+        const rawMessages = Array.isArray(data?.data?.messages)
+          ? data.data.messages
+          : Array.isArray(data?.messages)
+            ? data.messages
+            : Array.isArray(data)
+              ? data
+              : [];
+
+        console.log('[useMailFolder] Parsed messages:', rawMessages.length);
 
         // Transform messages to ensure isUnread is properly set from labelIds
         const fetched = rawMessages.map((msg: any) => ({
@@ -116,11 +158,21 @@ export function useMailFolder({
         }));
 
         if (pageToken) {
-          // Append to existing mails
-          setMails((prev) => [...prev, ...fetched]);
+          // Append to existing mails with deduplication
+          setMails((prev) => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMails = fetched.filter((m: any) => !existingIds.has(m.id));
+            return [...prev, ...newMails];
+          });
         } else {
-          // Replace mails
-          setMails(fetched);
+          // Replace mails (also deduplicate in case backend sends duplicates)
+          const uniqueMails = fetched.reduce((acc: any[], mail: any) => {
+            if (!acc.find(m => m.id === mail.id)) {
+              acc.push(mail);
+            }
+            return acc;
+          }, []);
+          setMails(uniqueMails);
         }
 
         setNextPageToken(data.nextPageToken || null);
@@ -133,7 +185,7 @@ export function useMailFolder({
         setIsLoadingMore(false);
       }
     },
-    [isAuthenticated, folderId, isAuthLoading, accessToken]
+    [isAuthenticated, folderId, isAuthLoading, accessToken, sortBy, filterUnread, filterAttachment]
   );
 
   // Search mails
@@ -215,6 +267,18 @@ export function useMailFolder({
     await fetchMails();
   }, [fetchMails]);
 
+  // Remove mail by ID from local state
+  const removeMailById = useCallback((mailId: string) => {
+    setMails((prev) => prev.filter((m) => m.id !== mailId));
+  }, []);
+
+  // Update mail by ID in local state
+  const updateMailById = useCallback((mailId: string, updates: Partial<Mail>) => {
+    setMails((prev) =>
+      prev.map((m) => (m.id === mailId ? { ...m, ...updates } : m))
+    );
+  }, []);
+
   // Effect: Fetch mails when folder changes or on mount
   useEffect(() => {
     console.log('[useMailFolder] Main effect:', { folderId, searchQuery, isAuthenticated, isAuthLoading });
@@ -250,7 +314,7 @@ export function useMailFolder({
     } else {
       fetchMails();
     }
-  }, [folderId, searchQuery, isAuthenticated, isAuthLoading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [folderId, searchQuery, isAuthenticated, isAuthLoading, sortBy, filterUnread, filterAttachment]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     mails,
@@ -261,5 +325,7 @@ export function useMailFolder({
     isLoadingMore,
     loadMoreMails,
     refreshMails,
+    removeMailById,
+    updateMailById,
   };
 }

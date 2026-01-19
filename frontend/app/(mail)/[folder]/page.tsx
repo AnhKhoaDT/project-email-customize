@@ -78,17 +78,17 @@ export default function FolderPage() {
 
   // Filter & Sort state
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | null>(null);
-  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterReadStatus, setFilterReadStatus] = useState<"all" | "unread" | "read">("all");
   const [filterAttachments, setFilterAttachments] = useState(false);
 
   // Debug: Log state changes
   useEffect(() => {
     console.log("Filter state changed:", {
       sortBy,
-      filterUnread,
+      filterReadStatus,
       filterAttachments,
     });
-  }, [sortBy, filterUnread, filterAttachments]);
+  }, [sortBy, filterReadStatus, filterAttachments]);
 
   // State for label resolution
   // undefined = not resolved yet, null = resolved but not found, string = found
@@ -152,8 +152,16 @@ export default function FolderPage() {
         const boxes = await res.json();
         if (!mounted) return;
 
+        // Validate that boxes is an array (API might return error object)
+        if (!Array.isArray(boxes)) {
+          console.error('[Label Resolution] API returned non-array:', boxes);
+          setResolvedFolderId(null);
+          setIsResolving(false);
+          return;
+        }
+
         // Try to match by slugified name or by id
-        const target = (boxes || []).find((b: any) => {
+        const target = boxes.find((b: any) => {
           const nameSlug = slugify(b.name) || "";
           const folderSlugSlug = slugify(folderSlug || "") || "";
           if (nameSlug && nameSlug === folderSlugSlug) return true;
@@ -215,9 +223,14 @@ export default function FolderPage() {
     isLoadingMore,
     loadMoreMails,
     refreshMails,
+    removeMailById,
+    updateMailById,
   } = useMailFolder({
     folderId: effectiveFolderId,
     searchQuery: null,
+    sortBy: sortBy === 'newest' ? 'date-desc' : sortBy === 'oldest' ? 'date-asc' : null,
+    filterUnread: filterReadStatus === 'unread',
+    filterAttachment: filterAttachments,
   });
 
   // Search hook
@@ -299,23 +312,24 @@ export default function FolderPage() {
       const isUnread =
         Array.isArray(data?.labelIds) && data.labelIds.includes("UNREAD");
       if (isUnread) {
+        const updates = {
+          labelIds: (mail.labelIds || []).filter((l) => l !== "UNREAD"),
+          isUnread: false,
+        };
         setMails((prev) =>
           prev.map((m) =>
             m.id === data.id
-              ? {
-                  ...m,
-                  labelIds: (m.labelIds || []).filter((l) => l !== "UNREAD"),
-                  isUnread: false,
-                }
+              ? { ...m, ...updates }
               : m,
           ),
         );
+        updateMailById(data.id, updates);
         setTriggerMarkReadAuto((t) => t + 1);
       }
     } catch (err) {
       console.error("Error fetching email:", err);
     }
-  }, []);
+  }, [updateMailById]);
 
   // Handle send forward
   const handleSendForward = useCallback(
@@ -401,7 +415,9 @@ export default function FolderPage() {
           throw new Error(errorData.message || "Failed to delete email");
         }
 
+        // Remove from both local state and folder state
         setMails((prevMails) => prevMails.filter((m) => m.id !== mailId));
+        removeMailById(mailId);
         setSelectedMail(null);
         showToast("Email moved to trash", "success");
       } catch (error: any) {
@@ -412,16 +428,18 @@ export default function FolderPage() {
         );
       }
     },
-    [accessToken, showToast],
+    [accessToken, showToast, removeMailById],
   );
 
   // Handle archive email
   const handleArchiveEmail = useCallback(
     (mailId: string) => {
+      // Remove from both local state and folder state
+      removeMailById(mailId);
       setSelectedMail(null);
-      refreshMails();
+      // No need to call refreshMails() anymore
     },
-    [refreshMails],
+    [removeMailById],
   );
 
   // Keyboard navigation
@@ -461,19 +479,14 @@ export default function FolderPage() {
               body: JSON.stringify({ action: "markRead" }),
             });
             if (!res.ok) throw new Error("Failed to mark read");
+            const updates = {
+              labelIds: (mail.labelIds || []).filter((l) => l !== "UNREAD"),
+              isUnread: false,
+            };
             setMails((prev) =>
-              prev.map((m) =>
-                m.id === mail.id
-                  ? {
-                      ...m,
-                      labelIds: (m.labelIds || []).filter(
-                        (l) => l !== "UNREAD",
-                      ),
-                      isUnread: false,
-                    }
-                  : m,
-              ),
+              prev.map((m) => (m.id === mail.id ? { ...m, ...updates } : m)),
             );
+            updateMailById(mail.id, updates);
           } catch (err) {
             console.error("Mark read failed", err);
           }
@@ -503,19 +516,14 @@ export default function FolderPage() {
               body: JSON.stringify({ action: "markUnread" }),
             });
             if (!res.ok) throw new Error("Failed to mark unread");
+            const updates = {
+              labelIds: Array.from(new Set([...(mail.labelIds || []), "UNREAD"])),
+              isUnread: true,
+            };
             setMails((prev) =>
-              prev.map((m) =>
-                m.id === mail.id
-                  ? {
-                      ...m,
-                      labelIds: Array.from(
-                        new Set([...(m.labelIds || []), "UNREAD"]),
-                      ),
-                      isUnread: true,
-                    }
-                  : m,
-              ),
+              prev.map((m) => (m.id === mail.id ? { ...m, ...updates } : m)),
             );
+            updateMailById(mail.id, updates);
           } catch (err) {
             console.error("Mark unread failed", err);
           }
@@ -549,35 +557,19 @@ export default function FolderPage() {
               body: JSON.stringify({ action }),
             });
             if (!res.ok) throw new Error("Failed to toggle read");
-            if (isUnread) {
-              setMails((prev) =>
-                prev.map((m) =>
-                  m.id === mail.id
-                    ? {
-                        ...m,
-                        labelIds: (m.labelIds || []).filter(
-                          (l) => l !== "UNREAD",
-                        ),
-                        isUnread: false,
-                      }
-                    : m,
-                ),
-              );
-            } else {
-              setMails((prev) =>
-                prev.map((m) =>
-                  m.id === mail.id
-                    ? {
-                        ...m,
-                        labelIds: Array.from(
-                          new Set([...(m.labelIds || []), "UNREAD"]),
-                        ),
-                        isUnread: true,
-                      }
-                    : m,
-                ),
-              );
-            }
+            const updates = isUnread
+              ? {
+                labelIds: (mail.labelIds || []).filter((l) => l !== "UNREAD"),
+                isUnread: false,
+              }
+              : {
+                labelIds: Array.from(new Set([...(mail.labelIds || []), "UNREAD"])),
+                isUnread: true,
+              };
+            setMails((prev) =>
+              prev.map((m) => (m.id === mail.id ? { ...m, ...updates } : m)),
+            );
+            updateMailById(mail.id, updates);
           } catch (err) {
             console.error("Toggle read failed", err);
           }
@@ -622,18 +614,15 @@ export default function FolderPage() {
               body: JSON.stringify({ action }),
             });
             if (!res.ok) throw new Error("Failed to toggle star");
+            const updates = {
+              labelIds: isStarred
+                ? (mail.labelIds || []).filter((l) => l !== "STARRED")
+                : [...(mail.labelIds || []), "STARRED"],
+            };
             setMails((prev) =>
-              prev.map((m) =>
-                m.id === mail.id
-                  ? {
-                      ...m,
-                      labelIds: isStarred
-                        ? (m.labelIds || []).filter((l) => l != "STARRED")
-                        : [...(m.labelIds || []), "STARRED"],
-                    }
-                  : m,
-              ),
+              prev.map((m) => (m.id === mail.id ? { ...m, ...updates } : m)),
             );
+            updateMailById(mail.id, updates);
           } catch (err) {
             console.error("Toggle star failed", err);
           }
@@ -709,7 +698,7 @@ export default function FolderPage() {
   const displayMails = useMemo(() => {
     console.log("Computing displayMails with filters:", {
       sortBy,
-      filterUnread,
+      filterReadStatus,
       filterAttachments,
       mailsCount: mails.length,
       isSearching: !!searchQuery,
@@ -718,19 +707,38 @@ export default function FolderPage() {
     const sourceMails = searchQuery ? mails : folderMails;
     let filtered = [...sourceMails];
 
-    // Apply unread filter
-    if (filterUnread) {
-      filtered = filtered.filter(
-        (mail) => mail.isUnread || mail.labelIds?.includes("UNREAD"),
-      );
+    // Apply read status filter
+    const isItemUnread = (item: any): boolean => {
+      // Priority 1: Check labelIds array (Gmail API primary source)
+      if (Array.isArray(item.labelIds)) {
+        return item.labelIds.includes('UNREAD');
+      }
+      // Priority 2: Check boolean isUnread field (backend transformed)
+      if (typeof item.isUnread === 'boolean') {
+        return item.isUnread;
+      }
+      return false;
+    };
+
+    if (filterReadStatus === "unread") {
+      filtered = filtered.filter((mail) => isItemUnread(mail));
       console.log("After unread filter:", filtered.length);
+    } else if (filterReadStatus === "read") {
+      filtered = filtered.filter((mail) => !isItemUnread(mail));
+      console.log("After read filter:", filtered.length);
     }
 
     // Apply attachments filter
     if (filterAttachments) {
-      filtered = filtered.filter(
-        (mail) => mail.hasAttachment || (mail as any).attachments?.length > 0,
-      );
+      filtered = filtered.filter((mail) => {
+        // Check hasAttachment field from backend (most reliable)
+        if (mail.hasAttachment === true) return true;
+
+        // Fallback: check attachments array (for compatibility)
+        if ((mail as any).attachments?.length > 0) return true;
+
+        return false;
+      });
       console.log("After attachments filter:", filtered.length);
     }
 
@@ -759,7 +767,7 @@ export default function FolderPage() {
     folderMails,
     mails,
     searchQuery,
-    filterUnread,
+    filterReadStatus,
     filterAttachments,
     sortBy,
   ]);
@@ -800,7 +808,7 @@ export default function FolderPage() {
             isLoading={isMailsLoading}
             hasMore={hasMore}
             kanbanMode={isKanBanMode}
-            kanbanClick={() => {}}
+            kanbanClick={() => { }}
             onRefresh={refreshMails}
             searchQuery={searchQuery ?? undefined}
             onSearch={handleSearch}
@@ -812,8 +820,8 @@ export default function FolderPage() {
             folderName={resolvedDisplayName}
             sortBy={sortBy}
             onSortChange={setSortBy}
-            filterUnread={filterUnread}
-            onFilterUnreadChange={setFilterUnread}
+            filterReadStatus={filterReadStatus}
+            onFilterReadStatusChange={setFilterReadStatus}
             filterAttachments={filterAttachments}
             onFilterAttachmentsChange={setFilterAttachments}
           />
@@ -846,52 +854,46 @@ export default function FolderPage() {
           triggerMarkReadAuto={triggerMarkReadAuto}
           triggerMarkUnread={triggerMarkUnread}
           onMarkRead={(mailId: string) => {
-            setMails((prev) =>
-              prev.map((m) =>
-                m.id === mailId
-                  ? {
-                      ...m,
-                      labelIds: (m.labelIds || []).filter(
-                        (l) => l !== "UNREAD",
-                      ),
-                      isUnread: false,
-                    }
-                  : m,
+            const updates = {
+              labelIds: (mails.find((m) => m.id === mailId)?.labelIds || []).filter(
+                (l) => l !== "UNREAD",
               ),
+              isUnread: false,
+            };
+            setMails((prev) =>
+              prev.map((m) => (m.id === mailId ? { ...m, ...updates } : m)),
             );
+            updateMailById(mailId, updates);
             setSelectedMail((prev) =>
               prev && prev.id === mailId
                 ? {
-                    ...prev,
-                    labelIds: (prev.labelIds || []).filter(
-                      (l) => l !== "UNREAD",
-                    ),
-                  }
+                  ...prev,
+                  labelIds: (prev.labelIds || []).filter(
+                    (l) => l !== "UNREAD",
+                  ),
+                }
                 : prev,
             );
           }}
           onMarkUnread={(mailId: string) => {
-            setMails((prev) =>
-              prev.map((m) =>
-                m.id === mailId
-                  ? {
-                      ...m,
-                      labelIds: Array.from(
-                        new Set([...(m.labelIds || []), "UNREAD"]),
-                      ),
-                      isUnread: true,
-                    }
-                  : m,
+            const updates = {
+              labelIds: Array.from(
+                new Set([...(mails.find((m) => m.id === mailId)?.labelIds || []), "UNREAD"]),
               ),
+              isUnread: true,
+            };
+            setMails((prev) =>
+              prev.map((m) => (m.id === mailId ? { ...m, ...updates } : m)),
             );
+            updateMailById(mailId, updates);
             setSelectedMail((prev) =>
               prev && prev.id === mailId
                 ? {
-                    ...prev,
-                    labelIds: Array.from(
-                      new Set([...(prev.labelIds || []), "UNREAD"]),
-                    ),
-                  }
+                  ...prev,
+                  labelIds: Array.from(
+                    new Set([...(prev.labelIds || []), "UNREAD"]),
+                  ),
+                }
                 : prev,
             );
           }}

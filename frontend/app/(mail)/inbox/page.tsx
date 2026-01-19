@@ -38,17 +38,17 @@ export default function Home() {
 
   // Filter & Sort state
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | null>(null);
-  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterReadStatus, setFilterReadStatus] = useState<"all" | "unread" | "read">("all");
   const [filterAttachments, setFilterAttachments] = useState(false);
 
   // Debug: Log state changes
   useEffect(() => {
     console.log("Filter state changed:", {
       sortBy,
-      filterUnread,
+      filterReadStatus,
       filterAttachments,
     });
-  }, [sortBy, filterUnread, filterAttachments]);
+  }, [sortBy, filterReadStatus, filterAttachments]);
 
   // State quản lý dữ liệu Mail
   const [mails, setMails] = useState<Mail[]>([]);
@@ -256,12 +256,12 @@ export default function Home() {
               prev.map((m) =>
                 m.id === mail.id
                   ? {
-                      ...m,
-                      labelIds: (m.labelIds || []).filter(
-                        (l) => l !== "UNREAD",
-                      ),
-                      isUnread: false,
-                    }
+                    ...m,
+                    labelIds: (m.labelIds || []).filter(
+                      (l) => l !== "UNREAD",
+                    ),
+                    isUnread: false,
+                  }
                   : m,
               ),
             );
@@ -298,12 +298,12 @@ export default function Home() {
               prev.map((m) =>
                 m.id === mail.id
                   ? {
-                      ...m,
-                      labelIds: Array.from(
-                        new Set([...(m.labelIds || []), "UNREAD"]),
-                      ),
-                      isUnread: true,
-                    }
+                    ...m,
+                    labelIds: Array.from(
+                      new Set([...(m.labelIds || []), "UNREAD"]),
+                    ),
+                    isUnread: true,
+                  }
                   : m,
               ),
             );
@@ -347,12 +347,12 @@ export default function Home() {
                 prev.map((m) =>
                   m.id === mail.id
                     ? {
-                        ...m,
-                        labelIds: (m.labelIds || []).filter(
-                          (l) => l !== "UNREAD",
-                        ),
-                        isUnread: false,
-                      }
+                      ...m,
+                      labelIds: (m.labelIds || []).filter(
+                        (l) => l !== "UNREAD",
+                      ),
+                      isUnread: false,
+                    }
                     : m,
                 ),
               );
@@ -361,12 +361,12 @@ export default function Home() {
                 prev.map((m) =>
                   m.id === mail.id
                     ? {
-                        ...m,
-                        labelIds: Array.from(
-                          new Set([...(m.labelIds || []), "UNREAD"]),
-                        ),
-                        isUnread: true,
-                      }
+                      ...m,
+                      labelIds: Array.from(
+                        new Set([...(m.labelIds || []), "UNREAD"]),
+                      ),
+                      isUnread: true,
+                    }
                     : m,
                 ),
               );
@@ -417,11 +417,11 @@ export default function Home() {
               prev.map((m) =>
                 m.id === mail.id
                   ? {
-                      ...m,
-                      labelIds: isStarred
-                        ? (m.labelIds || []).filter((l) => l != "STARRED")
-                        : [...(m.labelIds || []), "STARRED"],
-                    }
+                    ...m,
+                    labelIds: isStarred
+                      ? (m.labelIds || []).filter((l) => l != "STARRED")
+                      : [...(m.labelIds || []), "STARRED"],
+                  }
                   : m,
               ),
             );
@@ -545,10 +545,10 @@ export default function Home() {
           prev.map((m) =>
             m.id === data.id
               ? {
-                  ...m,
-                  labelIds: (m.labelIds || []).filter((l) => l !== "UNREAD"),
-                  isUnread: false,
-                }
+                ...m,
+                labelIds: (m.labelIds || []).filter((l) => l !== "UNREAD"),
+                isUnread: false,
+              }
               : m,
           ),
         );
@@ -656,7 +656,7 @@ export default function Home() {
   const displayMails = useMemo(() => {
     console.log("Computing displayMails with filters:", {
       sortBy,
-      filterUnread,
+      filterReadStatus,
       filterAttachments,
       mailsCount: mails.length,
     });
@@ -674,12 +674,23 @@ export default function Home() {
 
     let filtered = [...mails];
 
-    // Apply unread filter
-    if (filterUnread) {
-      filtered = filtered.filter(
-        (mail) => mail.isUnread || mail.labelIds?.includes("UNREAD"),
-      );
+    // Apply read status filter
+    const isItemUnread = (item: any): boolean => {
+      if (Array.isArray(item.labelIds)) {
+        return item.labelIds.includes('UNREAD');
+      }
+      if (typeof item.isUnread === 'boolean') {
+        return item.isUnread;
+      }
+      return false;
+    };
+
+    if (filterReadStatus === "unread") {
+      filtered = filtered.filter((mail) => isItemUnread(mail));
       console.log("After unread filter:", filtered.length);
+    } else if (filterReadStatus === "read") {
+      filtered = filtered.filter((mail) => !isItemUnread(mail));
+      console.log("After read filter:", filtered.length);
     }
 
     // Apply attachments filter
@@ -755,7 +766,7 @@ export default function Home() {
 
     console.log("Final displayMails count:", filtered.length);
     return filtered;
-  }, [mails, filterUnread, filterAttachments, sortBy]);
+  }, [mails, filterReadStatus, filterAttachments, sortBy]);
 
   // Render
   return (
@@ -806,8 +817,8 @@ export default function Home() {
               onFocusedIndexChange={setFocusedIndex}
               sortBy={sortBy}
               onSortChange={setSortBy}
-              filterUnread={filterUnread}
-              onFilterUnreadChange={setFilterUnread}
+              filterReadStatus={filterReadStatus}
+              onFilterReadStatusChange={setFilterReadStatus}
               filterAttachments={filterAttachments}
               onFilterAttachmentsChange={setFilterAttachments}
             />
@@ -845,23 +856,23 @@ export default function Home() {
                 prev.map((m) =>
                   m.id === mailId
                     ? {
-                        ...m,
-                        labelIds: (m.labelIds || []).filter(
-                          (l) => l !== "UNREAD",
-                        ),
-                        isUnread: false,
-                      }
+                      ...m,
+                      labelIds: (m.labelIds || []).filter(
+                        (l) => l !== "UNREAD",
+                      ),
+                      isUnread: false,
+                    }
                     : m,
                 ),
               );
               setSelectedMail((prev) =>
                 prev && prev.id === mailId
                   ? {
-                      ...prev,
-                      labelIds: (prev.labelIds || []).filter(
-                        (l) => l !== "UNREAD",
-                      ),
-                    }
+                    ...prev,
+                    labelIds: (prev.labelIds || []).filter(
+                      (l) => l !== "UNREAD",
+                    ),
+                  }
                   : prev,
               );
             }}
@@ -870,23 +881,23 @@ export default function Home() {
                 prev.map((m) =>
                   m.id === mailId
                     ? {
-                        ...m,
-                        labelIds: Array.from(
-                          new Set([...(m.labelIds || []), "UNREAD"]),
-                        ),
-                        isUnread: true,
-                      }
+                      ...m,
+                      labelIds: Array.from(
+                        new Set([...(m.labelIds || []), "UNREAD"]),
+                      ),
+                      isUnread: true,
+                    }
                     : m,
                 ),
               );
               setSelectedMail((prev) =>
                 prev && prev.id === mailId
                   ? {
-                      ...prev,
-                      labelIds: Array.from(
-                        new Set([...(prev.labelIds || []), "UNREAD"]),
-                      ),
-                    }
+                    ...prev,
+                    labelIds: Array.from(
+                      new Set([...(prev.labelIds || []), "UNREAD"]),
+                    ),
+                  }
                   : prev,
               );
             }}

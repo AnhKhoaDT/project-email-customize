@@ -123,7 +123,15 @@ const getFilteredItems = (
 
   // FILTER 2: Has Attachment
   if (config.filterAttachment) {
-    filtered = filtered.filter(item => item.hasAttachment === true);
+    filtered = filtered.filter(item => {
+      // Check boolean hasAttachment (backend field)
+      if (item.hasAttachment === true) return true;
+
+      // Fallback: Check attachments array (compatibility)
+      if (Array.isArray((item as any).attachments) && (item as any).attachments.length > 0) return true;
+
+      return false;
+    });
   }
 
   // SORTING
@@ -423,11 +431,10 @@ const MailCard = ({
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          className={`bg-white dark:bg-[#1a1a1a] rounded-lg border dark:border-gray-800 p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${
-            snapshot.isDragging
+          className={`bg-white dark:bg-[#1a1a1a] rounded-lg border dark:border-gray-800 p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${snapshot.isDragging
               ? "shadow-xl ring-2 ring-blue-400 rotate-2 opacity-90 cursor-grabbing"
               : ""
-          }`}
+            }`}
           style={{ ...provided.draggableProps.style }}
         >
           {item.color !== "bg-transparent" && (
@@ -469,9 +476,8 @@ const MailCard = ({
                 title="Regenerate summary (10/min limit)"
               >
                 <IoMdRefresh
-                  className={`w-3.5 h-3.5 ${
-                    isRegenerating ? "animate-spin" : ""
-                  }`}
+                  className={`w-3.5 h-3.5 ${isRegenerating ? "animate-spin" : ""
+                    }`}
                 />
               </button>
             </div>
@@ -681,8 +687,8 @@ export default function KanbanPage() {
       console.error("[Kanban] deleteFromModal failed", err);
       showToast(
         err?.response?.data?.message ||
-          err?.message ||
-          "Failed to delete email metadata",
+        err?.message ||
+        "Failed to delete email metadata",
         "error",
       );
     } finally {
@@ -1313,7 +1319,7 @@ export default function KanbanPage() {
                             onEditTitle={
                               !originalCol?.isSystem
                                 ? (newTitle) =>
-                                    handleEditColumnTitle(col.id, newTitle)
+                                  handleEditColumnTitle(col.id, newTitle)
                                 : undefined
                             }
                             onRecoverLabel={() => {
@@ -1347,20 +1353,20 @@ export default function KanbanPage() {
                             onDeleteColumn={
                               !originalCol?.isSystem
                                 ? async () => {
-                                    try {
-                                      await deleteColumn(col.id);
-                                      showToast(
-                                        `Column "${col.title}" deleted successfully`,
-                                        "success",
-                                      );
-                                    } catch (err: any) {
-                                      const errorMsg =
-                                        err?.response?.data?.message ||
-                                        err.message ||
-                                        "Failed to delete column";
-                                      showToast(errorMsg, "error");
-                                    }
+                                  try {
+                                    await deleteColumn(col.id);
+                                    showToast(
+                                      `Column "${col.title}" deleted successfully`,
+                                      "success",
+                                    );
+                                  } catch (err: any) {
+                                    const errorMsg =
+                                      err?.response?.data?.message ||
+                                      err.message ||
+                                      "Failed to delete column";
+                                    showToast(errorMsg, "error");
                                   }
+                                }
                                 : undefined
                             }
                           />
@@ -1421,13 +1427,12 @@ export default function KanbanPage() {
                             }
                           }}
                           placeholder="e.g., Review, Urgent, Done"
-                          className={`w-full px-3 py-2.5 text-sm border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${
-                            validationError &&
-                            newColTitle.trim() &&
-                            checkDuplicateColumnName(newColTitle.trim())
+                          className={`w-full px-3 py-2.5 text-sm border rounded-lg bg-gray-50 dark:bg-gray-900 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:border-transparent transition-all ${validationError &&
+                              newColTitle.trim() &&
+                              checkDuplicateColumnName(newColTitle.trim())
                               ? "border-red-500 focus:ring-red-500"
                               : "focus:ring-blue-500"
-                          }`}
+                            }`}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !validationError)
                               handleCreateColumn();
@@ -1519,94 +1524,94 @@ export default function KanbanPage() {
                                     {gmailLabels.filter(
                                       (l) => l.type === "system",
                                     ).length > 0 && (
-                                      <optgroup
-                                        label="System Labels"
-                                        className="bg-white dark:bg-gray-900"
-                                      >
-                                        {gmailLabels
-                                          .filter((label) => label.type === "system")
-                                          .map((label) => {
-                                            const mappedCol = columns.find((col: any) =>
-                                              col.id && (
-                                                (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
-                                                (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
-                                              )
-                                            );
-                                            const mapped = !!mappedCol;
-                                            return (
-                                              <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
-                                                {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
-                                              </option>
-                                            );
-                                          })}
-                                      </optgroup>
-                                    )}
+                                        <optgroup
+                                          label="System Labels"
+                                          className="bg-white dark:bg-gray-900"
+                                        >
+                                          {gmailLabels
+                                            .filter((label) => label.type === "system")
+                                            .map((label) => {
+                                              const mappedCol = columns.find((col: any) =>
+                                                col.id && (
+                                                  (col.gmailLabel && (col.gmailLabel === label.id || col.gmailLabel.toLowerCase() === (label.name || "").toLowerCase())) ||
+                                                  (col.gmailLabelName && col.gmailLabelName.toLowerCase() === (label.name || "").toLowerCase())
+                                                )
+                                              );
+                                              const mapped = !!mappedCol;
+                                              return (
+                                                <option key={label.id} value={label.id} className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100" disabled={mapped}>
+                                                  {label.name}{mapped ? ` (Đang ở cột: ${mappedCol?.title || 'Unknown'})` : ''}
+                                                </option>
+                                              );
+                                            })}
+                                        </optgroup>
+                                      )}
 
                                     {/* User Labels Group */}
                                     {gmailLabels.filter(
                                       (l) => l.type === "user",
                                     ).length > 0 && (
-                                      <optgroup
-                                        label="Custom Labels"
-                                        className="bg-white dark:bg-gray-900"
-                                      >
-                                        {gmailLabels
-                                          .filter(
-                                            (label) => label.type === "user",
-                                          )
-                                          .map((label) => {
-                                            const mappedCol = columns.find(
-                                              (col: any) => {
-                                                const colLabel = (
-                                                  col.gmailLabel || ""
-                                                ).toString();
-                                                const colLabelName = (
-                                                  col.gmailLabelName || ""
-                                                ).toString();
-                                                const colTitle = (
-                                                  col.title ||
-                                                  col.name ||
-                                                  ""
-                                                ).toString();
-                                                const labelName = (
-                                                  label.name || ""
-                                                ).toString();
-                                                const labelId = (
-                                                  label.id || ""
-                                                ).toString();
+                                        <optgroup
+                                          label="Custom Labels"
+                                          className="bg-white dark:bg-gray-900"
+                                        >
+                                          {gmailLabels
+                                            .filter(
+                                              (label) => label.type === "user",
+                                            )
+                                            .map((label) => {
+                                              const mappedCol = columns.find(
+                                                (col: any) => {
+                                                  const colLabel = (
+                                                    col.gmailLabel || ""
+                                                  ).toString();
+                                                  const colLabelName = (
+                                                    col.gmailLabelName || ""
+                                                  ).toString();
+                                                  const colTitle = (
+                                                    col.title ||
+                                                    col.name ||
+                                                    ""
+                                                  ).toString();
+                                                  const labelName = (
+                                                    label.name || ""
+                                                  ).toString();
+                                                  const labelId = (
+                                                    label.id || ""
+                                                  ).toString();
 
-                                                return (
-                                                  // direct id match
-                                                  colLabel === labelId ||
-                                                  colLabel.toLowerCase() ===
+                                                  return (
+                                                    // direct id match
+                                                    colLabel === labelId ||
+                                                    colLabel.toLowerCase() ===
                                                     labelId.toLowerCase() ||
-                                                  // label name matches stored label or title
-                                                  colLabel.toLowerCase() ===
+                                                    // label name matches stored label or title
+                                                    colLabel.toLowerCase() ===
                                                     labelName.toLowerCase() ||
-                                                  colLabelName.toLowerCase() ===
+                                                    colLabelName.toLowerCase() ===
                                                     labelName.toLowerCase() ||
-                                                  colTitle.toLowerCase() ===
+                                                    colTitle.toLowerCase() ===
                                                     labelName.toLowerCase()
-                                                );
-                                              },
-                                            );
-                                            const mapped = !!mappedCol;
-                                            return (
-                                              <option
-                                                key={label.id}
-                                                value={label.id}
-                                                className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
-                                                disabled={mapped}
-                                              >
-                                                {label.name}
-                                                {mapped
-                                                  ? ` (Đang ở cột: ${mappedCol?.title || "Unknown"})`
-                                                  : ""}
-                                              </option>
-                                            );
-                                          })}
-                                      </optgroup>
-                                    )}
+                                                  );
+                                                },
+                                              );
+                                              const mapped = !!mappedCol;
+                                              return (
+                                                <option
+                                                  key={label.id}
+                                                  value={label.id}
+                                                  className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+                                                  disabled={mapped}
+                                                >
+                                                  {label.name}
+                                                  {mapped
+                                                    ? ` (Đang ở cột: ${mappedCol?.title || "Unknown"})`
+                                                    : ""}
+                                                </option>
+                                              );
+                                            })}
+                                        </optgroup>
+                                      )}
                                   </select>
                                   {!isLoadingLabels &&
                                     gmailLabels.length === 0 && (
@@ -1636,11 +1641,10 @@ export default function KanbanPage() {
                                 setCustomColor("");
                               }}
                               type="button"
-                              className={`w-8 h-8 rounded-full transition-all hover:scale-110 shadow-md ${
-                                newColColor === color && !customColor
+                              className={`w-8 h-8 rounded-full transition-all hover:scale-110 shadow-md ${newColColor === color && !customColor
                                   ? "ring-2 ring-offset-2 ring-gray-400 dark:ring-gray-500 dark:ring-offset-gray-800 scale-110"
                                   : "opacity-70 hover:opacity-100"
-                              }`}
+                                }`}
                               style={{ backgroundColor: color }}
                               title={color}
                             />
@@ -1659,11 +1663,10 @@ export default function KanbanPage() {
                               title="Custom color"
                             />
                             <div
-                              className={`w-8 h-8 rounded-full border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center transition-all hover:scale-110 hover:border-blue-500 ${
-                                customColor
+                              className={`w-8 h-8 rounded-full border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center transition-all hover:scale-110 hover:border-blue-500 ${customColor
                                   ? "ring-2 ring-offset-2 ring-gray-400 dark:ring-gray-500 dark:ring-offset-gray-800 scale-110"
                                   : ""
-                              }`}
+                                }`}
                               style={{
                                 backgroundColor: customColor || "transparent",
                               }}
@@ -1742,11 +1745,11 @@ export default function KanbanPage() {
               prev.map((c) =>
                 c.id === colId
                   ? {
-                      ...c,
-                      ...patch,
-                      hasLabelError: false,
-                      labelErrorMessage: undefined,
-                    }
+                    ...c,
+                    ...patch,
+                    hasLabelError: false,
+                    labelErrorMessage: undefined,
+                  }
                   : c,
               ),
             );
