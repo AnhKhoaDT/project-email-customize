@@ -16,6 +16,8 @@ interface UseMailFolderReturn {
   isLoadingMore: boolean;
   loadMoreMails: () => Promise<void>;
   refreshMails: () => Promise<void>;
+  removeMailById: (mailId: string) => void;
+  updateMailById: (mailId: string, updates: Partial<Mail>) => void;
 }
 
 export function useMailFolder({
@@ -94,11 +96,21 @@ export function useMailFolder({
         }));
 
         if (pageToken) {
-          // Append to existing mails
-          setMails((prev) => [...prev, ...fetched]);
+          // Append to existing mails with deduplication
+          setMails((prev) => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMails = fetched.filter((m: any) => !existingIds.has(m.id));
+            return [...prev, ...newMails];
+          });
         } else {
-          // Replace mails
-          setMails(fetched);
+          // Replace mails (also deduplicate in case backend sends duplicates)
+          const uniqueMails = fetched.reduce((acc: any[], mail: any) => {
+            if (!acc.find(m => m.id === mail.id)) {
+              acc.push(mail);
+            }
+            return acc;
+          }, []);
+          setMails(uniqueMails);
         }
 
         setNextPageToken(data.nextPageToken || null);
@@ -193,6 +205,18 @@ export function useMailFolder({
     await fetchMails();
   }, [fetchMails]);
 
+  // Remove mail by ID from local state
+  const removeMailById = useCallback((mailId: string) => {
+    setMails((prev) => prev.filter((m) => m.id !== mailId));
+  }, []);
+
+  // Update mail by ID in local state
+  const updateMailById = useCallback((mailId: string, updates: Partial<Mail>) => {
+    setMails((prev) =>
+      prev.map((m) => (m.id === mailId ? { ...m, ...updates } : m))
+    );
+  }, []);
+
   // Effect: Fetch mails when folder changes or on mount
   useEffect(() => {
     if (searchQuery) {
@@ -211,5 +235,7 @@ export function useMailFolder({
     isLoadingMore,
     loadMoreMails,
     refreshMails,
+    removeMailById,
+    updateMailById,
   };
 }

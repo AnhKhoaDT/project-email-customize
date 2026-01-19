@@ -104,7 +104,36 @@ const MailBox = ({
           return;
         }
 
+<<<<<<< Updated upstream
         setSuggestions(typedSuggestions);
+=======
+        // Convert hybrid format to old format for backward compatibility
+        const convertedSuggestions: Array<{
+          value: string;
+          type: "sender" | "subject";
+          from?: string;
+        }> = [
+            // Keywords → map to 'subject' type for semantic search
+            ...result.keywords.map((keyword) => ({
+              value: keyword.value,
+              type: "subject" as const, // Will trigger semantic search
+            })),
+            // Top Hits (emails) → map to 'sender' type for navigation
+            ...result.topHits.map((hit) => ({
+              value: hit.subject,
+              type: "sender" as const, // Will trigger navigation
+              from: hit.from,
+            })),
+          ];
+
+        // Double check if request was aborted before updating state
+        if (signal?.aborted) {
+          console.log("[Suggestions] Request aborted before state update");
+          return;
+        }
+
+        setSuggestions(convertedSuggestions);
+>>>>>>> Stashed changes
         setSuggestionsError(null);
         // Always show dropdown if we have suggestions OR still loading
         setShowSuggestions(true);
@@ -243,11 +272,26 @@ const MailBox = ({
     }
     // Escape: Close suggestions or clear search
     else if (e.key === "Escape") {
+<<<<<<< Updated upstream
       if (showSuggestions) {
         setShowSuggestions(false);
         setSuggestions([]);
       } else {
         handleClearSearch();
+=======
+      try {
+        if (showSuggestions) {
+          setShowSuggestions(false);
+          setSuggestions([]);
+        } else {
+          handleClearSearch();
+        }
+        try {
+          (e.target as HTMLInputElement).blur();
+        } catch { }
+      } catch (err) {
+        // ignore
+>>>>>>> Stashed changes
       }
     }
   };
@@ -292,6 +336,7 @@ const MailBox = ({
               {searchQuery ? `Search: "${searchQuery}"` : folderName}
             </h1>
           </div>
+<<<<<<< Updated upstream
           {/* kanban active/ unactive*/}
           <button
             onClick={kanbanClick}
@@ -300,6 +345,164 @@ const MailBox = ({
           >
             <LuSquareKanban size={20} />
           </button>
+=======
+          <div className="flex items-center gap-2">
+            {/* Refresh Button */}
+            {onRefresh && !searchQuery && (
+              <button
+                onClick={onRefresh}
+                disabled={isLoading}
+                className="flex justify-center items-center h-8 w-8 hover:bg-secondary/10 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Reload emails"
+              >
+                <IoMdRefresh
+                  size={20}
+                  className={isLoading ? "animate-spin" : ""}
+                />
+              </button>
+            )}
+            {/* Filter Button */}
+            <div className="relative" ref={filterDropdownRef}>
+              <button
+                onClick={() => {
+                  console.log(
+                    "Filter button clicked, current state:",
+                    showFilterDropdown,
+                  );
+                  setShowFilterDropdown(!showFilterDropdown);
+                }}
+                className={`flex justify-center items-center h-8 w-8 rounded-md transition-colors cursor-pointer ${showFilterDropdown ||
+                    sortBy ||
+                    filterUnread ||
+                    filterAttachments
+                    ? "bg-primary/40"
+                    : "hover:bg-secondary/60"
+                  }`}
+                title="Filter & Sort"
+              >
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+                  <path
+                    fill="currentColor"
+                    d="M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 .8 1.6l-5.6 7.47V19a1 1 0 0 1-1.45.9l-4-2A1 1 0 0 1 9 17v-4.93L3.2 6.6A1 1 0 0 1 3 5Zm3.28 1 5.22 6.96a1 1 0 0 1 .2.6V16.4l2 1V13a1 1 0 0 1 .2-.6L20.72 6H3.28Z"
+                  />
+                </svg>
+              </button>
+
+              {/* Filter Dropdown */}
+              {showFilterDropdown && (
+                <div className="absolute right-0 top-10 w-64 bg-background dark:bg-gray-900 border border-secondary rounded-lg shadow-xl z-50 p-4">
+                  {/* Sort Section */}
+                  <div className="mb-4">
+                    <h3 className="text-sm font-semibold mb-2 text-foreground">
+                      Sort By
+                    </h3>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="radio"
+                          name="sort"
+                          checked={sortBy === "newest"}
+                          onChange={() => {
+                            console.log("Sorting to newest, current:", sortBy);
+                            onSortChange?.("newest");
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Newest First
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="radio"
+                          name="sort"
+                          checked={sortBy === "oldest"}
+                          onChange={() => {
+                            console.log("Sorting to oldest, current:", sortBy);
+                            onSortChange?.("oldest");
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Oldest First
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="radio"
+                          name="sort"
+                          checked={sortBy === null}
+                          onChange={() => {
+                            console.log("Sorting to default, current:", sortBy);
+                            onSortChange?.(null);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">Default</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="w-full h-px bg-secondary/30 my-3"></div>
+
+                  {/* Filter Section */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-2 text-foreground">
+                      Filters
+                    </h3>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={filterUnread}
+                          onChange={(e) => {
+                            console.log("Filter unread:", e.target.checked);
+                            onFilterUnreadChange?.(e.target.checked);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Unread Only
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={filterAttachments}
+                          onChange={(e) => {
+                            console.log(
+                              "Filter attachments:",
+                              e.target.checked,
+                            );
+                            onFilterAttachmentsChange?.(e.target.checked);
+                          }}
+                          className="cursor-pointer"
+                        />
+                        <span className="text-sm text-foreground">
+                          Has Attachments
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Clear All Button */}
+                  {(sortBy || filterUnread || filterAttachments) && (
+                    <button
+                      onClick={() => {
+                        onSortChange?.(null);
+                        onFilterUnreadChange?.(false);
+                        onFilterAttachmentsChange?.(false);
+                      }}
+                      className="mt-4 w-full py-2 px-3 text-sm bg-secondary/20 hover:bg-secondary/40 rounded-md transition-colors text-foreground font-medium"
+                    >
+                      Clear All Filters
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+>>>>>>> Stashed changes
         </div>
         {/* Search */}
         <div className="flex flex-col gap-2 mt-4">
@@ -383,7 +586,7 @@ const MailBox = ({
 
                 return (
                   <div
-                    key={mail.id}
+                    key={`${mail.id}-${index}`}
                     ref={isFocused ? focusedItemRef : null}
                     onClick={() => onSelectMail(mail)}
                     draggable={true}
@@ -419,8 +622,13 @@ const MailBox = ({
                         <div className="flex flex-row items-center justify-between">
                           <span
                             className={`mr-2 truncate text-secondary ${isSelected
+<<<<<<< Updated upstream
                               ? "font-bold text-foreground"
                               : "font-semibold"
+=======
+                                ? "font-bold text-foreground"
+                                : "font-semibold"
+>>>>>>> Stashed changes
                               }`}
                           >
                             {mail.from || "someone"}

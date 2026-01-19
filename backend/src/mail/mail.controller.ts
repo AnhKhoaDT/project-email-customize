@@ -135,7 +135,9 @@ export class MailController {
       const labels = await this.gmailService.listLabels(req.user.id);
       return labels;
     } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to fetch labels' };
+      this.logger.error(`Failed to fetch mailboxes for user ${req.user?.id}:`, err?.message);
+      // Return empty array instead of error object to maintain consistent response format
+      return [];
     }
   }
 
@@ -153,7 +155,21 @@ export class MailController {
 
       // Try Gmail API first
       try {
+<<<<<<< Updated upstream
         const res = await this.gmailService.listMessagesInLabel(req.user.id, id, pageSize, pageToken as any);
+=======
+        const mailboxId = decodeURIComponent(id);
+        this.logger.debug(`mailboxEmails: requested mailbox id=${mailboxId} user=${req.user?.id}`);
+        // Special handling for ARCHIVE: Gmail doesn't have ARCHIVE label
+        // Archived emails are those without INBOX label
+        if (mailboxId === 'ARCHIVE') {
+          const res = await this.gmailService.listArchivedMessages(req.user.id, pageSize, pageToken as any);
+          return res;
+        }
+
+        const res = await this.gmailService.listMessagesInLabel(req.user.id, mailboxId, pageSize, pageToken as any);
+        this.logger.debug(`mailboxEmails: gmail returned ${Array.isArray(res?.messages) ? res.messages.length : 0} messages for label ${mailboxId}`);
+>>>>>>> Stashed changes
         return res;
       } catch (gmailError) {
         // Fallback to MongoDB seed data if Gmail fails (no token, etc.)
@@ -575,6 +591,66 @@ export class MailController {
     }
   }
 
+<<<<<<< Updated upstream
+=======
+  /**
+   * 🔥 NEW: Hybrid Search Suggestions
+   * 
+   * Combines:
+   * - Top Hits: Direct email matches (navigate to email)
+   * - Keywords: Topic suggestions (trigger semantic search)
+   * 
+   * Example:
+   * GET /search/hybrid-suggestions?prefix=meeting&limitTopHits=2&limitKeywords=4
+   * 
+   * Response:
+   * {
+   *   topHits: [{ type: 'email', emailId: 'abc', from: '...', subject: '...' }],
+   *   keywords: [{ type: 'keyword', value: 'Meeting schedule', emailCount: 12 }],
+   *   totalResults: 6,
+   *   processingTimeMs: 45
+   * }
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('search/hybrid-suggestions')
+  async getHybridSuggestions(
+    @Req() req: any,
+    @Query('prefix') prefix: string,
+    @Query('limitTopHits') limitTopHits?: string,
+    @Query('limitKeywords') limitKeywords?: string,
+  ) {
+    try {
+      if (!prefix || prefix.trim().length < 2) {
+        return {
+          status: 400,
+          message: 'Prefix must be at least 2 characters'
+        };
+      }
+
+      // Convert string params to numbers
+      const topHitsLimit = limitTopHits ? parseInt(limitTopHits, 10) : 2;
+      const keywordsLimit = limitKeywords ? parseInt(limitKeywords, 10) : 4;
+
+      const result = await this.hybridSearchService.getHybridSuggestions(
+        req.user.id,
+        prefix,
+        topHitsLimit,
+        keywordsLimit,
+      );
+
+      return {
+        status: 200,
+        data: result
+      };
+    } catch (err) {
+      return {
+        status: 500,
+        message: err?.message || 'Failed to get hybrid suggestions'
+      };
+    }
+  }
+
+>>>>>>> Stashed changes
   // ============================================
   // WEEK 3: FILTERING & SORTING SUPPORT
   // ============================================
