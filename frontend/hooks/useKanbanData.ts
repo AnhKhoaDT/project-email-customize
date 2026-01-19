@@ -37,6 +37,7 @@ export interface KanbanEmail {
   textBody?: string; // Add textBody for mail content
   kanbanColumnId?: string; // NEW: Primary source of truth
   cachedColumnName?: string; // NEW: Column name display
+  position?: number; // NEW: explicit position within column (0-based)
 }
 
 // Thay đổi quan trọng: Column là một object trong mảng
@@ -122,6 +123,14 @@ export const useKanbanData = () => {
       textBody: email.textBody,
       kanbanColumnId: email.kanbanColumnId || 'inbox',
       cachedColumnName: email.cachedColumnName,
+      position: (() => {
+        if (typeof email.position === 'number') return email.position;
+        if (typeof email.position === 'string' && email.position.trim() !== '') {
+          const n = Number(email.position);
+          return Number.isFinite(n) ? n : undefined;
+        }
+        return undefined;
+      })(),
     };
   };
 
@@ -615,44 +624,54 @@ export const useKanbanData = () => {
     toColumnId: string,
     destinationIndex?: number
   ) => {
-    // ⚠️ IMPORTANT: NO optimistic update here to avoid @hello-pangea/dnd errors
-    // @hello-pangea/dnd handles the visual update during drag
-    // We only update state after API call completes
-
+    // Update state after API succeeds. Be resilient to optimistic-first updates
+    // by locating the moved item anywhere in the board (source or dest),
+    // removing it, inserting at `destinationIndex`, and recomputing positions.
     try {
-      // 🔥 WEEK 4: Use new dynamic moveEmail API (forward destination index)
       await moveEmail(emailId, fromColumnId, toColumnId, destinationIndex);
 
-      // NOW update state after API succeeds
       setColumns((prev) => {
         const newColumns = prev.map(col => ({ ...col, items: [...col.items] }));
 
-        const sourceColumn = newColumns.find(c => c.id === fromColumnId);
         const destColumn = newColumns.find(c => c.id === toColumnId);
+        if (!destColumn) return prev;
 
-        if (!sourceColumn || !destColumn) return prev;
-
-        const emailIndex = sourceColumn.items.findIndex(e => e.id === emailId);
-        if (emailIndex === -1) return prev;
-
-        // Cắt khỏi nguồn
-        const [movedItem] = sourceColumn.items.splice(emailIndex, 1);
-
-        // Chèn vào đích ở ĐÚNG VỊ TRÍ mà user drag
-        if (destinationIndex !== undefined) {
-          destColumn.items.splice(destinationIndex, 0, movedItem);
-        } else {
-          destColumn.items.push(movedItem);
+        // Find and remove moved item from wherever it currently is
+        let movedItem: KanbanEmail | null = null;
+        let originalColumnId: string | null = null;
+        for (const col of newColumns) {
+          const idx = col.items.findIndex(e => e.id === emailId);
+          if (idx !== -1) {
+            movedItem = col.items.splice(idx, 1)[0];
+            originalColumnId = col.id;
+            break;
+          }
         }
+
+        // If we couldn't find the item, abort and refresh from server to avoid inconsistent state
+        if (!movedItem) return prev;
+
+        // Compute a safe insert index
+        const insertAt = typeof destinationIndex === 'number'
+          ? Math.max(0, Math.min(destinationIndex, destColumn.items.length))
+          : destColumn.items.length;
+
+        destColumn.items.splice(insertAt, 0, movedItem);
+
+        // Recompute positions for affected columns
+        newColumns.forEach(col => {
+          if (col.id === originalColumnId || col.id === toColumnId) {
+            col.items.forEach((it, idx) => {
+              (it as any).position = idx;
+            });
+          }
+        });
 
         return newColumns;
       });
     } catch (err: any) {
       console.error("Failed to move email:", err);
-
-      // Rollback by fetching fresh data
       await fetchData();
-
       throw err;
     }
   }, [columns, fetchData, moveEmail]);

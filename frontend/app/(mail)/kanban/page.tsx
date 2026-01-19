@@ -76,7 +76,7 @@ const COLOR_PALETTE = [
 ];
 
 // --- CONFIG TYPES ---
-type SortOrder = "newest" | "oldest";
+type SortOrder = "manual" | "newest" | "oldest";
 type FilterReadStatus = "all" | "unread" | "read";
 
 interface ColumnConfig {
@@ -86,13 +86,13 @@ interface ColumnConfig {
 }
 
 const defaultConfig: ColumnConfig = {
-  sort: "newest",
+  sort: "manual",
   filterRead: "all",
   filterAttachment: false,
 };
 
 // 5. Helper: Apply filters and sorting
-const getFilteredSortedItems = (
+const getFilteredItems = (
   items: KanbanEmail[],
   config: ColumnConfig
 ): KanbanEmail[] => {
@@ -126,18 +126,34 @@ const getFilteredSortedItems = (
     filtered = filtered.filter(item => item.hasAttachment === true);
   }
 
-  // SORT: By date
-  filtered.sort((a, b) => {
-    // Safely parse dates (fallback to epoch if missing)
-    const dateA = a.date ? new Date(a.date).getTime() : 0;
-    const dateB = b.date ? new Date(b.date).getTime() : 0;
+  // SORTING
+  // Behavior:
+  // - `manual`: prefer backend `position` (if present). Items without position keep their original relative order.
+  // - `newest` / `oldest`: ignore `position` and sort strictly by date.
+  if (config.sort === "manual") {
+    // Stable ordering that respects explicit `position` when present.
+    const withIndex = filtered.map((it, idx) => ({ it, idx }));
+    withIndex.sort((A, B) => {
+      const aPos = typeof (A.it as any).position === "number" ? (A.it as any).position : undefined;
+      const bPos = typeof (B.it as any).position === "number" ? (B.it as any).position : undefined;
 
-    if (config.sort === "newest") {
-      return dateB - dateA; // Newest first
-    } else {
-      return dateA - dateB; // Oldest first
-    }
-  });
+      if (aPos !== undefined && bPos !== undefined) {
+        return aPos - bPos;
+      }
+      if (aPos !== undefined && bPos === undefined) return -1;
+      if (aPos === undefined && bPos !== undefined) return 1;
+      // both undefined -> preserve original order
+      return A.idx - B.idx;
+    });
+    filtered = withIndex.map(w => w.it);
+  } else {
+    // newest / oldest => sort by date only
+    filtered.sort((a, b) => {
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return config.sort === "newest" ? dateB - dateA : dateA - dateB;
+    });
+  }
 
   return filtered;
 };
@@ -924,14 +940,14 @@ export default function KanbanPage() {
       const deduped = Array.from(new Map(rawItems.map((item: any) => [item.id, item])).values());
 
       // Apply centralized filter/sort helper once
-      const items = getFilteredSortedItems(deduped as KanbanEmail[], config);
+      const items = getFilteredItems(deduped as KanbanEmail[], config);
 
       return {
         ...col,
         items, // Trả về column với items đã được xử lý
       };
     });
-  }, [columns, columnConfigs, isDragging]);
+  }, [columns, columnConfigs]);
 
   // --- HANDLERS ---
   // Edit column name handler
@@ -1132,6 +1148,15 @@ export default function KanbanPage() {
             if (destination.index !== undefined)
               dst.items.splice(destination.index, 0, moved);
             else dst.items.push(moved);
+
+            // Recompute positions after optimistic move so UI preserves manual order
+            optimistic.forEach((c) => {
+              if (Array.isArray(c.items)) {
+                c.items.forEach((it: any, idx: number) => {
+                  it.position = idx;
+                });
+              }
+            });
 
             // Apply optimistic state
             setColumns(optimistic);

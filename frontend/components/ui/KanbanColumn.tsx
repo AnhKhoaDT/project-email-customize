@@ -56,7 +56,7 @@ import {
 // --- TYPES ---
 // Bạn cần đảm bảo các interface này được define trước khi component sử dụng
 interface ColumnConfig {
-  sort: "newest" | "oldest";
+  sort: "manual" | "newest" | "oldest";
   filterRead: "all" | "unread" | "read";
   filterAttachment: boolean;
 }
@@ -308,7 +308,7 @@ const ColumnHeader = ({
                   SORT BY DATE
                 </p>
                 <button
-                  onClick={() => onConfigChange({ ...config, sort: "newest" })}
+                  onClick={() => onConfigChange({ ...config, sort: config.sort === "newest" ? "manual" : "newest" })}
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "newest"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 cursor-pointer"
                     : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
@@ -320,7 +320,7 @@ const ColumnHeader = ({
                   {config.sort === "newest" && <Check size={14} />}
                 </button>
                 <button
-                  onClick={() => onConfigChange({ ...config, sort: "oldest" })}
+                  onClick={() => onConfigChange({ ...config, sort: config.sort === "oldest" ? "manual" : "oldest" })}
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "oldest"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 cursor-pointer"
                     : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
