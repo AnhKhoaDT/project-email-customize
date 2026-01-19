@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { FaUserAlt, FaEnvelope } from "react-icons/fa";
 
 interface SearchSuggestionsProps {
-  suggestions: Array<{ value: string; type: 'sender' | 'subject' }>;
+  suggestions: Array<{ value: string; type: 'sender' | 'subject'; from?: string }>;
   selectedIndex: number;
   onSelect: (suggestion: string, type: 'sender' | 'subject') => void;
   isLoading?: boolean;
@@ -17,6 +18,21 @@ export default function SearchSuggestions({
   isLoading = false,
   error = null,
 }: SearchSuggestionsProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (selectedIndex == null || selectedIndex < 0) return;
+    const root = listRef.current;
+    if (!root) return;
+
+    // Try to find element by display index first, then by original index
+    const selector = `[data-display-index=\"${selectedIndex}\"],[data-original-index=\"${selectedIndex}\"]`;
+    const el = root.querySelector(selector) as HTMLElement | null;
+    if (el) {
+      // scroll the selected item into view inside the container
+      el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    }
+  }, [selectedIndex]);
   // Always show dropdown when called (even if loading or has suggestions)
   return (
     <div className="absolute top-full left-0 right-0 mt-1 bg-background border border-secondary/50 rounded-md shadow-xl z-50 overflow-hidden backdrop-blur-sm">
@@ -48,12 +64,14 @@ export default function SearchSuggestions({
       ) : (
         // Suggestions list
         <>
-          <div className="max-h-[300px] overflow-y-auto">
+          <div className="max-h-[300px] overflow-y-auto" ref={listRef}>
             {/* Separate suggestions by type */}
             {(() => {
               const contacts = suggestions.filter(s => s.type === 'sender');
               const keywords = suggestions.filter(s => s.type === 'subject');
               
+              const displayList = [...keywords, ...contacts];
+
               return (
                 <>
                   {/* Keywords Section */}
@@ -65,12 +83,15 @@ export default function SearchSuggestions({
                         </span>
                       </div>
                       {keywords.map((suggestion, idx) => {
-                        const globalIndex = suggestions.findIndex(s => s === suggestion);
-                        const isSelected = selectedIndex === globalIndex;
+                        const displayIndex = displayList.findIndex(s => s === suggestion);
+                        const originalIndex = suggestions.findIndex(s => s === suggestion);
+                        const isSelected = selectedIndex === displayIndex || selectedIndex === originalIndex;
                         
                         return (
                           <button
                             key={`subject-${idx}`}
+                            data-display-index={displayIndex}
+                            data-original-index={originalIndex}
                             onMouseDown={(e) => {
                               e.preventDefault();
                               onSelect(suggestion.value, suggestion.type);
@@ -113,15 +134,18 @@ export default function SearchSuggestions({
                         </span>
                       </div>
                       {contacts.map((suggestion, idx) => {
-                        const globalIndex = suggestions.findIndex(s => s === suggestion);
-                        const isSelected = selectedIndex === globalIndex;
+                        const displayIndex = displayList.findIndex(s => s === suggestion);
+                        const originalIndex = suggestions.findIndex(s => s === suggestion);
+                        const isSelected = selectedIndex === displayIndex || selectedIndex === originalIndex;
                         
                         return (
                           <button
                             key={`sender-${idx}`}
+                            data-display-index={displayIndex}
+                            data-original-index={originalIndex}
                             onMouseDown={(e) => {
                               e.preventDefault();
-                              onSelect(suggestion.value, suggestion.type);
+                              onSelect(suggestion.from ?? suggestion.value, suggestion.type);
                             }}
                             className={`
                               w-full px-4 py-2.5 text-left flex items-center gap-3 transition-all
@@ -138,8 +162,8 @@ export default function SearchSuggestions({
                               }`} 
                             />
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{suggestion.value}</div>
-                              <div className="text-xs text-muted-foreground">Sender</div>
+                                <div className="text-sm font-medium truncate">{suggestion.value}</div>
+                                <div className="text-xs text-muted-foreground truncate" title={suggestion.from ?? suggestion.value}>{suggestion.from ?? suggestion.value}</div>
                             </div>
                             {isSelected && (
                               <kbd className="hidden sm:inline-block px-2 py-0.5 text-xs font-mono border border-primary/30 rounded bg-primary/5">

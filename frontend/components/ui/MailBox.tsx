@@ -92,7 +92,7 @@ const MailBox = ({
 
   // Auto-suggest state
   const [suggestions, setSuggestions] = useState<
-    Array<{ value: string; type: "sender" | "subject" }>
+    Array<{ value: string; type: "sender" | "subject"; from?: string }>
   >([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
@@ -143,16 +143,18 @@ const MailBox = ({
         const convertedSuggestions: Array<{
           value: string;
           type: "sender" | "subject";
+          from?: string;
         }> = [
-          // Top Hits (emails) → map to 'sender' type for navigation
-          ...result.topHits.map((hit) => ({
-            value: hit.subject,
-            type: "sender" as const, // Will trigger navigation
-          })),
           // Keywords → map to 'subject' type for semantic search
           ...result.keywords.map((keyword) => ({
             value: keyword.value,
             type: "subject" as const, // Will trigger semantic search
+          })),
+          // Top Hits (emails) → map to 'sender' type for navigation
+          ...result.topHits.map((hit) => ({
+            value: hit.subject,
+            type: "sender" as const, // Will trigger navigation
+            from: hit.from,
           })),
         ];
 
