@@ -116,6 +116,7 @@ interface KanbanColumnProps {
 }
 
 const ColumnHeader = ({
+  columnId,
   title,
   count,
   icon,
@@ -132,6 +133,7 @@ const ColumnHeader = ({
   gmailLabelName,
   autoArchive,
 }: {
+  columnId: string;
   title: string;
   count: number;
   icon: React.ReactNode;
@@ -301,7 +303,7 @@ const ColumnHeader = ({
           </button>
 
           {showFilterMenu && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+            <div className="absolute right-0 top-full mt-2 w-56 bg-background dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
               {/* Sorting Section */}
               <div className="mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
                 <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 px-2">
@@ -311,7 +313,7 @@ const ColumnHeader = ({
                   onClick={() => onConfigChange({ ...config, sort: config.sort === "newest" ? "manual" : "newest" })}
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "newest"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 cursor-pointer"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -323,7 +325,7 @@ const ColumnHeader = ({
                   onClick={() => onConfigChange({ ...config, sort: config.sort === "oldest" ? "manual" : "oldest" })}
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${config.sort === "oldest"
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400 cursor-pointer"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -349,7 +351,7 @@ const ColumnHeader = ({
                       }
                       className={`flex-1 text-xs py-1 rounded capitalize transition-all ${config.filterRead === status
                         ? "bg-white dark:bg-[#2c2c2c] shadow text-gray-900 dark:text-white font-medium cursor-pointer"
-                        : "text-gray-500 dark:text-gray-400 hover:text-gray-700 hover:bg-gray-700 cursor-pointer"
+                        : "text-gray-500 dark:text-gray-400 hover:text-gray-900 hover:bg-gray-200 dark:hover:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
                         }`}
                     >
                       {status}
@@ -367,7 +369,7 @@ const ColumnHeader = ({
                   }
                   className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between transition-colors ${config.filterAttachment
                     ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400 cursor-pointer"
-                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                    : "text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -380,56 +382,58 @@ const ColumnHeader = ({
           )}
         </div>
 
-        {/* Options Menu (3 dots) */}
-        <div className="relative" ref={optionsMenuRef}>
-          <button
-            onClick={() => setShowOptionsMenu(!showOptionsMenu)}
-            className={`p-1.5 rounded transition-colors ${showOptionsMenu
-              ? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 cursor-pointer"
-              : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
-              }`}
-          >
-            <BsThreeDots size={18} />
-          </button>
+        {/* Options Menu (3 dots) - Hide for inbox column */}
+        {columnId !== 'inbox' && (
+          <div className="relative" ref={optionsMenuRef}>
+            <button
+              onClick={() => setShowOptionsMenu(!showOptionsMenu)}
+              className={`p-1.5 rounded transition-colors ${showOptionsMenu
+                ? "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300 cursor-pointer"
+                : "text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+                }`}
+            >
+              <BsThreeDots size={18} />
+            </button>
 
-          {showOptionsMenu && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
-              {/* Gmail Label Info - Always show */}
-              <div className="px-3 py-2 mb-2 border-b border-gray-200 dark:border-gray-700">
-                <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Gmail Label Mapping</div>
-                {gmailLabel || autoArchive ? (
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                    <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: color }}></span>
-                    {autoArchive ? 'ARCHIVE' : (gmailLabelName || gmailLabel)}
-                  </div>
+            {showOptionsMenu && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-[#1e1e1e] rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-30 animate-in fade-in zoom-in-95 duration-100">
+                {/* Gmail Label Info - Always show */}
+                <div className="px-3 py-2 mb-2 border-b border-gray-200 dark:border-gray-700">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Gmail Label Mapping</div>
+                  {gmailLabel || autoArchive ? (
+                    <div className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                      <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: color }}></span>
+                      {autoArchive ? 'ARCHIVE' : (gmailLabelName || gmailLabel)}
+                    </div>
+                  ) : (
+                    <div className="text-sm italic text-gray-400 dark:text-gray-500">
+                      Not mapped
+                    </div>
+                  )}
+                </div>
+
+                {/* Delete Column Button - Only show for non-system columns */}
+                {!isSystemColumn && onDeleteColumn ? (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Are you sure you want to delete column "${title}"? This action cannot be undone.`)) {
+                        onDeleteColumn();
+                        setShowOptionsMenu(false);
+                      }
+                    }}
+                    className="w-full text-left px-3 py-2 text-sm rounded flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+                  >
+                    <BsTrash3 size={14} /> Delete Column
+                  </button>
                 ) : (
-                  <div className="text-sm italic text-gray-400 dark:text-gray-500">
-                    Not mapped
+                  <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500 italic">
+                    No options available
                   </div>
                 )}
               </div>
-              
-              {/* Delete Column Button - Only show for non-system columns */}
-              {!isSystemColumn && onDeleteColumn ? (
-                <button
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete column "${title}"? This action cannot be undone.`)) {
-                      onDeleteColumn();
-                      setShowOptionsMenu(false);
-                    }
-                  }}
-                  className="w-full text-left px-3 py-2 text-sm rounded flex items-center gap-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
-                >
-                  <BsTrash3 size={14} /> Delete Column
-                </button>
-              ) : (
-                <div className="px-3 py-2 text-sm text-gray-400 dark:text-gray-500 italic">
-                  No options available
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -488,14 +492,14 @@ const MailCard = ({
             {...provided.draggableProps}
             {...provided.dragHandleProps}
             className={`bg-white dark:bg-[#1a1a1a] rounded-lg border dark:border-gray-800 p-4 mb-3 shadow-sm relative overflow-hidden group hover:shadow-md transition-all cursor-grab active:cursor-grabbing ${snapshot.isDragging
-                ? "shadow-xl ring-2 ring-blue-400 opacity-90 cursor-grabbing"
-                : ""
+              ? "shadow-xl ring-2 ring-blue-400 opacity-90 cursor-grabbing"
+              : ""
               }`}
             style={{
               ...provided.draggableProps.style,
               // Fix scroll offset during drag
-              transform: snapshot.isDragging 
-                ? provided.draggableProps.style?.transform 
+              transform: snapshot.isDragging
+                ? provided.draggableProps.style?.transform
                 : provided.draggableProps.style?.transform,
             }}
           >
@@ -591,7 +595,7 @@ const KanbanColumn = ({
   hasLabelError = false,
   labelErrorMessage,
   onRecoverLabel,
-  onDeleteColumn, 
+  onDeleteColumn,
   isSystemColumn = false,
   onEditTitle,
   isLoading = false,
@@ -600,11 +604,11 @@ const KanbanColumn = ({
   onLoadMore,
 }: KanbanColumnProps) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  
+
   // Infinite scroll detection
   useEffect(() => {
     if (!onLoadMore || !hasMore || isLoadingMore) return;
-    
+
     const container = scrollContainerRef.current;
     if (!container) {
       return;
@@ -613,7 +617,7 @@ const KanbanColumn = ({
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
       const scrollPercentage = (scrollTop + clientHeight) / scrollHeight;
-      
+
       // Trigger when scrolled to 80% of content
       if (scrollPercentage > 0.8) {
         console.log(`🚀 Triggering loadMore for column ${id}`);
@@ -640,6 +644,7 @@ const KanbanColumn = ({
     >
       <div style={{ color: hasLabelError ? '#facc15' : color }}>
         <ColumnHeader
+          columnId={id}
           title={title}
           count={items.length} // Hoặc totalRawItems nếu muốn hiển thị tổng số
           icon={icon}
@@ -666,8 +671,7 @@ const KanbanColumn = ({
               provided.innerRef(el);
               scrollContainerRef.current = el;
             }}
-            className={`flex-1 p-3 transition-colors min-h-0 ${
-              snapshot.isDraggingOver ? dragOverClass : ""
+            className={`flex-1 p-3 transition-colors min-h-0 ${snapshot.isDraggingOver ? dragOverClass : ""
               } ${(hasLabelError && !autoArchive) ? 'bg-yellow-50/30 dark:bg-yellow-900/5' : ''}`}
           >
             {/* Show loading spinner */}

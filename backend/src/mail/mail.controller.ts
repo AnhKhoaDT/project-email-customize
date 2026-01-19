@@ -182,7 +182,9 @@ export class MailController {
       const labels = await this.gmailService.listLabels(req.user.id);
       return labels;
     } catch (err) {
-      return { status: 500, message: err?.message || 'Failed to fetch labels' };
+      this.logger.error(`Failed to fetch mailboxes for user ${req.user?.id}:`, err?.message);
+      // Return empty array instead of error object to maintain consistent response format
+      return [];
     }
   }
 
@@ -284,7 +286,7 @@ export class MailController {
           const res = await this.gmailService.listArchivedMessages(req.user.id, pageSize, pageToken as any);
           return res;
         }
-        
+
         const res = await this.gmailService.listMessagesInLabel(req.user.id, mailboxId, pageSize, pageToken as any);
         this.logger.debug(`mailboxEmails: gmail returned ${Array.isArray(res?.messages) ? res.messages.length : 0} messages for label ${mailboxId}`);
         return res;
@@ -759,9 +761,9 @@ export class MailController {
   ) {
     try {
       if (!prefix || prefix.trim().length < 2) {
-        return { 
-          status: 400, 
-          message: 'Prefix must be at least 2 characters' 
+        return {
+          status: 400,
+          message: 'Prefix must be at least 2 characters'
         };
       }
 
@@ -776,14 +778,14 @@ export class MailController {
         keywordsLimit,
       );
 
-      return { 
-        status: 200, 
-        data: result 
+      return {
+        status: 200,
+        data: result
       };
     } catch (err) {
-      return { 
-        status: 500, 
-        message: err?.message || 'Failed to get hybrid suggestions' 
+      return {
+        status: 500,
+        message: err?.message || 'Failed to get hybrid suggestions'
       };
     }
   }
@@ -818,13 +820,26 @@ export class MailController {
 
       let emails = result.messages || [];
 
+      // Debug log for attachment filter
+      if (filterAttachment === 'true') {
+        this.logger.debug(`📎 Filter attachment requested. Total emails before filter: ${emails.length}`);
+        
+        // Log first 5 emails to see their hasAttachment value
+        emails.slice(0, 5).forEach((email, idx) => {
+          this.logger.debug(`📎 Email ${idx + 1}: id=${email.id}, subject="${email.subject?.substring(0, 30)}", hasAttachment=${email.hasAttachment} (type: ${typeof email.hasAttachment})`);
+        });
+        
+        const withAttachments = emails.filter(e => e.hasAttachment === true).length;
+        this.logger.debug(`📎 Emails with hasAttachment=true: ${withAttachments}`);
+      }
+
       // Apply filters
       if (filterUnread === 'true') {
         emails = emails.filter(email => email.isUnread);
       }
 
       if (filterAttachment === 'true') {
-        emails = emails.filter(email => email.hasAttachment);
+        emails = emails.filter(email => email.hasAttachment === true);
       }
 
       // Apply sorting

@@ -1,4 +1,12 @@
-import { TbLayoutSidebarRightExpandFilled, TbSparkles } from "react-icons/tb";
+import {
+  TbLayoutSidebarRightExpandFilled,
+  TbSparkles,
+  TbFilter,
+  TbSortDescending,
+  TbSortAscending,
+  TbPaperclip,
+} from "react-icons/tb";
+import { Check } from "lucide-react";
 // ... import khác giữ nguyên ...
 import { BsFillLightningChargeFill } from "react-icons/bs";
 import { FaSearch, FaUserAlt, FaBell, FaTag } from "react-icons/fa";
@@ -46,8 +54,8 @@ interface MailBoxProps {
   // Filter & Sort props
   sortBy?: "newest" | "oldest" | null;
   onSortChange?: (sort: "newest" | "oldest" | null) => void;
-  filterUnread?: boolean;
-  onFilterUnreadChange?: (value: boolean) => void;
+  filterReadStatus?: "all" | "unread" | "read";
+  onFilterReadStatusChange?: (value: "all" | "unread" | "read") => void;
   filterAttachments?: boolean;
   onFilterAttachmentsChange?: (value: boolean) => void;
 }
@@ -75,8 +83,8 @@ const MailBox = ({
   onFocusedIndexChange,
   sortBy = null,
   onSortChange,
-  filterUnread = false,
-  onFilterUnreadChange,
+  filterReadStatus = "all",
+  onFilterReadStatusChange,
   filterAttachments = false,
   onFilterAttachmentsChange,
 }: MailBoxProps) => {
@@ -145,18 +153,18 @@ const MailBox = ({
           type: "sender" | "subject";
           from?: string;
         }> = [
-          // Keywords → map to 'subject' type for semantic search
-          ...result.keywords.map((keyword) => ({
-            value: keyword.value,
-            type: "subject" as const, // Will trigger semantic search
-          })),
-          // Top Hits (emails) → map to 'sender' type for navigation
-          ...result.topHits.map((hit) => ({
-            value: hit.subject,
-            type: "sender" as const, // Will trigger navigation
-            from: hit.from,
-          })),
-        ];
+            // Keywords → map to 'subject' type for semantic search
+            ...result.keywords.map((keyword) => ({
+              value: keyword.value,
+              type: "subject" as const, // Will trigger semantic search
+            })),
+            // Top Hits (emails) → map to 'sender' type for navigation
+            ...result.topHits.map((hit) => ({
+              value: hit.subject,
+              type: "sender" as const, // Will trigger navigation
+              from: hit.from,
+            })),
+          ];
 
         // Double check if request was aborted before updating state
         if (signal?.aborted) {
@@ -350,7 +358,7 @@ const MailBox = ({
         }
         try {
           (e.target as HTMLInputElement).blur();
-        } catch {}
+        } catch { }
       } catch (err) {
         // ignore
       }
@@ -422,132 +430,100 @@ const MailBox = ({
                   );
                   setShowFilterDropdown(!showFilterDropdown);
                 }}
-                className={`flex justify-center items-center h-8 w-8 rounded-md transition-colors cursor-pointer ${
-                  showFilterDropdown ||
+                className={`flex justify-center items-center h-8 w-8 rounded-md transition-colors cursor-pointer ${showFilterDropdown ||
                   sortBy ||
-                  filterUnread ||
+                  filterReadStatus !== "all" ||
                   filterAttachments
-                    ? "bg-primary/40"
-                    : "hover:bg-secondary/60"
-                }`}
+                  ? "bg-primary/40 text-primary-foreground font-medium"
+                  : "hover:bg-secondary/60 text-secondary"
+                  }`}
                 title="Filter & Sort"
               >
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
-                  <path
-                    fill="currentColor"
-                    d="M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 .8 1.6l-5.6 7.47V19a1 1 0 0 1-1.45.9l-4-2A1 1 0 0 1 9 17v-4.93L3.2 6.6A1 1 0 0 1 3 5Zm3.28 1 5.22 6.96a1 1 0 0 1 .2.6V16.4l2 1V13a1 1 0 0 1 .2-.6L20.72 6H3.28Z"
-                  />
-                </svg>
+                <TbFilter size={18} />
               </button>
 
               {/* Filter Dropdown */}
               {showFilterDropdown && (
-                <div className="absolute right-0 top-10 w-64 bg-background dark:bg-gray-900 border border-secondary rounded-lg shadow-xl z-50 p-4">
+                <div className="absolute right-0 top-10 w-64 bg-background dark:bg-[#1e1e1e] border border-secondary dark:border-gray-700 rounded-lg shadow-xl z-50 p-2 animate-in fade-in zoom-in-95 duration-100">
                   {/* Sort Section */}
-                  <div className="mb-4">
-                    <h3 className="text-sm font-semibold mb-2 text-foreground">
-                      Sort By
-                    </h3>
-                    <div className="flex flex-col gap-2">
-                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
-                        <input
-                          type="radio"
-                          name="sort"
-                          checked={sortBy === "newest"}
-                          onChange={() => {
-                            console.log("Sorting to newest, current:", sortBy);
-                            onSortChange?.("newest");
-                          }}
-                          className="cursor-pointer"
-                        />
-                        <span className="text-sm text-foreground">
-                          Newest First
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
-                        <input
-                          type="radio"
-                          name="sort"
-                          checked={sortBy === "oldest"}
-                          onChange={() => {
-                            console.log("Sorting to oldest, current:", sortBy);
-                            onSortChange?.("oldest");
-                          }}
-                          className="cursor-pointer"
-                        />
-                        <span className="text-sm text-foreground">
-                          Oldest First
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
-                        <input
-                          type="radio"
-                          name="sort"
-                          checked={sortBy === null}
-                          onChange={() => {
-                            console.log("Sorting to default, current:", sortBy);
-                            onSortChange?.(null);
-                          }}
-                          className="cursor-pointer"
-                        />
-                        <span className="text-sm text-foreground">Default</span>
-                      </label>
-                    </div>
+                  <div className="mb-2 pb-2 border-b border-secondary/20 dark:border-gray-700">
+                    <p className="text-xs font-semibold text-secondary dark:text-gray-400 mb-2 px-2 uppercase">
+                      Sort By Date
+                    </p>
+                    <button
+                      onClick={() => onSortChange?.(sortBy === "newest" ? null : "newest")}
+                      className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${sortBy === "newest"
+                        ? "bg-primary/10 text-primary dark:text-blue-400 cursor-pointer"
+                        : "text-foreground dark:text-gray-300 hover:bg-secondary/10 dark:hover:bg-gray-800 cursor-pointer"
+                        }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <TbSortDescending /> Newest First
+                      </div>
+                      {sortBy === "newest" && <Check size={14} />}
+                    </button>
+                    <button
+                      onClick={() => onSortChange?.(sortBy === "oldest" ? null : "oldest")}
+                      className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between ${sortBy === "oldest"
+                        ? "bg-primary/10 text-primary dark:text-blue-400 cursor-pointer"
+                        : "text-foreground dark:text-gray-300 hover:bg-secondary/10 dark:hover:bg-gray-800 cursor-pointer"
+                        }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <TbSortAscending /> Oldest First
+                      </div>
+                      {sortBy === "oldest" && <Check size={14} />}
+                    </button>
                   </div>
-
-                  <div className="w-full h-px bg-secondary/30 my-3"></div>
 
                   {/* Filter Section */}
                   <div>
-                    <h3 className="text-sm font-semibold mb-2 text-foreground">
-                      Filters
-                    </h3>
-                    <div className="flex flex-col gap-2">
-                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
-                        <input
-                          type="checkbox"
-                          checked={filterUnread}
-                          onChange={(e) => {
-                            console.log("Filter unread:", e.target.checked);
-                            onFilterUnreadChange?.(e.target.checked);
-                          }}
-                          className="cursor-pointer"
-                        />
-                        <span className="text-sm text-foreground">
-                          Unread Only
-                        </span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer hover:bg-secondary/10 p-1 rounded">
-                        <input
-                          type="checkbox"
-                          checked={filterAttachments}
-                          onChange={(e) => {
-                            console.log(
-                              "Filter attachments:",
-                              e.target.checked,
-                            );
-                            onFilterAttachmentsChange?.(e.target.checked);
-                          }}
-                          className="cursor-pointer"
-                        />
-                        <span className="text-sm text-foreground">
-                          Has Attachments
-                        </span>
-                      </label>
+                    <p className="text-xs font-semibold text-secondary dark:text-gray-400 mb-2 px-2 uppercase">
+                      Filter
+                    </p>
+
+                    {/* Read Status */}
+                    <div className="flex bg-secondary/10 dark:bg-gray-800 rounded p-1 mb-2">
+                      {(["all", "unread", "read"] as const).map((status) => (
+                        <button
+                          key={status}
+                          onClick={() => onFilterReadStatusChange?.(status)}
+                          className={`flex-1 text-xs py-1 rounded capitalize transition-all cursor-pointer ${filterReadStatus === status
+                            ? "bg-background dark:bg-[#2c2c2c] shadow text-foreground dark:text-white font-medium"
+                            : "text-secondary dark:text-gray-400 hover:text-foreground hover:bg-secondary/20"
+                            }`}
+                        >
+                          {status}
+                        </button>
+                      ))}
                     </div>
+
+                    {/* Attachment Toggle */}
+                    <button
+                      onClick={() => onFilterAttachmentsChange?.(!filterAttachments)}
+                      className={`w-full text-left px-2 py-1.5 text-sm rounded flex items-center justify-between transition-colors ${filterAttachments
+                        ? "bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400 cursor-pointer"
+                        : "text-foreground dark:text-gray-300 hover:bg-secondary/10 dark:hover:bg-gray-800 cursor-pointer"
+                        }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <TbPaperclip /> Has Attachment
+                      </div>
+                      {filterAttachments && <Check size={14} />}
+                    </button>
                   </div>
 
                   {/* Clear All Button */}
-                  {(sortBy || filterUnread || filterAttachments) && (
+                  {(sortBy || filterReadStatus !== "all" || filterAttachments) && (
                     <button
                       onClick={() => {
                         onSortChange?.(null);
-                        onFilterUnreadChange?.(false);
+                        onFilterReadStatusChange?.("all");
                         onFilterAttachmentsChange?.(false);
                       }}
-                      className="mt-4 w-full py-2 px-3 text-sm bg-secondary/20 hover:bg-secondary/40 rounded-md transition-colors text-foreground font-medium"
+                      className="mt-2 w-full py-1.5 px-3 text-xs bg-secondary/10 hover:bg-secondary/20 rounded text-secondary hover:text-foreground transition-colors cursor-pointer"
                     >
-                      Clear All Filters
+                      Reset Default
                     </button>
                   )}
                 </div>
@@ -678,7 +654,7 @@ const MailBox = ({
 
                 return (
                   <div
-                    key={mail.id}
+                    key={`${mail.id}-${index}`}
                     ref={isFocused ? focusedItemRef : null}
                     onClick={() => onSelectMail(mail)}
                     draggable={true}
@@ -710,11 +686,10 @@ const MailBox = ({
                       <div className="flex flex-col w-full min-w-0">
                         <div className="flex flex-row items-center justify-between">
                           <span
-                            className={`mr-2 truncate text-secondary ${
-                              isSelected
-                                ? "font-bold text-foreground"
-                                : "font-semibold"
-                            }`}
+                            className={`mr-2 truncate text-secondary ${isSelected
+                              ? "font-bold text-foreground"
+                              : "font-semibold"
+                              }`}
                           >
                             {mail.from || "someone"}
                           </span>
@@ -724,12 +699,11 @@ const MailBox = ({
                               <div
                                 className={`
                                   flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
-                                  ${
-                                    mail.similarityScore >= 0.7
-                                      ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
-                                      : mail.similarityScore >= 0.5
-                                        ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
-                                        : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
+                                  ${mail.similarityScore >= 0.7
+                                    ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                                    : mail.similarityScore >= 0.5
+                                      ? "bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400"
+                                      : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400"
                                   }
                                 `}
                                 title={`Similarity: ${(
