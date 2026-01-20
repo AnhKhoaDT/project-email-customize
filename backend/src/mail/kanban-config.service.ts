@@ -107,10 +107,15 @@ export class KanbanConfigService {
         name: 'Done',
         order: 3,
         gmailLabel: null,
+        gmailLabelName: 'Archive',
         mappingType: 'label',
+        // When users move emails to Done by default we treat it as "archive"
+        // behaviour: remove INBOX label instead of mapping to a non-existent ARCHIVE label.
+        removeInboxLabel: true,
         color: '#32CD32',
         isVisible: true,
         emailCount: 0,
+        autoArchive: true,
       },
     ];
 
