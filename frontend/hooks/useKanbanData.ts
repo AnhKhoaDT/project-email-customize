@@ -35,7 +35,7 @@ export interface KanbanEmail {
   labelIds?: string[]; // Add labelIds for checking SENT
   htmlBody?: string; // Add htmlBody for mail content
   textBody?: string; // Add textBody for mail content
-  kanbanColumnId?: string; // NEW: Primary source of truth
+  kanbanColumnId?: string | "inbox"; // NEW: Primary source of truth (nullable to avoid incorrect 'inbox' fallback)
   cachedColumnName?: string; // NEW: Column name display
   position?: number; // NEW: explicit position within column (0-based)
 }
@@ -47,7 +47,7 @@ export interface Column {
   isSystem: boolean;
   items: KanbanEmail[];
   color?: string;
-  gmailLabel?: string;
+  gmailLabel: string | null;
   gmailLabelName?: string;
   hasLabelError?: boolean;
   labelErrorMessage?: string;
@@ -56,6 +56,7 @@ export interface Column {
   isVisible?: boolean; // Whether column is visible on board
   hasMore?: boolean;
   isLoadingMore?: boolean;
+  status?: 'creating' | 'ready';
 }
 
 export const useKanbanData = () => {
@@ -121,7 +122,8 @@ export const useKanbanData = () => {
       labelIds: email.labelIds || [],
       htmlBody: email.htmlBody,
       textBody: email.textBody,
-      kanbanColumnId: email.kanbanColumnId || 'inbox',
+      // Do NOT fallback to 'inbox' when backend omits kanbanColumnId — keep null
+      kanbanColumnId: email.kanbanColumnId ?? null,
       cachedColumnName: email.cachedColumnName,
       position: (() => {
         if (typeof email.position === 'number') return email.position;
@@ -398,25 +400,41 @@ export const useKanbanData = () => {
         colEmailMap[r.colId] = r.raw || [];
       });
 
-      // After assigning inbox items, trigger summary generation for first 5 inbox emails
+      // Build a deduplicated list of transformed emails and assign to columns
       try {
-        setColumns(prev => prev.map(col => ({
-          ...col,
-          items: (colEmailMap[col.id] || []).map(transformEmail)
-        })));
+        const transformedById: Record<string, KanbanEmail> = {};
 
+        // Keep inbox raw separately for summary preloads
         const inboxRaw = colEmailMap['inbox'] || [];
-        const inboxTransformed: KanbanEmail[] = inboxRaw.map(transformEmail);
-        const emailsToGenerate = inboxTransformed.slice(0, 5).filter(
-          email => !email.summary ||
-            email.summary === email.snippet ||
-            email.summary === "No summary available");
 
-        // Transform and assign emails to columns
-        setColumns(prev => prev.map(col => ({
-          ...col,
-          items: (colEmailMap[col.id] || []).map(transformEmail)
-        })));
+        // Collect and dedupe all transformed emails
+        Object.values(colEmailMap).forEach((list: any[]) => {
+          (list || []).map(transformEmail).forEach(item => {
+            if (!item || !item.id) return;
+            if (!transformedById[item.id]) transformedById[item.id] = item;
+          });
+        });
+
+        const allTransformed = Object.values(transformedById);
+
+        // Assign emails to columns using kanbanColumnId as source-of-truth
+        // Show emails with null kanbanColumnId in the `inbox` column for display,
+        // but DO NOT mutate their kanbanColumnId — it stays null until user moves the email.
+        setColumns(prev => prev.map(col => {
+          if (col.id === 'inbox') {
+            const items = allTransformed.filter(e => e.kanbanColumnId === 'inbox' || e.kanbanColumnId == null);
+            return { ...col, items };
+          }
+
+          const items = allTransformed.filter(e => e.kanbanColumnId === col.id);
+          return { ...col, items };
+        }));
+
+        // Trigger summary generation for first 5 inbox emails (from raw inbox fetch)
+        const inboxTransformed: KanbanEmail[] = (inboxRaw || []).map(transformEmail);
+        const emailsToGenerate = inboxTransformed.slice(0, 5).filter(
+          email => !email.summary || email.summary === email.snippet || email.summary === "No summary available"
+        );
 
         setTimeout(() => {
           emailsToGenerate.forEach((email) => {
@@ -426,7 +444,7 @@ export const useKanbanData = () => {
           });
         }, 0);
       } catch (e) {
-        console.debug('Failed to trigger inbox preload summaries', e);
+        console.debug('Failed to assign emails to columns or trigger inbox summaries', e);
       }
 
     } catch (err: any) {
@@ -514,16 +532,22 @@ export const useKanbanData = () => {
     gmailLabel?: string,
     createNewLabel?: boolean
   ) => {
-    const tempId = `temp-${Date.now()}`;
+    const tempId = `temp-${crypto.randomUUID()}`;
     const newColumn: Column = {
       id: tempId,
       title,
       isSystem: false,
       items: [],
-      color: color
+      color,
+      status: 'creating',     // 👈 CRITICAL
+      gmailLabel: null
     };
 
     // Optimistic Update
+    // Mark the temp column as loading so UI shows disabled/faded state
+    columnLoadingRef.current = { ...columnLoadingRef.current, [tempId]: true };
+    setColumnLoadingStates(prev => ({ ...prev, [tempId]: true }));
+
     setColumns(prev => [...prev, newColumn]);
 
     try {
@@ -532,7 +556,8 @@ export const useKanbanData = () => {
         name: title,
         color,
         gmailLabel,
-        createNewLabel
+        createNewLabel,
+        clientTempId: tempId
       });
 
       // Cập nhật ID thật và emails từ phản hồi API
@@ -543,15 +568,50 @@ export const useKanbanData = () => {
       // Transform emails using the same logic
       const transformedEmails = emails.map(transformEmail);
 
-      setColumns(prev => prev.map(c =>
-        c.id === tempId
-          ? { ...c, id: newId, items: transformedEmails } // Cập nhật với emails
-          : c
-      ));
+      const created = responseData;
+      setColumns(prev =>
+        prev.map(c =>
+          c.id === created.clientTempId
+            ? {
+              id: created.id,
+              title: created.name,
+              isSystem: false,
+              items: transformedEmails,
+              color: created.color,
+              gmailLabel: created.gmailLabel,
+              gmailLabelName: created.gmailLabelName,
+              isVisible: created.isVisible,
+              status: 'ready'
+            }
+            : c
+        )
+      );
+
+      // Clear loading state for temp id and ensure real id is not loading
+      columnLoadingRef.current = { ...columnLoadingRef.current };
+      // remove temp key if present
+      if (columnLoadingRef.current[created.clientTempId]) {
+        delete columnLoadingRef.current[created.clientTempId];
+      }
+      columnLoadingRef.current[created.id] = false;
+      setColumnLoadingStates(prev => {
+        const copy = { ...prev };
+        if (copy[created.clientTempId]) delete copy[created.clientTempId];
+        copy[created.id] = false;
+        return copy;
+      });
     } catch (err) {
       console.error("Failed to add column", err);
       // Rollback nếu API thất bại
       setColumns(prev => prev.filter(c => c.id !== tempId));
+      // Remove temp loading state
+      columnLoadingRef.current = { ...columnLoadingRef.current };
+      if (columnLoadingRef.current[tempId]) delete columnLoadingRef.current[tempId];
+      setColumnLoadingStates(prev => {
+        const copy = { ...prev };
+        if (copy[tempId]) delete copy[tempId];
+        return copy;
+      });
       throw err;
     }
   }, []);

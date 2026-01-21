@@ -635,7 +635,7 @@ const KanbanColumn = ({
     ? "border-yellow-400 dark:border-yellow-600 border-2"
     : "border-r border-gray-200 dark:border-gray-800 border-t-2";
 
-  const columnOpacity = hasLabelError ? "opacity-75" : "";
+  const columnOpacity = hasLabelError ? "opacity-75" : (isLoading ? "opacity-60" : "");
 
   return (
     <div
