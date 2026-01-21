@@ -1255,7 +1255,7 @@ export default function KanbanPage() {
                   const isColumnLoading = columnLoadingStates[col.id] || false;
 
                   return (
-                    <Draggable key={col.id} draggableId={col.id} index={index}>
+                    <Draggable key={col.id} draggableId={col.id} index={index} isDragDisabled={isColumnLoading}>
                       {(providedDrag, snapshot) => (
                         <div
                           ref={providedDrag.innerRef}
@@ -1306,7 +1306,7 @@ export default function KanbanPage() {
                             }}
                             onRegenerateSummary={generateSummary}
                             dragOverClass={getDragOverClass(col)}
-                            gmailLabel={originalCol?.gmailLabel}
+                            gmailLabel={originalCol?.gmailLabel ?? undefined}
                             gmailLabelName={originalCol?.gmailLabelName}
                             autoArchive={originalCol?.autoArchive}
                             hasLabelError={originalCol?.hasLabelError}
